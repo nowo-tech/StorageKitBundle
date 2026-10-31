@@ -1,0 +1,4 @@
+# Exclude from git archive (dist packages).
+/demo export-ignore
+/tests export-ignore
+/.cursor export-ignore
