@@ -1,0 +1,60 @@
+# Local environment (do not version secrets or machine-specific env)
+.env
+.env.dev
+.env.local
+.env.local.php
+.env.*.local
+
+# Dependencies and build
+/vendor/
+/node_modules/
+/public/build/
+
+# Symfony runtime
+/var/
+/public/bundles/
+
+# PHPUnit
+/phpunit.xml
+/.phpunit.cache/
+
+# Secret key files (Doctrine Encrypt Bundle demo)
+.Halite.key
+.Defuse.key
+.Halite.*.key
+.Defuse.*.key
+.demo_financial.key
+
+# Config secrets (if generated)
+/config/secrets/prod/prod.decrypt.private.php
+
+# Archives / compressed
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# SQLite artifacts (REQ-DEMO-011 — demos use MySQL)
+*.db
+*.sqlite
+*.sqlite3
+
+###> symfony/framework-bundle ###
+/.env.local
+/.env.local.php
+/.env.*.local
+/config/secrets/prod/prod.decrypt.private.php
+/public/bundles/
+/var/
+/vendor/
+###< symfony/framework-bundle ###
+
+###> phpunit/phpunit ###
+/phpunit.xml
+/.phpunit.cache/
+###< phpunit/phpunit ###
+
+# Package manager stores
+/.pnpm-store

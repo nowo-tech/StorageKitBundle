@@ -1,0 +1,26 @@
+{
+  "exclude": [
+    "demo",
+    "tests",
+    "vendor",
+    "var",
+    "coverage",
+    ".git",
+    "node_modules",
+    "scripts",
+    ".scripts",
+    "src/Entity"
+  ],
+  "safe_namespaces": [
+    "Symfony\\",
+    "Doctrine\\",
+    "Psr\\",
+    "Twig\\",
+    "ApiPlatform\\",
+    "IgorPhp\\IgorBundle\\"
+  ],
+  "ignore_vendors": true,
+  "ignore_external_baseline": false,
+  "env": "prod",
+  "verbose": false
+}

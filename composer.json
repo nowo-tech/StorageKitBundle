@@ -1,51 +1,178 @@
 {
     "name": "nowo-tech/storage-kit-bundle",
-    "description": "S3-compatible object storage for Symfony: per-tenant buckets with encrypted credentials, image uploads for Markdown fields, reference-aware purge, bucket sync and an SSRF-guarded endpoint test.",
+    "description": "S3-compatible object storage for Symfony: per-scope buckets with encrypted credentials, image uploads for Markdown editors, reference-aware purge, verified bucket moves and an SSRF-guarded endpoint test.",
     "type": "symfony-bundle",
+    "license": "MIT",
     "keywords": [
+        "php",
         "symfony",
         "symfony-bundle",
-        "bundle",
         "storage",
         "s3",
+        "object-storage",
         "flysystem",
         "uploads",
         "images",
         "markdown",
-        "nowo",
+        "multi-tenant",
         "frankenphp"
     ],
     "homepage": "https://github.com/nowo-tech/StorageKitBundle",
-    "license": "MIT",
-    "authors": [
-        {
-            "name": "Héctor Franco Aceituno",
-            "email": "hectorfranco@nowo.tech",
-            "homepage": "https://github.com/HecFranco",
-            "role": "Maintainer"
-        },
-        {
-            "name": "Nowo.tech",
-            "homepage": "https://nowo.tech"
-        }
-    ],
     "support": {
         "issues": "https://github.com/nowo-tech/StorageKitBundle/issues",
         "source": "https://github.com/nowo-tech/StorageKitBundle",
         "docs": "https://github.com/nowo-tech/StorageKitBundle/tree/main/docs",
         "changelog": "https://github.com/nowo-tech/StorageKitBundle/blob/main/docs/CHANGELOG.md"
     },
+    "authors": [
+        {
+            "name": "Héctor Franco Aceituno",
+            "email": "hectorfranco@nowo.tech",
+            "homepage": "https://github.com/HecFranco",
+            "role": "Developer"
+        },
+        {
+            "name": "Nowo.tech",
+            "homepage": "https://nowo.tech"
+        }
+    ],
     "require": {
         "php": ">=8.2 <8.6",
+        "ext-gd": "*",
+        "async-aws/core": "^1.27",
+        "async-aws/s3": "^2.8",
+        "doctrine/dbal": "^3.8 || ^4.0",
+        "doctrine/doctrine-bundle": "^2.13 || ^3.0",
+        "doctrine/orm": "^3.3",
+        "doctrine/persistence": "^3.1 || ^4.0",
+        "league/flysystem": "^3.29",
+        "league/flysystem-async-aws-s3": "^3.29",
+        "nowo-tech/doctrine-encrypt-bundle": "^2.10",
+        "nowo-tech/form-kit-bundle": "^2.17",
+        "nowo-tech/outbound-url-guard-bundle": "^1.3",
+        "nowo-tech/ui-kit-bundle": "^2.21",
+        "psr/log": "^2.0 || ^3.0",
         "symfony/config": "^7.4 || ^8.0",
+        "symfony/console": "^7.4 || ^8.0",
         "symfony/dependency-injection": "^7.4 || ^8.0",
-        "symfony/http-kernel": "^7.4 || ^8.0"
+        "symfony/event-dispatcher": "^7.4 || ^8.0",
+        "symfony/event-dispatcher-contracts": "^3.5",
+        "symfony/form": "^7.4 || ^8.0",
+        "symfony/framework-bundle": "^7.4 || ^8.0",
+        "symfony/http-client": "^7.4 || ^8.0",
+        "symfony/http-foundation": "^7.4 || ^8.0",
+        "symfony/http-kernel": "^7.4 || ^8.0",
+        "symfony/lock": "^7.4 || ^8.0",
+        "symfony/polyfill-intl-idn": "^1.31",
+        "symfony/rate-limiter": "^7.4 || ^8.0",
+        "symfony/routing": "^7.4 || ^8.0",
+        "symfony/security-core": "^7.4 || ^8.0",
+        "symfony/security-csrf": "^7.4 || ^8.0",
+        "symfony/service-contracts": "^3.5",
+        "symfony/translation-contracts": "^3.5",
+        "symfony/twig-bundle": "^7.4 || ^8.0",
+        "symfony/uid": "^7.4 || ^8.0",
+        "symfony/validator": "^7.4 || ^8.0",
+        "twig/extra-bundle": "^3.12",
+        "twig/string-extra": "^3.12",
+        "twig/twig": "^3.12"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.0",
+        "igor-php/igor-php": "^0.10.1",
+        "league/flysystem-memory": "^3.29",
+        "nowo-tech/http-hardening-bundle": "^1.8",
+        "nowo-tech/phpstan-frankenphp": "^1.0",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan": "^2.0",
+        "phpstan/phpstan-doctrine": "^2.0",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpstan/phpstan-symfony": "^2.0",
+        "phpunit/phpunit": "^11.5",
+        "rector/rector": "^2.0",
+        "symfony/browser-kit": "^7.4 || ^8.0",
+        "symfony/css-selector": "^7.4 || ^8.0",
+        "symfony/dom-crawler": "^7.4 || ^8.0",
+        "symfony/messenger": "^7.4 || ^8.0",
+        "symfony/mime": "^7.4 || ^8.0",
+        "symfony/phpunit-bridge": "^7.4 || ^8.0",
+        "symfony/security-bundle": "^7.4 || ^8.0",
+        "symfony/translation": "^7.4 || ^8.0",
+        "symfony/yaml": "^7.4 || ^8.0"
+    },
+    "suggest": {
+        "nowo-tech/http-hardening-bundle": "Adds the bucket origin of the redirect-delivered profiles to the CSP img-src (CspSourceProviderInterface adapter)",
+        "nowo-tech/milkdown-editor-bundle": "Markdown editor whose upload hook posts to the StorageKit upload endpoint (see docs/USAGE.md)",
+        "symfony/flex": "For automatic recipe installation",
+        "symfony/messenger": "Runs bucket moves in the background (otherwise run nowo:storage-kit:sync)",
+        "symfony/security-bundle": "Required for the admin UI unless security.allow_unauthenticated is true (dev / demo only)"
     },
     "autoload": {
         "psr-4": {
             "Nowo\\StorageKitBundle\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Nowo\\StorageKitBundle\\Tests\\": "tests/"
+        }
+    },
+    "archive": {
+        "exclude": [
+            "/demo",
+            "/.cursor"
+        ]
+    },
+    "extra": {
+        "symfony": {
+            "bundle": "Nowo\\StorageKitBundle\\NowoStorageKitBundle"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "phpstan/extension-installer": true
+        },
+        "platform": {
+            "php": "8.2.0"
+        }
+    },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "scripts": {
+        "test": "php -d memory_limit=512M vendor/bin/phpunit --color=always",
+        "test-coverage": "php -d memory_limit=512M vendor/bin/phpunit --color=always --coverage-html coverage --coverage-clover coverage.xml --coverage-text",
+        "test-coverage-100": [
+            "@test-coverage",
+            "php .scripts/check-coverage.php coverage.xml --min-percent=100"
+        ],
+        "validate-phpdoc": "php .scripts/complete-public-phpdoc.php",
+        "cs-check": "php-cs-fixer fix --dry-run --diff",
+        "cs-fix": "php-cs-fixer fix",
+        "rector": "rector process",
+        "rector-dry": "rector process --dry-run --no-progress-bar",
+        "phpstan": "phpstan analyse --memory-limit=512M",
+        "update": "composer update --no-interaction",
+        "validate": "composer validate --strict",
+        "qa": [
+            "@cs-check",
+            "@test"
+        ],
+        "igor": "igor-php --no-agent ."
+    },
+    "scripts-descriptions": {
+        "test": "Run PHPUnit tests (memory_limit 512M)",
+        "test-coverage": "Run PHPUnit tests with code coverage (memory_limit 512M)",
+        "test-coverage-100": "Run test-coverage and fail if statement or element coverage is below 100% (REQ-TEST-003)",
+        "validate-phpdoc": "Fail when a class or public method in src/ has no PHPDoc (REQ-CS-001)",
+        "cs-check": "Check code style with PHP-CS-Fixer",
+        "cs-fix": "Fix code style with PHP-CS-Fixer",
+        "rector": "Apply Rector refactoring",
+        "rector-dry": "Rector in dry-run mode",
+        "phpstan": "Run PHPStan static analysis",
+        "update": "Update composer.lock (composer update)",
+        "validate": "Validate composer.json (composer validate --strict)",
+        "qa": "Run all quality assurance checks",
+        "igor": "Run Igor FrankenPHP worker-state audit (REQ-CS-008)"
+    }
 }

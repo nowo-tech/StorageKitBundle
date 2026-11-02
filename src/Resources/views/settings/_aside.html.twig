@@ -1,0 +1,21 @@
+{#
+  Aside of the Storage / Move pages: one card per View\DetailSection (`aside`), painted with the UiKit `section`,
+  `card*` slots and the `detail_list` partial (values escaped). Optional `notice` (translation key of the bundle
+  domain) and `notice_tone` (`info`, `warning`) show a note above the cards in the `flash_<tone>` slot.
+#}
+{% set _b = page.bundle %}
+<aside class="nowo-ui-form-page__aside" data-nowo-ui-region="aside" data-testid="storage-kit-aside">
+    {% if notice|default(null) %}
+        <p class="{{ nowo_ui_class('flash_' ~ notice_tone|default('info'), _b) }}" role="note">{{ notice|trans({}, 'NowoStorageKitBundle') }}</p>
+    {% endif %}
+    {% for section in aside %}
+        <section class="{{ nowo_ui_class('section', _b) }} {{ nowo_ui_class('card', _b) }}"{% if section.id %} id="{{ section.id }}" data-testid="{{ section.id }}"{% endif %} data-nowo-ui-region="section"{{ nowo_ui_attrs('section', _b) }}>
+            {% if section.title %}
+                <header class="{{ nowo_ui_class('card_header', _b) }}"><h2 class="{{ nowo_ui_class('card_title', _b) }}">{{ section.title|nowo_ui_trans }}</h2></header>
+            {% endif %}
+            <div class="{{ nowo_ui_class('card_body', _b) }}">
+                {{ include(nowo_ui_partial('detail_list', _b), {items: section.items, bundle: _b}, false) }}
+            </div>
+        </section>
+    {% endfor %}
+</aside>

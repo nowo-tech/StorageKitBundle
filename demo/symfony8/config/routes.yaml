@@ -1,0 +1,8 @@
+controllers:
+    resource: ../src/Controller/
+    type: attribute
+
+# Storage / Move pages and the upload / download endpoints (REQ-SF-004 rule 7: opt-in import)
+nowo_storage_kit:
+    resource: .
+    type: nowo_storage_kit

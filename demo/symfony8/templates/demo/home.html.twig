@@ -1,0 +1,23 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Home - Storage Kit Demo{% endblock %}
+
+{% block body %}
+<div class="card shadow-sm mb-4">
+    <div class="card-header"><h1 class="h3 mb-0">S3-compatible storage for Symfony</h1></div>
+    <div class="card-body">
+        <p>
+            Files uploaded into texts live in a private S3-compatible bucket (a RustFS container here). Texts keep
+            <code>![alt](storage-file:&lt;uuid&gt;)</code>, never a bucket URL; downloads go through the application,
+            which asks the file's context who may read it. The bucket credentials are encrypted at rest.
+        </p>
+        <ul class="mb-0">
+            <li><strong>Notes</strong> — upload an image into a note (needs a signed-in user: <code>alice</code> / <code>demo</code>).</li>
+            <li><strong>Storage</strong> — the instance bucket, its connection test and usage (<code>admin</code> / <code>demo</code>).</li>
+            <li><strong>Move</strong> — copy every file to another bucket, verified by SHA-256, then switch.</li>
+        </ul>
+    </div>
+</div>
+<a class="btn btn-primary" href="{{ path('demo_notes') }}" data-testid="demo-open-notes">Open the notes</a>
+<a class="btn btn-outline-secondary" href="{{ path('nowo_storage_kit_settings') }}">Storage settings</a>
+{% endblock %}

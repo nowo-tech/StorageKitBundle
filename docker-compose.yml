@@ -1,0 +1,46 @@
+name: storage-kit-bundle
+services:
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: storage-kit-bundle-php
+    working_dir: /app
+    volumes:
+      - .:/app
+      - composer-cache:/root/.composer/cache
+      - coverage-data:/app/coverage
+    environment:
+      - COMPOSER_ALLOW_SUPERUSER=1
+    command: ["tail", "-f", "/dev/null"]
+    networks:
+      - storage-kit-bundle-network
+
+  # Optional real database for `make test-with-db` (REQ-TEST-005); started only with the `db` profile.
+  db:
+    image: mysql:8.4
+    profiles: ["db"]
+    container_name: storage-kit-bundle-db
+    environment:
+      # Throw-away local test credential (not a secret), same as CI.
+      MYSQL_ROOT_PASSWORD: ci-throwaway
+      MYSQL_DATABASE: storagekit
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pci-throwaway"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+    networks:
+      - storage-kit-bundle-network
+
+volumes:
+  composer-cache:
+    driver: local
+  coverage-data:
+    driver: local
+
+networks:
+  storage-kit-bundle-network:
+    driver: bridge

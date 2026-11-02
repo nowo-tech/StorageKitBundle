@@ -1,0 +1,23 @@
+{#
+  Move page of an owner (REQ-UI-003): UiKit form scaffold. Variables: page (Nowo\UiKitBundle\View\FormPage from
+  Ui\AdminPages::movePage(): header with "Back" and the running status, the FormKit form of the target bucket —
+  read-only while a sync runs —, "Save the target bucket", and the POST actions below the form: Test connection,
+  Start / Resume sync, Cancel, Switch, Discard), aside (View\DetailSection list: current bucket, target, sync, retired
+  buckets), sync (Entity\StorageSync or null), running (bool), scope (null = the instance).
+
+  While a sync runs the aside shows its progress meter (UiKit `progress` partial); reload the page to refresh it.
+  Override: extend '@!NowoStorageKitBundle/move/edit.html.twig' (web_ui.templates.move) and override
+  nowo_storage_kit_move_progress or nowo_ui_form_aside.
+#}
+{% extends '@NowoUiKit/page/form.html.twig' %}
+
+{% block nowo_ui_form_aside %}
+    <div class="nowo-ui-stack">
+        {% block nowo_storage_kit_move_progress %}
+            {% if running and sync is not null %}
+                {{ include(nowo_ui_partial('progress', page.bundle), {percent: sync.percent, label: 'move.field.progress'|trans({}, 'NowoStorageKitBundle'), id: 'storage-kit-progress', bundle: page.bundle, attr: {'data-testid': 'storage-kit-progress'}}, false) }}
+            {% endif %}
+        {% endblock %}
+        {{ include('@NowoStorageKitBundle/settings/_aside.html.twig', {page: page, aside: aside, notice: 'move.notice', notice_tone: 'warning'}, false) }}
+    </div>
+{% endblock %}

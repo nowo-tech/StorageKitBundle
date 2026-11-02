@@ -1,0 +1,42 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Notes - Storage Kit Demo{% endblock %}
+
+{% block body %}
+{% set upload = nowo_storage_upload('board', board) %}
+<div class="card shadow-sm mb-4">
+    <div class="card-header"><h1 class="h3 mb-0">New note</h1></div>
+    <div class="card-body">
+        {% if upload.state == 'off' %}
+            <p class="alert alert-warning" data-testid="demo-upload-off">Image uploads are not set up: configure a bucket in <a href="{{ path('nowo_storage_kit_settings') }}">Storage</a>.</p>
+        {% endif %}
+        {{ form_start(form) }}
+            {% for child in form %}
+                {% if not child.rendered %}{{ form_row(child) }}{% endif %}
+            {% endfor %}
+        {{ form_end(form) }}
+        {# What an editor such as MilkdownEditorBundle receives (nowo_storage_milkdown_upload): the JSON endpoint and its token. #}
+        <dl class="row small text-muted mt-3 mb-0" data-testid="demo-upload-config" data-state="{{ upload.state }}" data-url="{{ upload.url|default('') }}" data-token="{{ upload.token|default('') }}">
+            <dt class="col-sm-3">Upload endpoint</dt><dd class="col-sm-9"><code>{{ upload.url|default('—') }}</code> (state <code>{{ upload.state }}</code>)</dd>
+        </dl>
+    </div>
+</div>
+
+<h2 class="h4">Notes</h2>
+{% for note in notes %}
+    {% set images = nowo_storage_images(note.body) %}
+    <article class="card shadow-sm mb-3" data-testid="demo-note">
+        <div class="card-body">
+            <p class="mb-2" style="white-space: pre-line">{{ note.body|u.truncate(400, '…') }}</p>
+            <div class="demo-images d-flex flex-wrap gap-2">
+                {% for uuid, image in images %}
+                    <a href="{{ image.original }}"><img src="{{ image.src }}" width="{{ image.width }}" height="{{ image.height }}" alt="{{ image.alt }}" loading="lazy" data-testid="demo-note-image-view"></a>
+                {% endfor %}
+            </div>
+            <p class="small text-muted mb-0">{{ note.author }} · {{ note.createdAt|date('Y-m-d H:i') }}</p>
+        </div>
+    </article>
+{% else %}
+    <p class="text-muted" data-testid="demo-no-notes">No notes yet.</p>
+{% endfor %}
+{% endblock %}
