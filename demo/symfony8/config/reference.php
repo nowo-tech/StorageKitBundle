@@ -1642,7 +1642,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         path_prefix?: scalar|Param|null, // URL prefix of the endpoints. // Default: "/storage"
  *         access_roles?: list<scalar|Param|null>,
  *         max_bytes?: int|Param, // Largest accepted upload, in bytes (also check upload_max_filesize / post_max_size). // Default: 10485760
- *         max_pixels?: int|Param, // Largest accepted image, in pixels (width × height), checked before decoding. // Default: 40000000
+ *         max_pixels?: int|Param, // Largest accepted image, in pixels (width × height), checked before decoding. // Default: 24000000
  *         variants?: array<string, int|Param>,
  *         rate_limit?: int|Param, // Uploads one user may make per rate_interval (sliding window over cache.app). // Default: 30
  *         rate_interval?: scalar|Param|null, // Window of the rate limit, a relative time such as "1 minute". // Default: "1 minute"

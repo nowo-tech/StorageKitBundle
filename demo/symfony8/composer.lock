@@ -1776,7 +1776,7 @@
             "dist": {
                 "type": "path",
                 "url": "/var/storage-kit-bundle",
-                "reference": "c76e4782d2b569b93deec100ee795ddac55872ab"
+                "reference": "8e7266ced6054c9c5673a3b4e7ddecb1f2425cc9"
             },
             "require": {
                 "async-aws/core": "^1.27",
@@ -1839,6 +1839,7 @@
                 "symfony/messenger": "^7.4 || ^8.0",
                 "symfony/mime": "^7.4 || ^8.0",
                 "symfony/phpunit-bridge": "^7.4 || ^8.0",
+                "symfony/process": "^7.4 || ^8.0",
                 "symfony/security-bundle": "^7.4 || ^8.0",
                 "symfony/translation": "^7.4 || ^8.0",
                 "symfony/yaml": "^7.4 || ^8.0"
