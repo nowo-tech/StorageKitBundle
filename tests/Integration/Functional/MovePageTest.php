@@ -288,7 +288,8 @@ final class MovePageTest extends KernelTestCase
         $client = $this->client($kernel);
         $this->saveTarget($client);
 
-        $this->act($client, 'sync');
+        // While a sync runs the target form is read-only, the AWS CSV row included.
+        self::assertMatchesRegularExpression('/<input[^>]*name="storage_target\[access_key_csv\]"[^>]*disabled/', $this->act($client, 'sync'));
         self::assertStringContainsString('Copying stopped. You can resume it later.', $this->act($client, 'cancel'));
         self::assertStringContainsString('Stopped by a user', (string) $client->getResponse()->getContent());
         self::assertStringContainsString('Resume copying', (string) $client->getResponse()->getContent());

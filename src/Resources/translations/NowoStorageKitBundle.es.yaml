@@ -70,6 +70,7 @@ profile:
         secret: 'Clave secreta'
         path_style: 'Direccionamiento por ruta (path-style)'
         provider: 'Proveedor'
+        access_key_csv: 'Importar desde CSV de AWS'
     help:
         enabled: 'Necesita un bucket, una clave de acceso, una clave secreta y, para un servicio compatible con S3, un endpoint.'
         endpoint: 'https://host[:puerto] del servicio (sin ruta).'
@@ -80,6 +81,7 @@ profile:
         secret_kept: 'Hay una clave secreta guardada. Déjalo vacío para conservarla.'
         path_style: 'Lo necesitan la mayoría de servicios autoalojados (MinIO, RustFS).'
         provider: 'Solo se muestran y guardan los campos del proveedor seleccionado.'
+        access_key_csv: 'Opcional, solo Amazon S3: el archivo <usuario>_accessKeys.csv que AWS ofrece al crear una clave de acceso. Rellena la clave de acceso y la clave secreta; el archivo se lee una vez y nunca se guarda.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
@@ -94,6 +96,14 @@ profile:
         endpoint_not_allowed: 'Esta dirección no está permitida: se rechazan los hosts privados, locales y de metadatos de la nube.'
         endpoint_unresolvable: 'Este nombre de host no se resuelve.'
         provider: 'Elige un proveedor.'
+        csv_unreadable: 'No se ha podido subir el archivo CSV. Inténtalo de nuevo.'
+        csv_size: 'El archivo CSV está vacío o es demasiado grande (máximo 4 KB). Sube el archivo de claves de acceso que te da AWS.'
+        csv_type: 'El archivo no es un CSV de texto.'
+        csv_header: 'El archivo no es un CSV de claves de acceso de AWS: necesita las columnas "Access key ID" y "Secret access key".'
+        csv_rows: 'El archivo CSV debe contener exactamente una clave de acceso.'
+        csv_key_id: 'El archivo CSV no contiene un ID de clave de acceso de AWS válido (AKIA o ASIA seguido de 16 letras y dígitos).'
+        csv_secret: 'El archivo CSV no contiene una clave de acceso secreta de AWS válida (40 caracteres).'
+        csv_conflict: 'La clave de acceso o la clave secreta escrita no coincide con el archivo CSV. Borra el valor escrito o sube el archivo correspondiente.'
 move:
     title: 'Mover a otro bucket'
     intro: 'Copia todos los archivos a un bucket nuevo, comprueba cada copia y después cambia. Las subidas siguen yendo al bucket actual hasta que cambies.'

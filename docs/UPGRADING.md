@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [To 1.1.0](#to-110)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
   - [Requirements](#requirements)
   - [Install and configure](#install-and-configure)
@@ -12,7 +13,20 @@
 
 ## Unreleased
 
-Nothing yet.
+### To 1.1.0
+
+No breaking change, no configuration or schema change.
+
+- The Amazon S3 bucket forms gain an optional file row **Import from AWS CSV** (`<form>[access_key_csv]`, unmapped
+  `FileType`): the scope Storage page (`storage_profile`), the Move target (`storage_target`) and the `storage`
+  Instance Settings section (`settings_section`, added by a form type extension on Instance Settings'
+  `SettingsSectionType`). The forms are now `multipart/form-data` (`form_start` sets it). Templates that render the
+  forms with `form_start` / `form_row` / `form_end` need no change; a template that renders fields one by one must add
+  `form_row(form.access_key_csv)` or the row is left out (the form still works without it).
+- Hosts with a request size limit in front of PHP (reverse proxy, `post_max_size`, `upload_max_filesize`) need room
+  for a few KB; the kit refuses files above 4 KB itself.
+- New translation keys `profile.field.access_key_csv`, `profile.help.access_key_csv` and `profile.error.csv_*`;
+  hosts that override the `NowoStorageKitBundle` catalogue should add them.
 
 ## To 1.0.0 (initial release)
 

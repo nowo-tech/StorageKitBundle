@@ -55,7 +55,8 @@ worker. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md).
 - **Instance bucket in Instance Settings** — the `storage` section (provider, endpoint, public endpoint, region, bucket,
   prefix, access key, encrypted write-only secret, path style), provider-dependent fields with `visible-when`, empty
   provider = uploads off, notices, **Test connection** (write, read, sign, public-read warning, delete) and **Usage and
-  move**. Or pin it in the configuration (`profiles` + `instance_profile`, e.g. a DSN from an env var).
+  move**. For Amazon S3, the access key and secret can also come from the AWS console's access-key CSV (*Import from
+  AWS CSV*, never stored). Or pin it in the configuration (`profiles` + `instance_profile`, e.g. a DSN from an env var).
 - **Scope buckets** — `scopes.enabled` with your `ScopeResolverInterface` and `ScopeAccessCheckerInterface`: each
   organisation / tenant manages its own bucket on its Storage page (404 for everyone else); a turned-off scope bucket
   turns its uploads off, never falls back to someone else's.

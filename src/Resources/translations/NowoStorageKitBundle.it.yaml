@@ -70,6 +70,7 @@ profile:
         secret: 'Chiave segreta'
         path_style: 'Indirizzamento per percorso (path-style)'
         provider: 'Provider'
+        access_key_csv: 'Importa dal CSV di AWS'
     help:
         enabled: 'Richiede un bucket, una chiave di accesso, una chiave segreta e, per un servizio compatibile con S3, un endpoint.'
         endpoint: 'https://host[:porta] del servizio (senza percorso).'
@@ -80,6 +81,7 @@ profile:
         secret_kept: 'È salvata una chiave segreta. Lascia vuoto per mantenerla.'
         path_style: 'Necessario per la maggior parte dei servizi self-hosted (MinIO, RustFS).'
         provider: 'Vengono mostrati e salvati solo i campi del provider selezionato.'
+        access_key_csv: 'Facoltativo, solo Amazon S3: il file <utente>_accessKeys.csv che AWS offre quando crei una chiave di accesso. Compila la chiave di accesso e la chiave segreta; il file viene letto una volta e mai salvato.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
@@ -94,6 +96,14 @@ profile:
         endpoint_not_allowed: 'Questo indirizzo non è consentito: gli host privati, locali e di metadati cloud vengono rifiutati.'
         endpoint_unresolvable: 'Questo nome host non si risolve.'
         provider: 'Scegli un provider.'
+        csv_unreadable: 'Impossibile caricare il file CSV. Riprova.'
+        csv_size: 'Il file CSV è vuoto o troppo grande (massimo 4 KB). Carica il file della chiave di accesso fornito da AWS.'
+        csv_type: 'Il file non è un file CSV di testo.'
+        csv_header: 'Il file non è un CSV di chiavi di accesso AWS: servono le colonne "Access key ID" e "Secret access key".'
+        csv_rows: 'Il file CSV deve contenere esattamente una chiave di accesso.'
+        csv_key_id: 'Il file CSV non contiene un ID chiave di accesso AWS valido (AKIA o ASIA seguito da 16 lettere e cifre).'
+        csv_secret: 'Il file CSV non contiene una chiave di accesso segreta AWS valida (40 caratteri).'
+        csv_conflict: 'La chiave di accesso o la chiave segreta digitata è diversa dal file CSV. Cancella il valore digitato o carica il file corrispondente.'
 move:
     title: 'Sposta in un altro bucket'
     intro: 'Copia tutti i file in un nuovo bucket, verifica ogni copia e poi passa al nuovo. I caricamenti continuano nel bucket attuale finché non passi.'

@@ -70,6 +70,7 @@ profile:
         secret: 'Chave secreta'
         path_style: 'Endereçamento por caminho (path-style)'
         provider: 'Fornecedor'
+        access_key_csv: 'Importar do CSV da AWS'
     help:
         enabled: 'Precisa de um bucket, uma chave de acesso, uma chave secreta e, para um serviço compatível com S3, um endpoint.'
         endpoint: 'https://host[:porta] do serviço (sem caminho).'
@@ -80,6 +81,7 @@ profile:
         secret_kept: 'Existe uma chave secreta guardada. Deixe vazio para a manter.'
         path_style: 'Necessário na maioria dos serviços auto-alojados (MinIO, RustFS).'
         provider: 'Só são mostrados e guardados os campos do fornecedor selecionado.'
+        access_key_csv: 'Opcional, só Amazon S3: o ficheiro <utilizador>_accessKeys.csv que a AWS oferece ao criar uma chave de acesso. Preenche a chave de acesso e a chave secreta; o ficheiro é lido uma vez e nunca guardado.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
@@ -94,6 +96,14 @@ profile:
         endpoint_not_allowed: 'Este endereço não é permitido: hosts privados, locais e de metadados da nuvem são recusados.'
         endpoint_unresolvable: 'Este nome de host não é resolvido.'
         provider: 'Escolha um fornecedor.'
+        csv_unreadable: 'Não foi possível carregar o ficheiro CSV. Tente novamente.'
+        csv_size: 'O ficheiro CSV está vazio ou é demasiado grande (no máximo 4 KB). Carregue o ficheiro de chave de acesso que a AWS lhe dá.'
+        csv_type: 'O ficheiro não é um ficheiro CSV de texto.'
+        csv_header: 'O ficheiro não é um CSV de chaves de acesso da AWS: precisa das colunas "Access key ID" e "Secret access key".'
+        csv_rows: 'O ficheiro CSV deve conter exatamente uma chave de acesso.'
+        csv_key_id: 'O ficheiro CSV não contém um ID de chave de acesso da AWS válido (AKIA ou ASIA seguido de 16 letras e dígitos).'
+        csv_secret: 'O ficheiro CSV não contém uma chave de acesso secreta da AWS válida (40 caracteres).'
+        csv_conflict: 'A chave de acesso ou a chave secreta escrita difere do ficheiro CSV. Apague o valor escrito ou carregue o ficheiro correspondente.'
 move:
     title: 'Mover para outro bucket'
     intro: 'Copie todos os ficheiros para um bucket novo, verifique cada cópia e depois mude. Os envios continuam para o bucket atual até mudar.'

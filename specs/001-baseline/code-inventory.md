@@ -146,7 +146,11 @@
 | --- | --- | --- |
 | `src/Controller/StorageSettingsController.php` | Admin UI and access | FR-UI-001 |
 | `src/Controller/StorageMoveController.php` | Admin UI and access | FR-UI-002 |
-| `src/Form/StorageProfileType.php` | Admin UI and access | FR-UI-003 |
+| `src/Form/StorageProfileType.php` | Admin UI and access | FR-UI-003, FR-UI-007 |
+| `src/Form/AwsAccessKeyCsv.php` | Admin UI and access | FR-UI-007 |
+| `src/Form/AwsAccessKeyCsvException.php` | Admin UI and access | FR-UI-007 |
+| `src/Form/AwsCsvImport.php` | Admin UI and access | FR-UI-007 |
+| `src/Form/Extension/StorageSettingsSectionTypeExtension.php` | Admin UI and access | FR-UI-007, FR-SET-001 |
 | `src/Ui/AdminPages.php` | Admin UI and access | FR-UI-004 |
 | `src/Ui/StorageKitPages.php` | Admin UI and access | FR-UI-004 |
 | `src/Ui/ProfileTester.php` | Admin UI and access | FR-UI-004, FR-STO-007 |
@@ -189,6 +193,6 @@
 | Moves | 9 |
 | Files data | 5 |
 | Personal data and audit | 3 |
-| Admin UI and access | 16 |
+| Admin UI and access | 20 |
 | Translations | 7 |
-| **Total production sources** | **100 / 100** (`find src -type f \| wc -l` = 100) |
+| **Total production sources** | **104 / 104** (`find src -type f \| wc -l` = 104) |

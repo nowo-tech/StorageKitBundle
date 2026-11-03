@@ -70,6 +70,7 @@ profile:
         secret: 'Geheime sleutel'
         path_style: 'Adressering via pad (path-style)'
         provider: 'Provider'
+        access_key_csv: 'Importeren uit AWS-CSV'
     help:
         enabled: 'Vereist een bucket, een toegangssleutel, een geheime sleutel en, voor een S3-compatibele dienst, een endpoint.'
         endpoint: 'https://host[:poort] van de dienst (zonder pad).'
@@ -80,6 +81,7 @@ profile:
         secret_kept: 'Er is een geheime sleutel opgeslagen. Laat leeg om hem te behouden.'
         path_style: 'Nodig voor de meeste zelf gehoste diensten (MinIO, RustFS).'
         provider: 'Alleen de velden van de gekozen provider worden getoond en opgeslagen.'
+        access_key_csv: 'Optioneel, alleen Amazon S3: het bestand <gebruiker>_accessKeys.csv dat AWS aanbiedt bij het aanmaken van een toegangssleutel. Het vult de toegangssleutel en de geheime sleutel in; het bestand wordt één keer gelezen en nooit bewaard.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
@@ -94,6 +96,14 @@ profile:
         endpoint_not_allowed: 'Dit adres is niet toegestaan: privé-, lokale en cloudmetadata-hosts worden geweigerd.'
         endpoint_unresolvable: 'Deze hostnaam kan niet worden opgezocht.'
         provider: 'Kies een provider.'
+        csv_unreadable: 'Het CSV-bestand kon niet worden geüpload. Probeer het opnieuw.'
+        csv_size: 'Het CSV-bestand is leeg of te groot (maximaal 4 KB). Upload het toegangssleutelbestand dat AWS je geeft.'
+        csv_type: 'Het bestand is geen tekst-CSV-bestand.'
+        csv_header: 'Het bestand is geen AWS-toegangssleutel-CSV: het heeft de kolommen "Access key ID" en "Secret access key" nodig.'
+        csv_rows: 'Het CSV-bestand moet precies één toegangssleutel bevatten.'
+        csv_key_id: 'Het CSV-bestand bevat geen geldige AWS-toegangssleutel-ID (AKIA of ASIA gevolgd door 16 letters en cijfers).'
+        csv_secret: 'Het CSV-bestand bevat geen geldige geheime AWS-toegangssleutel (40 tekens).'
+        csv_conflict: 'De ingevoerde toegangssleutel of geheime sleutel wijkt af van het CSV-bestand. Wis de ingevoerde waarde of upload het bijbehorende bestand.'
 move:
     title: 'Naar een andere bucket verplaatsen'
     intro: 'Kopieer alle bestanden naar een nieuwe bucket, controleer elke kopie en schakel dan over. Uploads gaan naar de huidige bucket tot u overschakelt.'

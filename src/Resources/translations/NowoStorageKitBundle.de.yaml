@@ -70,6 +70,7 @@ profile:
         secret: 'Geheimer Schlüssel'
         path_style: 'Pfadbasierte Adressierung (path-style)'
         provider: 'Anbieter'
+        access_key_csv: 'Aus AWS-CSV importieren'
     help:
         enabled: 'Benötigt einen Bucket, einen Zugriffsschlüssel, einen geheimen Schlüssel und bei einem S3-kompatiblen Dienst einen Endpunkt.'
         endpoint: 'https://host[:port] des Dienstes (ohne Pfad).'
@@ -80,6 +81,7 @@ profile:
         secret_kept: 'Ein geheimer Schlüssel ist gespeichert. Leer lassen, um ihn zu behalten.'
         path_style: 'Von den meisten selbst gehosteten Diensten benötigt (MinIO, RustFS).'
         provider: 'Nur die Felder des gewählten Anbieters werden angezeigt und gespeichert.'
+        access_key_csv: 'Optional, nur Amazon S3: die Datei <Benutzer>_accessKeys.csv, die AWS beim Erstellen eines Zugriffsschlüssels anbietet. Sie füllt Zugriffsschlüssel und geheimen Schlüssel aus; die Datei wird einmal gelesen und nie gespeichert.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
@@ -94,6 +96,14 @@ profile:
         endpoint_not_allowed: 'Diese Adresse ist nicht erlaubt: Private, lokale und Cloud-Metadaten-Hosts werden abgelehnt.'
         endpoint_unresolvable: 'Dieser Hostname lässt sich nicht auflösen.'
         provider: 'Wählen Sie einen Anbieter.'
+        csv_unreadable: 'Die CSV-Datei konnte nicht hochgeladen werden. Bitte erneut versuchen.'
+        csv_size: 'Die CSV-Datei ist leer oder zu groß (höchstens 4 KB). Laden Sie die Zugriffsschlüssel-Datei von AWS hoch.'
+        csv_type: 'Die Datei ist keine CSV-Textdatei.'
+        csv_header: 'Die Datei ist keine AWS-Zugriffsschlüssel-CSV: Sie braucht die Spalten „Access key ID“ und „Secret access key“.'
+        csv_rows: 'Die CSV-Datei muss genau einen Zugriffsschlüssel enthalten.'
+        csv_key_id: 'Die CSV-Datei enthält keine gültige AWS-Zugriffsschlüssel-ID (AKIA oder ASIA gefolgt von 16 Buchstaben und Ziffern).'
+        csv_secret: 'Die CSV-Datei enthält keinen gültigen geheimen AWS-Zugriffsschlüssel (40 Zeichen).'
+        csv_conflict: 'Der eingegebene Zugriffsschlüssel oder geheime Schlüssel weicht von der CSV-Datei ab. Löschen Sie den eingegebenen Wert oder laden Sie die passende Datei hoch.'
 move:
     title: 'In einen anderen Bucket verschieben'
     intro: 'Kopieren Sie alle Dateien in einen neuen Bucket, prüfen Sie jede Kopie und wechseln Sie dann. Uploads gehen bis zum Wechsel in den aktuellen Bucket.'

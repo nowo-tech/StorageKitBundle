@@ -8,6 +8,7 @@ use LogicException;
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
 use Nowo\HttpHardeningBundle\Csp\CspSourceProviderInterface;
 use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
+use Nowo\InstanceSettingsBundle\Form\SettingsSectionType;
 use Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\OutboundUrlGuardBundle\Dns\HostnameDnsLookup;
@@ -30,6 +31,7 @@ use Nowo\StorageKitBundle\Download\FileUrls;
 use Nowo\StorageKitBundle\Download\StoredImageResolver;
 use Nowo\StorageKitBundle\EventListener\InstanceSettingsListener;
 use Nowo\StorageKitBundle\EventListener\StorageKitAccessListener;
+use Nowo\StorageKitBundle\Form\Extension\StorageSettingsSectionTypeExtension;
 use Nowo\StorageKitBundle\Form\StorageProfileType;
 use Nowo\StorageKitBundle\Http\StorageCspSources;
 use Nowo\StorageKitBundle\Integration\HttpHardening\StorageCspSourceProvider;
@@ -259,6 +261,8 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
                 $webUi ? new Reference(CsrfOnlyFormFactory::class) : null,
                 $endpoints['guard_instance_profile'],
             ]))->setPublic(true)->addTag(NowoInstanceSettingsBundle::SECTION_TAG, ['priority' => StorageSettingsSection::PRIORITY]));
+            $container->setDefinition(StorageSettingsSectionTypeExtension::class, (new Definition(StorageSettingsSectionTypeExtension::class))
+                ->addTag('form.type_extension', ['extended_type' => SettingsSectionType::class]));
             $container->setDefinition(InstanceSettingsListener::class, (new Definition(InstanceSettingsListener::class, [
                 new Reference(StorageProfiles::class),
                 new Reference(FileStorage::class),
