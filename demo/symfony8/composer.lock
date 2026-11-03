@@ -1776,7 +1776,7 @@
             "dist": {
                 "type": "path",
                 "url": "/var/storage-kit-bundle",
-                "reference": "8e7266ced6054c9c5673a3b4e7ddecb1f2425cc9"
+                "reference": "7a4f41317268258f64d07af504e99b0396741287"
             },
             "require": {
                 "async-aws/core": "^1.27",
