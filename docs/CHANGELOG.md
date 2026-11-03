@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-03
+
+Import the AWS access-key CSV in the S3 profile form
+
 ### Added
 
 - **Import from AWS CSV** (FR-UI-007): the Amazon S3 bucket forms — scope Storage page and Move target

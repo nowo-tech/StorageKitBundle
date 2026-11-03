@@ -3,7 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
-  - [To 1.1.0](#to-110)
+- [To 1.1.0](#to-110)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
   - [Requirements](#requirements)
   - [Install and configure](#install-and-configure)
@@ -13,7 +13,13 @@
 
 ## Unreleased
 
-### To 1.1.0
+## To 1.1.0
+
+From **1.0.0**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
 
 No breaking change, no configuration or schema change.
 
