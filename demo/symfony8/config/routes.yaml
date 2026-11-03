@@ -1,0 +1,13 @@
+controllers:
+    resource: ../src/Controller/
+    type: attribute
+
+# Instance Settings pages: the instance bucket is the "storage" section (/admin/settings/sections/storage)
+nowo_instance_settings:
+    resource: .
+    type: nowo_instance_settings
+
+# Storage / Move pages and the upload / download endpoints (REQ-SF-004 rule 7: opt-in import)
+nowo_storage_kit:
+    resource: .
+    type: nowo_storage_kit

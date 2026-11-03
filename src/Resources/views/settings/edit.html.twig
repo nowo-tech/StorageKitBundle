@@ -1,0 +1,31 @@
+{#
+  Storage page of an owner (REQ-UI-003): UiKit form scaffold. Variables: page (Nowo\UiKitBundle\View\FormPage from
+  Ui\AdminPages::settingsPage(): header with the on / off status, the FormKit bucket form — secret write-only, never
+  rendered back —, "Save", the "Test connection" POST action and the link to the Move page), aside (list of
+  View\DetailSection: usage, last test, the configuration-managed bucket), scope (null = the instance), managed
+  (null = editable here; 'config' = the instance bucket comes from nowo_storage_kit.instance_profile; 'settings' = it
+  is edited in the "storage" Instance Settings section — both without a form), env_managed (managed == 'config').
+
+  Override: a template that extends '@!NowoStorageKitBundle/settings/edit.html.twig' (web_ui.templates.settings) and
+  overrides nowo_ui_form_aside or nowo_storage_kit_settings_notice. Restyle through nowo_ui_kit.theme (slots), never
+  here.
+#}
+{% extends '@NowoUiKit/page/form.html.twig' %}
+
+{% block nowo_ui_form_body %}
+    {% if managed is not null %}
+        {% block nowo_storage_kit_settings_notice %}
+            {% if managed == 'config' %}
+                <p class="{{ nowo_ui_class('flash_info', page.bundle) }}" role="note" data-testid="storage-kit-env-managed">{{ 'settings.env_managed'|trans({}, 'NowoStorageKitBundle') }}</p>
+            {% else %}
+                <p class="{{ nowo_ui_class('flash_info', page.bundle) }}" role="note" data-testid="storage-kit-settings-managed">{{ 'settings.settings_managed'|trans({}, 'NowoStorageKitBundle') }}</p>
+            {% endif %}
+        {% endblock %}
+    {% else %}
+        {{ parent() }}
+    {% endif %}
+{% endblock %}
+
+{% block nowo_ui_form_aside %}
+    {{ include('@NowoStorageKitBundle/settings/_aside.html.twig', {page: page, aside: aside, notice: scope is null ? null : 'settings.scope_notice'}, false) }}
+{% endblock %}

@@ -1,0 +1,9 @@
+# Halite default profile: encrypts the secret settings (#[Encrypted] column of instance_setting_value) and seals
+# secrets in exports. The key file is generated on first start (docker/entrypoint.sh) and never committed.
+nowo_doctrine_encrypt:
+    default_profile: default
+    on_decrypt_failure: 'null'   # never hand ciphertext to consumers (DoctrineEncrypt ^2.10)
+    profiles:
+        default:
+            encryptor_class: Halite
+            secret_directory_path: '%kernel.project_dir%/var/secrets'

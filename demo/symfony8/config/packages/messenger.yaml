@@ -1,0 +1,7 @@
+# The Move page dispatches its copy job: the demo runs it synchronously (a host routes it to a worker transport).
+framework:
+    messenger:
+        transports:
+            sync: 'sync://'
+        routing:
+            Nowo\StorageKitBundle\Message\RunStorageSyncMessage: sync

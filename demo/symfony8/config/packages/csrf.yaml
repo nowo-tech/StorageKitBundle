@@ -1,0 +1,7 @@
+# Classic session CSRF (works without JS). Flex may install a "stateless" csrf.yaml —
+# keep this file as the source of truth for the demo.
+framework:
+    csrf_protection: true
+    form:
+        csrf_protection:
+            enabled: true

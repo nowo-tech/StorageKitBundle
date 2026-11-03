@@ -1,0 +1,153 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Nowo\StorageKitBundle\Upload;
+
+use DateTimeImmutable;
+use Nowo\StorageKitBundle\Audit\AuditRecorder;
+use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\StorageKitBundle\Context\FileContexts;
+use Nowo\StorageKitBundle\Context\FileContextTarget;
+use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
+use Nowo\StorageKitBundle\Entity\StoredFile;
+use Nowo\StorageKitBundle\Profile\StorageProfiles;
+use Nowo\StorageKitBundle\Storage\ErrorScrubber;
+use Nowo\StorageKitBundle\Storage\FileStorage;
+use Nowo\StorageKitBundle\Storage\StorageConnection;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Symfony\Component\Security\Core\User\UserInterface;
+use Symfony\Component\Uid\Uuid;
+use Throwable;
+
+use function basename;
+use function gmdate;
+use function hash;
+use function mb_substr;
+use function preg_replace;
+use function str_replace;
+use function strlen;
+use function trim;
+
+/**
+ * One image upload (the PHP API behind the upload endpoint), in the order that leaves nothing behind on a refusal:
+ * the context (the user may write in it), the storage (the scope's bucket or the instance one; none = off), the image
+ * checks ({@see ImageProcessor}), the owner's limit ({@see UploadLimitInterface}), then the objects (original and
+ * variants under a random server-generated `yyyy/mm/<uuid>` key — no user input in the key, so no path traversal) and
+ * last the row. A failed write removes the objects already written. The new file is an orphan until a text that points
+ * at it is saved.
+ */
+final readonly class ImageUploader
+{
+    /** Longest kept file name. */
+    public const NAME_MAX = 120;
+
+    /**
+     * Contexts, profiles, storage, checks, entity manager, audit, optional limit and logger.
+     */
+    public function __construct(
+        private FileContexts $contexts,
+        private StorageProfiles $profiles,
+        private FileStorage $storage,
+        private ImageProcessor $processor,
+        private StorageEntityManager $entityManager,
+        private AuditRecorder $audit,
+        private ?UploadLimitInterface $limit = null,
+        private LoggerInterface $logger = new NullLogger(),
+    ) {
+    }
+
+    /**
+     * Stores an image for `$user` in a context.
+     *
+     * @param object $user security user (writes are checked by the context)
+     *
+     * @throws UploadRefused
+     */
+    public function upload(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFile
+    {
+        $target = FileContexts::isType($contextType) && FileContexts::isId($contextId)
+            ? $this->contexts->get($contextType)?->writableTarget($user, $contextId)
+            : null;
+        if (!$target instanceof FileContextTarget) {
+            throw new UploadRefused(UploadRefused::CONTEXT);
+        }
+        $profile  = $this->profiles->forTarget($target) ?? throw new UploadRefused(UploadRefused::OFF);
+        $settings = $this->profiles->settingsOf($profile) ?? throw new UploadRefused(UploadRefused::OFF);
+        $image    = $this->processor->process($bytes);
+        if ($this->limit instanceof UploadLimitInterface && !$this->limit->allows($target, $image->totalBytes())) {
+            throw new UploadRefused(UploadRefused::LIMIT);
+        }
+
+        $uuid       = Uuid::v4()->toRfc4122();
+        $key        = gmdate('Y/m') . '/' . $uuid;
+        $connection = $this->storage->connection($settings);
+        $written    = [];
+        try {
+            $connection->write($key, $image->original['bytes'], $image->original['mime']);
+            $written[] = $key;
+            $file      = new StoredFile(
+                $profile,
+                $contextType,
+                $contextId,
+                $key,
+                self::cleanName($originalName),
+                $image->original['mime'],
+                strlen($image->original['bytes']),
+                $image->original['width'],
+                $image->original['height'],
+                hash('sha256', $image->original['bytes']),
+                $uuid,
+            );
+            foreach ($image->variants as $name => $variant) {
+                $variantKey = $key . '-' . $name;
+                $connection->write($variantKey, $variant['bytes'], $variant['mime']);
+                $written[] = $variantKey;
+                $file->addVariant($name, ['key' => $variantKey, 'size' => strlen($variant['bytes']), 'width' => $variant['width'], 'height' => $variant['height'], 'mime' => $variant['mime']]);
+            }
+            $file->setUploadedBy($user instanceof UserInterface ? mb_substr($user->getUserIdentifier(), 0, 180) : null);
+            $file->setOwner($target->owner);
+            $file->markOrphaned(new DateTimeImmutable());
+            $manager = $this->entityManager->manager();
+            $manager->persist($file);
+            $manager->flush();
+        } catch (Throwable $e) {
+            $this->discard($connection, $written);
+            $this->logger->warning('Image upload failed: {error}', ['error' => ErrorScrubber::message($e, $settings)]);
+
+            throw new UploadRefused(UploadRefused::STORAGE);
+        }
+        $this->audit->record(StorageAuditEvent::FILE_UPLOADED, $profile->getScope(), $user, [
+            'file'    => $uuid,
+            'context' => $contextType . '/' . $contextId,
+            'bytes'   => $file->totalBytes(),
+        ]);
+
+        return $file;
+    }
+
+    /**
+     * The name kept as default alt text: no path, no control characters, at most {@see self::NAME_MAX} characters.
+     */
+    public static function cleanName(string $name): string
+    {
+        $name = trim((string) preg_replace('/[\x00-\x1F\x7F]+/u', '', basename(str_replace('\\', '/', $name))));
+
+        return $name === '' ? StoredFile::ANONYMOUS_NAME : mb_substr($name, 0, self::NAME_MAX);
+    }
+
+    /**
+     * @param list<string> $keys
+     */
+    private function discard(StorageConnection $connection, array $keys): void
+    {
+        foreach ($keys as $key) {
+            try {
+                $connection->delete($key);
+            } catch (Throwable) {
+                $this->logger->error('Could not remove an orphan object {key}.', ['key' => $key]);
+            }
+        }
+    }
+}

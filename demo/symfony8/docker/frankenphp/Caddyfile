@@ -1,0 +1,35 @@
+{
+	order mercure after encode
+	skip_install_trust
+	# REQ-RUNTIME-001 timeout hierarchy: DNS lookup of an endpoint (2 s, nowo_storage_kit.endpoints.dns_timeout) and one
+	# storage request (30 s idle, nowo_storage_kit.endpoints.request_timeout) < PHP max_execution_time (60 s) < Caddy
+	# write timeout (70 s). max_wait_time caps the wait for a free PHP thread (503 instead of an endless queue).
+	servers {
+		timeouts {
+			write 70s
+		}
+	}
+	frankenphp {
+		php_ini max_execution_time 60
+		php_ini max_input_time 30
+		max_wait_time 10s
+	}
+}
+
+# Worker mode: app boots once, handles requests in memory.
+# StorageKit's request-scoped services implement ResetInterface (kernel.reset) — safe for worker.
+:80 {
+	root * /app/public
+	encode zstd br gzip
+	mercure {
+		anonymous
+	}
+
+	php_server {
+		hot_reload
+		worker {
+			file /app/public/index.php
+			watch
+		}
+	}
+}
