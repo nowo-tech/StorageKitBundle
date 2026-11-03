@@ -108,9 +108,11 @@ move:
         cancel: 'Detener la copia'
         switch: 'Cambiar al bucket nuevo'
         discard: 'Olvidar el bucket nuevo'
+        forget: 'Olvidar los buckets anteriores'
     confirm:
         switch: '¿Cambiar todos los archivos al bucket nuevo?'
         discard: '¿Olvidar el bucket nuevo? Los objetos ya copiados se quedan en él.'
+        forget: '¿Eliminar los buckets anteriores que ya no usa ningún archivo, con sus credenciales guardadas? Sus objetos no se eliminan.'
     status:
         running: 'Copiando'
     section:
@@ -147,6 +149,9 @@ move:
         new_files: 'Se han subido archivos desde la copia: cópialos y después cambia.'
         env_managed: 'El bucket de la instancia lo gestiona la configuración: cámbialo allí.'
         discarded: 'Se ha olvidado el bucket nuevo.'
+        forgotten: 'Se olvidaron %count% bucket(s) anteriores y sus credenciales.'
+        nothing_to_forget: 'Todos los buckets anteriores aún tienen archivos: no se olvidó nada.'
+        settings_refused: 'Los ajustes de Almacenamiento rechazaron el bucket nuevo (revisa su endpoint frente a los hosts permitidos): no se cambió nada.'
 upload:
     error:
         type: 'Solo se pueden subir imágenes PNG, JPEG, GIF y WebP.'

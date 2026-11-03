@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Tests\Unit\Storage;
 
 use InvalidArgumentException;
+use LogicException;
 use Nowo\StorageKitBundle\Storage\S3Settings;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -22,7 +23,7 @@ final class S3SettingsTest extends TestCase
 
         self::assertSame('files', $settings->bucket);
         self::assertSame('KEY/id', $settings->accessKey);
-        self::assertSame('se+cret', $settings->secret);
+        self::assertSame('se+cret', $settings->secret());
         self::assertSame('eu-west-1', $settings->region);
         self::assertSame('http://minio:9000', $settings->endpoint);
         self::assertSame('http://localhost:9124', $settings->publicEndpoint);
@@ -149,5 +150,25 @@ final class S3SettingsTest extends TestCase
         self::assertNotSame($settings->fingerprint(), (new S3Settings('bucket', 'AKIAEXAMPLE', 'other-secret'))->fingerprint());
         self::assertNotSame($settings->fingerprint(), $settings->withRestricted(true)->fingerprint());
         self::assertStringContainsString('bucket', var_export($settings->__debugInfo(), true));
+        self::assertSame('not-a-real-secret', $settings->secret());
+        $json = (string) json_encode($settings);
+        self::assertStringNotContainsString('not-a-real-secret', $json);
+        self::assertStringContainsString('"secret":"***"', $json);
+        try {
+            serialize($settings);
+            self::fail('serialized');
+        } catch (LogicException $e) {
+            self::assertStringNotContainsString('not-a-real-secret', $e->getMessage());
+        }
+    }
+
+    public function testATrailingNewlineIsNotAcceptedByThePatterns(): void
+    {
+        foreach (['bucket' => S3Settings::BUCKET_PATTERN, 'eu-west-1' => S3Settings::REGION_PATTERN, 'app/x' => S3Settings::PREFIX_PATTERN] as $value => $pattern) {
+            self::assertSame(1, preg_match($pattern, $value));
+            self::assertSame(0, preg_match($pattern, $value . "\n"), $pattern);
+        }
+        $this->expectException(InvalidArgumentException::class);
+        new S3Settings("bucket\n", 'key', 'secret');
     }
 }

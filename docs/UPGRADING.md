@@ -39,7 +39,9 @@ Nothing yet.
 5. Add `access_control` rules for `/admin/storage` (and `/admin/settings`); keep uploads behind a firewall.
 6. Implement your `FileContextInterface` services (who writes / reads) and `FileReferenceSourceInterface` services
    (texts that point at files) — [USAGE](USAGE.md#file-contexts-who-may-write-and-read).
-7. Schedule `php bin/console nowo:storage-kit:purge` daily (cron or Symfony Scheduler).
+7. Schedule `php bin/console nowo:storage-kit:purge` daily (cron or Symfony Scheduler). After a bucket move, run
+   `php bin/console nowo:storage-kit:forget-retired` (or *Forget previous buckets*) once no file uses the old bucket,
+   so its encrypted credentials do not stay around.
 8. With Messenger, route `Nowo\StorageKitBundle\Message\RunStorageSyncMessage` to a worker transport; without it, bucket
    moves run with `nowo:storage-kit:sync`.
 9. Open **Settings → Storage**, choose a provider, save and press **Test connection**.

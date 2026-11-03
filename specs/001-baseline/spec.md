@@ -199,6 +199,9 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-MOVE-005** — `StorageSyncCommand` (`nowo:storage-kit:sync`, `--check`).
 - **FR-MOVE-006** — `AdoptInstanceBucketCommand` (`nowo:storage-kit:adopt-instance-bucket`): database-source active
   instance bucket → `storage` section.
+- **FR-MOVE-007** — `StorageMove::forgetRetired()` / `ForgetRetiredProfilesCommand` (`nowo:storage-kit:forget-retired`)
+  and the Move page's *Forget previous buckets* (CSRF): retired profiles no file uses are deleted with their encrypted
+  credentials, audited `profiles_forgotten` (audit CJ L3).
 
 ### Files data
 

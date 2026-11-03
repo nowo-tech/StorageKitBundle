@@ -108,9 +108,11 @@ move:
         cancel: 'Stop copying'
         switch: 'Switch to the new bucket'
         discard: 'Forget the new bucket'
+        forget: 'Forget previous buckets'
     confirm:
         switch: 'Switch every file to the new bucket?'
         discard: 'Forget the new bucket? Objects already copied stay in it.'
+        forget: 'Delete the previous buckets no file uses any more, with their saved credentials? Their objects are not deleted.'
     status:
         running: 'Copying'
     section:
@@ -147,6 +149,9 @@ move:
         new_files: 'Files were uploaded since the copy: copy them, then switch.'
         env_managed: 'The instance bucket is managed by the configuration: change it there.'
         discarded: 'The new bucket was forgotten.'
+        forgotten: '%count% previous bucket(s) and their credentials were forgotten.'
+        nothing_to_forget: 'Every previous bucket still holds files: nothing was forgotten.'
+        settings_refused: 'The Storage settings refused the new bucket (check its endpoint against the allowed hosts): nothing was switched.'
 upload:
     error:
         type: 'Only PNG, JPEG, GIF and WebP images can be uploaded.'

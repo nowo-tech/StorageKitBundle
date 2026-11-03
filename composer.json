@@ -97,6 +97,7 @@
         "symfony/messenger": "^7.4 || ^8.0",
         "symfony/mime": "^7.4 || ^8.0",
         "symfony/phpunit-bridge": "^7.4 || ^8.0",
+        "symfony/process": "^7.4 || ^8.0",
         "symfony/security-bundle": "^7.4 || ^8.0",
         "symfony/translation": "^7.4 || ^8.0",
         "symfony/yaml": "^7.4 || ^8.0"

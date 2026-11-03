@@ -40,6 +40,16 @@ final readonly class StorageConnection
     }
 
     /**
+     * Opens an object for reading (streamed from the bucket, not loaded in memory).
+     *
+     * @return resource
+     */
+    public function readStream(string $key)
+    {
+        return $this->filesystem->readStream($key);
+    }
+
+    /**
      * Whether an object exists.
      */
     public function exists(string $key): bool

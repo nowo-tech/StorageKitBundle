@@ -268,15 +268,15 @@ class StoredFile
     /**
      * The object key, type and size a variant is served from (the original when the variant was not generated).
      *
-     * @return array{key: string, mime: string, width: int, height: int}
+     * @return array{key: string, mime: string, width: int, height: int, size: int}
      */
     public function variant(string $name): array
     {
         $variant = $this->variants[$name] ?? null;
 
         return $variant === null
-            ? ['key' => $this->storageKey, 'mime' => $this->mimeType, 'width' => $this->width, 'height' => $this->height]
-            : ['key' => $variant['key'], 'mime' => $variant['mime'], 'width' => $variant['width'], 'height' => $variant['height']];
+            ? ['key' => $this->storageKey, 'mime' => $this->mimeType, 'width' => $this->width, 'height' => $this->height, 'size' => $this->getSize()]
+            : ['key' => $variant['key'], 'mime' => $variant['mime'], 'width' => $variant['width'], 'height' => $variant['height'], 'size' => (int) $variant['size']];
     }
 
     /**

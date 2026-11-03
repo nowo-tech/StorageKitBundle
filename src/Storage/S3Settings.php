@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Storage;
 
 use InvalidArgumentException;
+use JsonSerializable;
+use LogicException;
 use Nowo\OutboundUrlGuardBundle\Network\PrivateNetworkTarget;
 use Nowo\StorageKitBundle\Security\EndpointGuard;
 use SensitiveParameter;
@@ -53,21 +55,22 @@ use const FILTER_VALIDATE_IP;
  *   s3://ACCESS_KEY:SECRET@host[:port]/bucket[/prefix]?region=eu-west-1&path_style=1&tls=0&public_endpoint=http://localhost:9124
  *
  * Host `aws` (or `s3.amazonaws.com`) means AWS itself (no custom endpoint). The secret never appears in exceptions,
- * `var_dump()` / `print_r()` output or {@see self::fingerprint()}.
+ * `var_dump()` / `print_r()` / `json_encode()` output or {@see self::fingerprint()}; it is read only through
+ * {@see self::secret()}, and the object refuses to be serialized (no secret in a cache or a queued message).
  */
-final readonly class S3Settings
+final readonly class S3Settings implements JsonSerializable
 {
     /** A region token: lowercase letters, digits and inner dashes (us-east-1, fr-par, auto). */
-    public const REGION_PATTERN = '/^[a-z0-9]+(?:-[a-z0-9]+)*$/';
+    public const REGION_PATTERN = '/^[a-z0-9]+(?:-[a-z0-9]+)*$/D';
 
     /** Longest accepted region token. */
     public const REGION_MAX = 32;
 
     /** S3 bucket naming rules (3–63 characters, lowercase letters, digits, dots and dashes). */
-    public const BUCKET_PATTERN = '/^[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]$/';
+    public const BUCKET_PATTERN = '/^[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]$/D';
 
     /** Object key prefix: the S3 "safe characters" and slashes, at most 191 characters. */
-    public const PREFIX_PATTERN = '#^[A-Za-z0-9!_.*\'()\-/]{0,191}$#';
+    public const PREFIX_PATTERN = '#^[A-Za-z0-9!_.*\'()\-/]{0,191}$#D';
 
     /** Longest accepted access key id. */
     public const ACCESS_KEY_MAX = 191;
@@ -103,7 +106,7 @@ final readonly class S3Settings
         public string $bucket,
         public string $accessKey,
         #[SensitiveParameter]
-        public string $secret,
+        private string $secret,
         string $region = self::DEFAULT_REGION,
         ?string $endpoint = null,
         ?string $publicEndpoint = null,
@@ -227,6 +230,36 @@ final readonly class S3Settings
             'pathStyle'      => $this->pathStyle,
             'restricted'     => $this->restricted,
         ];
+    }
+
+    /**
+     * The secret access key (for the S3 client only).
+     */
+    public function secret(): string
+    {
+        return $this->secret;
+    }
+
+    /**
+     * Masked like {@see self::__debugInfo()}.
+     *
+     * @return array<string, mixed>
+     */
+    public function jsonSerialize(): array
+    {
+        return $this->__debugInfo();
+    }
+
+    /**
+     * Never serialized: the secret would end up in a cache, a session or a message.
+     *
+     * @throws LogicException always
+     *
+     * @return array<string, mixed>
+     */
+    public function __serialize(): array
+    {
+        throw new LogicException('S3Settings holds a secret and cannot be serialized.');
     }
 
     /**

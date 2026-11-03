@@ -231,7 +231,8 @@ context — the same answer for a missing and a forbidden file; anonymous viewer
 variant falls back to the original. Then:
 
 - **proxy** (every database / settings bucket, and config profiles with `delivery: proxy`): the application streams the
-  bytes with the stored type, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
+  object in 64 KiB chunks (`Content-Length` = the size stored at upload; an object that grew is cut there) with the
+  stored type, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
   `Cross-Origin-Resource-Policy: same-origin` and `Content-Disposition` (`download.disposition`, default `attachment`,
   which `<img>` still renders);
 - **redirect** (config profiles with `delivery: redirect`): `302` to a pre-signed URL of the private bucket, valid
@@ -366,6 +367,22 @@ prefix no file knows (first 100 of each; the scan stops after 100 000 objects) a
 When the instance bucket is the `storage` section, *Switch* writes the target's connection into the section (validated
 by Instance Settings, the secret encrypted by it) and the target row reads from the section from then on. The retired
 row keeps an encrypted copy (DoctrineEncrypt) of the old connection, so files still pointing at it keep downloading.
+If the section refuses the target's connection at that moment (an allow-list or endpoint rule changed since the target
+was saved), the page says so and nothing changes. Do not edit the `storage` section while a move is in progress: the
+switch replaces it with the target.
+
+### Forgetting previous buckets
+
+Retired profiles keep their encrypted credentials while files still point at them. When none does any more,
+*Forget previous buckets* on the Move page (POST + CSRF) deletes them, or from the console:
+
+```bash
+php bin/console nowo:storage-kit:forget-retired --dry-run     # list the instance's forgettable profiles
+php bin/console nowo:storage-kit:forget-retired --scope=acme  # one scope
+php bin/console nowo:storage-kit:forget-retired --all         # every owner
+```
+
+Objects in those buckets are never deleted; each run is audited as `profiles_forgotten`.
 
 ## Adopting an existing instance bucket
 
@@ -401,6 +418,7 @@ logged at `info`. It never carries a secret, an access key, a signed URL or a pr
 | `move_sync_started` | sync, from, to |
 | `move_sync_cancelled` | sync |
 | `move_switched` | from, to, files |
+| `profiles_forgotten` | profiles (UUIDs of the retired profiles deleted) |
 | `file_uploaded` | file, context, bytes |
 | `files_purged` | counters |
 | `files_erased` | files |

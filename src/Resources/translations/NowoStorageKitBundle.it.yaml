@@ -108,9 +108,11 @@ move:
         cancel: 'Interrompi la copia'
         switch: 'Passa al nuovo bucket'
         discard: 'Dimentica il nuovo bucket'
+        forget: 'Dimentica i bucket precedenti'
     confirm:
         switch: 'Passare tutti i file al nuovo bucket?'
         discard: 'Dimenticare il nuovo bucket? Gli oggetti già copiati restano lì.'
+        forget: 'Eliminare i bucket precedenti che nessun file usa più, con le credenziali salvate? I loro oggetti non vengono eliminati.'
     status:
         running: 'Copia in corso'
     section:
@@ -147,6 +149,9 @@ move:
         new_files: 'Sono stati caricati file dopo la copia: copiali e poi passa.'
         env_managed: 'Il bucket dell''istanza è gestito dalla configurazione: modificalo lì.'
         discarded: 'Il nuovo bucket è stato dimenticato.'
+        forgotten: '%count% bucket precedenti e le loro credenziali sono stati dimenticati.'
+        nothing_to_forget: 'Ogni bucket precedente contiene ancora file: non è stato dimenticato nulla.'
+        settings_refused: 'Le impostazioni di Archiviazione hanno rifiutato il nuovo bucket (controlla il suo endpoint rispetto agli host consentiti): non è stato cambiato nulla.'
 upload:
     error:
         type: 'Si possono caricare solo immagini PNG, JPEG, GIF e WebP.'

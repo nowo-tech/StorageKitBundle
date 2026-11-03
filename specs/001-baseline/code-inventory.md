@@ -120,6 +120,7 @@
 | `src/MessageHandler/RunStorageSyncHandler.php` | Moves | FR-MOVE-004 |
 | `src/Command/StorageSyncCommand.php` | Moves | FR-MOVE-005 |
 | `src/Command/AdoptInstanceBucketCommand.php` | Moves | FR-MOVE-006 |
+| `src/Command/ForgetRetiredProfilesCommand.php` | Moves | FR-MOVE-007 |
 
 ## Files data
 
@@ -190,4 +191,4 @@
 | Personal data and audit | 3 |
 | Admin UI and access | 16 |
 | Translations | 7 |
-| **Total production sources** | **99 / 99** (`find src -type f \| wc -l` = 99) |
+| **Total production sources** | **100 / 100** (`find src -type f \| wc -l` = 100) |

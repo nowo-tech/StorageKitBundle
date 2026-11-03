@@ -108,9 +108,11 @@ move:
         cancel: 'Kopiëren stoppen'
         switch: 'Overschakelen naar de nieuwe bucket'
         discard: 'Nieuwe bucket vergeten'
+        forget: 'Eerdere buckets vergeten'
     confirm:
         switch: 'Alle bestanden naar de nieuwe bucket overschakelen?'
         discard: 'Nieuwe bucket vergeten? Al gekopieerde objecten blijven erin staan.'
+        forget: 'Eerdere buckets die geen bestand meer gebruikt, met hun opgeslagen inloggegevens verwijderen? Hun objecten worden niet verwijderd.'
     status:
         running: 'Bezig met kopiëren'
     section:
@@ -147,6 +149,9 @@ move:
         new_files: 'Er zijn bestanden geüpload sinds de kopie: kopieer ze en schakel dan over.'
         env_managed: 'De bucket van de instantie wordt beheerd door de configuratie: wijzig hem daar.'
         discarded: 'De nieuwe bucket is vergeten.'
+        forgotten: '%count% eerdere bucket(s) en hun inloggegevens zijn vergeten.'
+        nothing_to_forget: 'Elke eerdere bucket bevat nog bestanden: er is niets vergeten.'
+        settings_refused: 'De opslaginstellingen weigerden de nieuwe bucket (controleer het endpoint tegen de toegestane hosts): er is niets omgeschakeld.'
 upload:
     error:
         type: 'Alleen PNG-, JPEG-, GIF- en WebP-afbeeldingen kunnen worden geüpload.'

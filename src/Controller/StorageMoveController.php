@@ -52,7 +52,7 @@ final class StorageMoveController extends AbstractController
     public const ROUTE_SCOPE_ACTION = 'nowo_storage_kit_scope_move_action';
 
     /** The POST actions. */
-    public const ACTIONS = 'test|sync|cancel|switch|discard';
+    public const ACTIONS = 'test|sync|cancel|switch|discard|forget';
 
     /**
      * Dependencies and configuration.
@@ -165,9 +165,15 @@ final class StorageMoveController extends AbstractController
         [$settingsRoute, $settingsParams] = StorageSettingsController::route($scope);
         $usage                            = $active instanceof StorageProfile && $active->getId() !== null ? $this->files->usageOf($active) : ['files' => 0, 'bytes' => 0];
 
+        $retired = $this->profiles->retiredOf($scope);
+        $actions = $this->actions($scope, $active, $target, $sync);
+        if ($retired !== []) {
+            $actions[] = $this->action($scope, 'forget', 'move.action.forget', confirm: 'move.confirm.forget');
+        }
+
         $response = $this->render($this->pages->template('move'), [
-            'page'    => $this->adminPages->movePage($scope, $form->createView(), $running, $this->actions($scope, $active, $target, $sync), $this->generateUrl($settingsRoute, $settingsParams)),
-            'aside'   => $this->adminPages->moveAside($active, $target, $sync, $usage, $this->profiles->retiredOf($scope), $this->move->runsInBackground()),
+            'page'    => $this->adminPages->movePage($scope, $form->createView(), $running, $actions, $this->generateUrl($settingsRoute, $settingsParams)),
+            'aside'   => $this->adminPages->moveAside($active, $target, $sync, $usage, $retired, $this->move->runsInBackground()),
             'sync'    => $sync,
             'running' => $running,
             'scope'   => $scope,
@@ -215,9 +221,15 @@ final class StorageMoveController extends AbstractController
     {
         $form = $this->csrfForms->createNamed('', self::tokenId($action, $scope));
         $form->handleRequest($request);
+        if ($action === 'forget' && $form->isSubmitted() && $form->isValid()) {
+            $count = $this->move->forgetRetired($scope, $this->guard->user());
+            $this->addFlash($count > 0 ? 'success' : 'info', $this->trans($count > 0 ? 'move.flash.forgotten' : 'move.flash.nothing_to_forget', ['%count%' => $count]));
+
+            return $this->redirectToRoute(...self::route($scope));
+        }
         $active = $this->resolver->activeOf($scope);
         $target = $this->profiles->targetOf($scope);
-        if (!$form->isSubmitted() || !$form->isValid() || !$target instanceof StorageProfile) {
+        if ($action === 'forget' || !$form->isSubmitted() || !$form->isValid() || !$target instanceof StorageProfile) {
             $this->addFlash('error', $this->trans('move.flash.unavailable'));
 
             return $this->redirectToRoute(...self::route($scope));

@@ -43,6 +43,18 @@ final class PrefixedMemoryAdapter extends InMemoryFilesystemAdapter
         return $this->inner->read($this->path($path));
     }
 
+    /**
+     * @return resource
+     */
+    public function readStream(string $path)
+    {
+        if ($this->buckets->failReads) {
+            throw UnableToReadFile::fromLocation($path, 'bucket unavailable');
+        }
+
+        return $this->inner->readStream($this->path($path));
+    }
+
     public function fileExists(string $path): bool
     {
         return $this->inner->fileExists($this->path($path));

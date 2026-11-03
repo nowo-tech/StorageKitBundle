@@ -108,9 +108,11 @@ move:
         cancel: 'Arrêter la copie'
         switch: 'Basculer vers le nouveau bucket'
         discard: 'Oublier le nouveau bucket'
+        forget: 'Oublier les buckets précédents'
     confirm:
         switch: 'Basculer tous les fichiers vers le nouveau bucket ?'
         discard: 'Oublier le nouveau bucket ? Les objets déjà copiés y restent.'
+        forget: 'Supprimer les buckets précédents qu’aucun fichier n’utilise plus, avec leurs identifiants enregistrés ? Leurs objets ne sont pas supprimés.'
     status:
         running: 'Copie en cours'
     section:
@@ -147,6 +149,9 @@ move:
         new_files: 'Des fichiers ont été envoyés depuis la copie : copiez-les, puis basculez.'
         env_managed: 'Le bucket de l''instance est géré par la configuration : modifiez-le là-bas.'
         discarded: 'Le nouveau bucket a été oublié.'
+        forgotten: '%count% bucket(s) précédent(s) et leurs identifiants ont été oubliés.'
+        nothing_to_forget: 'Chaque bucket précédent contient encore des fichiers : rien n’a été oublié.'
+        settings_refused: 'Les paramètres de Stockage ont refusé le nouveau bucket (vérifiez son endpoint par rapport aux hôtes autorisés) : rien n’a été basculé.'
 upload:
     error:
         type: 'Seules les images PNG, JPEG, GIF et WebP peuvent être envoyées.'

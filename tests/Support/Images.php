@@ -10,6 +10,7 @@ use function imagecolorallocate;
 use function imagecreatetruecolor;
 use function imagefill;
 use function imagegif;
+use function imageinterlace;
 use function imagejpeg;
 use function imagepng;
 use function imagewebp;
@@ -34,9 +35,13 @@ final class Images
      * @param int<1, max> $width
      * @param int<1, max> $height
      */
-    public static function jpeg(int $width = 20, int $height = 10): string
+    public static function jpeg(int $width = 20, int $height = 10, bool $progressive = false): string
     {
-        return self::encode($width, $height, static fn ($image): bool => imagejpeg($image));
+        return self::encode($width, $height, static function ($image) use ($progressive): bool {
+            imageinterlace($image, $progressive);
+
+            return imagejpeg($image);
+        });
     }
 
     /**

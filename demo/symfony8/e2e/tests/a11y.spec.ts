@@ -20,7 +20,8 @@ for (const { path, user } of pages) {
       // The Symfony web debug toolbar (dev only) is not part of the bundle UI.
       .exclude('.sf-toolbar')
       .exclude('.sf-minitoolbar')
-      // Upstream (UiKit 2.23 settings scaffold with the bootstrap5 theme): the section intro under the card header
+      // TODO(UiKit): remove once UiKit fixes the contrast of the settings-card intro (`.nowo-ui-card__intro`, muted text
+      // on the card header with the bootstrap5 theme). Upstream (UiKit 2.23 settings scaffold): the section intro
       // fails color-contrast on every Instance Settings page; tracked for UiKit, not part of this bundle's markup.
       .exclude('.nowo-ui-card__intro')
       .analyze();

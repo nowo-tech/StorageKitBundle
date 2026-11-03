@@ -159,7 +159,7 @@ final class SettingsPageTest extends KernelTestCase
         self::assertSame([StorageProvider::AWS_S3, 'http://minio:9000', true], [$connection['provider'] ?? null, $connection['endpoint'] ?? null, $connection['path_style'] ?? null]);
         $aws = $settings->settings();
         self::assertNotNull($aws);
-        self::assertSame([null, null, false, 'test-secret-not-real'], [$aws->endpoint, $aws->publicEndpoint, $aws->pathStyle, $aws->secret]);
+        self::assertSame([null, null, false, 'test-secret-not-real'], [$aws->endpoint, $aws->publicEndpoint, $aws->pathStyle, $aws->secret()]);
 
         // Back to S3-compatible: the endpoint is required again.
         $this->saveSection($client, ['provider' => StorageProvider::S3_COMPATIBLE, 'endpoint' => '']);
@@ -206,7 +206,7 @@ final class SettingsPageTest extends KernelTestCase
         $this->saveSection($client, ['prefix' => 'other', 'secret' => '']);
         self::assertSame(302, $client->getResponse()->getStatusCode());
         $settings = $this->service($kernel, InstanceStorageSettings::class)->settings();
-        self::assertSame(['other', 'test-secret-not-real'], [$settings?->prefix, $settings?->secret]);
+        self::assertSame(['other', 'test-secret-not-real'], [$settings?->prefix, $settings?->secret()]);
     }
 
     /**

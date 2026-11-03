@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Functional;
 
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\StorageKitBundle\Command\ForgetRetiredProfilesCommand;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Entity\StoredFile;
@@ -19,7 +20,10 @@ use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Upload\ImageUploader;
+use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
@@ -205,6 +209,75 @@ final class MovePageTest extends KernelTestCase
         $html = (string) $client->getResponse()->getContent();
         self::assertStringContainsString('new-files', $html);
         self::assertStringNotContainsString('secret-not-real', $html);
+    }
+
+    public function testASwitchTheSectionRefusesChangesNothing(): void
+    {
+        $kernel   = $this->bootKernel();
+        $settings = $this->service($kernel, InstanceSettingsInterface::class);
+        $settings->save('storage', ['provider' => StorageProvider::S3_COMPATIBLE, 'endpoint' => 'http://minio:9000', 'region' => 'us-east-1', 'bucket' => 'files', 'prefix' => 'app', 'access_key' => 'test-key', 'path_style' => true, 'secret' => 'old-secret-not-real']);
+        $file   = $this->upload($kernel);
+        $client = $this->client($kernel);
+        $this->saveTarget($client);
+        $this->act($client, 'sync', kernel: $kernel);
+        $this->runWorker($kernel);
+        // The allow-list changed since the target was saved (simulated): the section refuses its endpoint now.
+        $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET endpoint = 'http://10.0.0.5:9000' WHERE state = 'target'");
+        $this->entityManager($kernel)->clear();
+
+        self::assertStringContainsString('The Storage settings refused the new bucket', $this->act($client, 'switch', kernel: $kernel));
+        $this->entityManager($kernel)->clear();
+        $repository = $this->service($kernel, StorageProfileRepository::class);
+        self::assertSame($file->getProfile()->getUuid(), $repository->activeOf(null)?->getUuid());
+        self::assertNotNull($repository->targetOf(null));
+        self::assertSame('files', $this->service($kernel, InstanceStorageSettings::class)->settings()?->bucket);
+        self::assertSame($file->getProfile()->getUuid(), $this->entityManager($kernel)->find(StoredFile::class, $file->getId())?->getProfile()->getUuid());
+        self::assertNotContains(StorageAuditEvent::MOVE_SWITCHED, $this->audit($kernel)->actions());
+    }
+
+    public function testRetiredBucketsNoFileUsesAreForgotten(): void
+    {
+        $kernel = $this->bootKernel();
+        $used   = $this->profile($kernel, null, 'old-used', StorageProfile::STATE_RETIRED);
+        $unused = $this->profile($kernel, null, 'old-unused', StorageProfile::STATE_RETIRED);
+        $scoped = $this->profile($kernel, 'acme', 'acme-old', StorageProfile::STATE_RETIRED);
+        $this->profile($kernel);
+        $file = $this->upload($kernel);
+        $this->entityManager($kernel)->getConnection()->executeStatement('UPDATE storage_kit_file SET profile_id = ? WHERE id = ?', [$used->getId(), $file->getId()]);
+        $client = $this->client($kernel);
+
+        $client->request('GET', '/admin/storage/move');
+        self::assertStringContainsString('Forget previous buckets', (string) $client->getResponse()->getContent());
+        self::assertStringContainsString('1 previous bucket(s) and their credentials were forgotten.', $this->act($client, 'forget', kernel: $kernel));
+        self::assertStringContainsString('Every previous bucket still holds files', $this->act($client, 'forget', kernel: $kernel));
+        $repository = $this->service($kernel, StorageProfileRepository::class);
+        self::assertNull($repository->findOneByUuid($unused->getUuid()));
+        self::assertNotNull($repository->findOneByUuid($used->getUuid()));
+        self::assertNotNull($repository->findOneByUuid($scoped->getUuid()), 'other owners are untouched');
+        $events = $this->audit($kernel)->events;
+        $last   = array_key_last($events);
+        self::assertNotNull($last);
+        $event = $events[$last];
+        self::assertSame([StorageAuditEvent::PROFILES_FORGOTTEN, $unused->getUuid(), 'admin'], [$event->action, $event->details['profiles'], $event->actor]);
+
+        // A forged token is refused.
+        $client->request('POST', '/admin/storage/move/forget', ['csrf_only' => ['_token' => 'forged']]);
+        $client->followRedirect();
+        self::assertStringContainsString('This action is not available now.', (string) $client->getResponse()->getContent());
+
+        // Console: dry run, one scope, every owner.
+        $tester = new CommandTester((new Application($kernel))->find(ForgetRetiredProfilesCommand::NAME));
+        self::assertSame(Command::INVALID, $tester->execute(['--scope' => 'acme', '--all' => true]));
+        self::assertSame(Command::INVALID, $tester->execute(['--scope' => 'bad key']));
+        self::assertSame(Command::SUCCESS, $tester->execute(['--scope' => 'acme', '--dry-run' => true]));
+        self::assertStringContainsString('acme-old', $tester->getDisplay());
+        self::assertNotNull($repository->findOneByUuid($scoped->getUuid()));
+        self::assertSame(Command::SUCCESS, $tester->execute(['--all' => true]));
+        self::assertStringContainsString('1 profile(s) forgotten.', $tester->getDisplay());
+        $this->entityManager($kernel)->clear();
+        self::assertNull($repository->findOneByUuid($scoped->getUuid()));
+        self::assertSame(Command::SUCCESS, $tester->execute([]));
+        self::assertStringContainsString('No retired profile to forget.', $tester->getDisplay());
     }
 
     public function testCancelResumeAndDiscard(): void

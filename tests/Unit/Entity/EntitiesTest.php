@@ -72,8 +72,8 @@ final class EntitiesTest extends TestCase
         $file->addVariant('preview', ['key' => '2026/10/u-preview', 'size' => 40, 'width' => 1600, 'height' => 800, 'mime' => 'image/png']);
 
         self::assertSame(140, $file->totalBytes());
-        self::assertSame(['key' => '2026/10/u-preview', 'mime' => 'image/png', 'width' => 1600, 'height' => 800], $file->variant('preview'));
-        self::assertSame(['key' => '2026/10/u', 'mime' => 'image/png', 'width' => 2000, 'height' => 1000], $file->variant('thumb'));
+        self::assertSame(['key' => '2026/10/u-preview', 'mime' => 'image/png', 'width' => 1600, 'height' => 800, 'size' => 40], $file->variant('preview'));
+        self::assertSame(['key' => '2026/10/u', 'mime' => 'image/png', 'width' => 2000, 'height' => 1000, 'size' => 100], $file->variant('thumb'));
         self::assertSame(['2026/10/u', '2026/10/u-preview'], $file->objectKeys());
         self::assertSame('0b6f2a3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b', $file->getUuid());
         self::assertSame(['board', 'b1', '2026/10/u', 'photo.png', 'image/png', 100, 2000, 1000, 'abc'], [$file->getContextType(), $file->getContextId(), $file->getStorageKey(), $file->getOriginalName(), $file->getMimeType(), $file->getSize(), $file->getWidth(), $file->getHeight(), $file->getSha256()]);

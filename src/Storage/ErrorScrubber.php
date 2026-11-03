@@ -55,7 +55,7 @@ final class ErrorScrubber
     {
         $message = $e->getMessage();
         foreach ($settings as $one) {
-            $message = str_replace([$one->secret, $one->accessKey], '***', $message);
+            $message = str_replace([$one->secret(), $one->accessKey], '***', $message);
         }
         $message = (string) preg_replace('/(X-Amz-(?:Signature|Credential|Security-Token)=)[^&\s"]+/i', '$1***', $message);
 

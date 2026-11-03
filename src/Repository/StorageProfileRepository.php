@@ -7,6 +7,7 @@ namespace Nowo\StorageKitBundle\Repository;
 use Doctrine\ORM\QueryBuilder;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
+use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 
 /**
@@ -54,6 +55,28 @@ final readonly class StorageProfileRepository
             ->orderBy('p.id', 'DESC')
             ->setMaxResults(self::RETIRED_LIMIT);
         $this->whereOwner($qb, $scope);
+
+        /** @var list<StorageProfile> $profiles */
+        $profiles = $qb->getQuery()->getResult();
+
+        return $profiles;
+    }
+
+    /**
+     * Retired profiles no stored file points at any more: of one owner, or of every owner with `$all`.
+     *
+     * @return list<StorageProfile>
+     */
+    public function retiredUnreferenced(?string $scope, bool $all = false): array
+    {
+        $qb = $this->query()
+            ->andWhere('p.state = :state')
+            ->andWhere('NOT EXISTS (SELECT 1 FROM ' . StoredFile::class . ' f WHERE f.profile = p)')
+            ->setParameter('state', StorageProfile::STATE_RETIRED)
+            ->orderBy('p.id', 'ASC');
+        if (!$all) {
+            $this->whereOwner($qb, $scope);
+        }
 
         /** @var list<StorageProfile> $profiles */
         $profiles = $qb->getQuery()->getResult();

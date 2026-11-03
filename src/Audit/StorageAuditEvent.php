@@ -32,6 +32,9 @@ final class StorageAuditEvent extends Event
     /** A move sync was cancelled (details: sync). */
     public const MOVE_SYNC_CANCELLED = 'move_sync_cancelled';
 
+    /** Retired profiles no file points at were deleted with their credentials (details: profiles). */
+    public const PROFILES_FORGOTTEN = 'profiles_forgotten';
+
     /** The owner switched to the target bucket (details: from, to, files). */
     public const MOVE_SWITCHED = 'move_switched';
 

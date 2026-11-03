@@ -45,7 +45,7 @@ nowo_storage_kit:
         path_prefix: /storage
         access_roles: [ROLE_USER]
         max_bytes: 10485760      # 10 MiB, 1024 – 50 MiB
-        max_pixels: 40000000     # 1 – 100 000 000
+        max_pixels: 24000000     # 1 – 100 000 000
         variants: { preview: 1600, thumb: 400 }
         rate_limit: 30           # uploads per user and window, 1–1000
         rate_interval: '1 minute'
@@ -153,7 +153,7 @@ Upload and download endpoints: `POST <path_prefix>/upload/{type}/{id}` and `GET 
 | `path_prefix` | `/storage` | Absolute path `^/[A-Za-z0-9_\-/.]*$`; must not be under `web_ui.path_prefix`. |
 | `access_roles` | `[ROLE_USER]` | Roles allowed to upload at all (any of them); never empty. The file context then decides where. |
 | `max_bytes` | `10485760` | Largest upload in bytes (1024 – 52428800). Keep PHP `upload_max_filesize` / `post_max_size` above it. |
-| `max_pixels` | `40000000` | Largest image (width × height), read from the header before decoding (1 – 100 000 000). |
+| `max_pixels` | `24000000` | Largest image (width × height), read from the header before decoding (1 – 100 000 000). A progressive JPEG also needs about 6 bytes per pixel of decoder memory: see [SECURITY](SECURITY.md#size-pixel-and-memory-limits). |
 | `variants` | `{preview: 1600, thumb: 400}` | Longest side per variant (16–8192 px). Names `preview` and `thumb` only; a variant is made only for larger images. |
 | `rate_limit` | `30` | Uploads one user may make per window (1–1000, sliding window over `cache.app`). |
 | `rate_interval` | `'1 minute'` | Relative time (`strtotime('+…')` must give a positive offset). |

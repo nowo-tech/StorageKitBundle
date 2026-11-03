@@ -108,9 +108,11 @@ move:
         cancel: 'Parar a cópia'
         switch: 'Mudar para o bucket novo'
         discard: 'Esquecer o bucket novo'
+        forget: 'Esquecer os buckets anteriores'
     confirm:
         switch: 'Mudar todos os ficheiros para o bucket novo?'
         discard: 'Esquecer o bucket novo? Os objetos já copiados ficam nele.'
+        forget: 'Eliminar os buckets anteriores que nenhum ficheiro usa, com as credenciais guardadas? Os seus objetos não são eliminados.'
     status:
         running: 'A copiar'
     section:
@@ -147,6 +149,9 @@ move:
         new_files: 'Foram enviados ficheiros depois da cópia: copie-os e depois mude.'
         env_managed: 'O bucket da instância é gerido pela configuração: altere-o aí.'
         discarded: 'O bucket novo foi esquecido.'
+        forgotten: '%count% bucket(s) anterior(es) e as suas credenciais foram esquecidos.'
+        nothing_to_forget: 'Todos os buckets anteriores ainda têm ficheiros: nada foi esquecido.'
+        settings_refused: 'As definições de Armazenamento recusaram o bucket novo (verifique o seu endpoint face aos hosts permitidos): nada foi mudado.'
 upload:
     error:
         type: 'Só é possível enviar imagens PNG, JPEG, GIF e WebP.'

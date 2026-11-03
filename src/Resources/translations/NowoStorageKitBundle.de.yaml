@@ -108,9 +108,11 @@ move:
         cancel: 'Kopieren anhalten'
         switch: 'Zum neuen Bucket wechseln'
         discard: 'Neuen Bucket verwerfen'
+        forget: 'Frühere Buckets vergessen'
     confirm:
         switch: 'Alle Dateien zum neuen Bucket wechseln?'
         discard: 'Neuen Bucket verwerfen? Bereits kopierte Objekte bleiben darin.'
+        forget: 'Frühere Buckets, die keine Datei mehr nutzt, samt gespeicherten Zugangsdaten löschen? Ihre Objekte werden nicht gelöscht.'
     status:
         running: 'Wird kopiert'
     section:
@@ -147,6 +149,9 @@ move:
         new_files: 'Seit der Kopie wurden Dateien hochgeladen: Kopieren Sie sie und wechseln Sie dann.'
         env_managed: 'Der Bucket der Instanz wird über die Konfiguration verwaltet: Ändern Sie ihn dort.'
         discarded: 'Der neue Bucket wurde verworfen.'
+        forgotten: '%count% frühere(r) Bucket(s) und ihre Zugangsdaten wurden vergessen.'
+        nothing_to_forget: 'Jeder frühere Bucket enthält noch Dateien: nichts wurde vergessen.'
+        settings_refused: 'Die Speicher-Einstellungen haben den neuen Bucket abgelehnt (Endpunkt gegen die erlaubten Hosts prüfen): nichts wurde umgestellt.'
 upload:
     error:
         type: 'Nur PNG-, JPEG-, GIF- und WebP-Bilder können hochgeladen werden.'

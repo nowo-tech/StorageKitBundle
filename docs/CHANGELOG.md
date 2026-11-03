@@ -76,6 +76,20 @@ Requires PHP `>=8.2 <8.6`, Symfony 7.4 / 8.x, Doctrine ORM 3.3+, `nowo-tech/inst
 - **Secrets**: encrypted at rest (Instance Settings secret, DoctrineEncrypt), write-only fields, never in logs,
   exceptions, audit events, flashes or view models; provider messages scrubbed and kept out of pages (no response
   oracle).
+- **Independent audit (Appendix CJ)**:
+  - **M1** the request timeout, the total limit (4×) and "no redirects" are set on the `NoPrivateNetworkHttpClient`
+    filter itself (it replaced the inner client's options with its defaults: 60 s idle, no total limit, 20 redirects);
+    regression tests against a slow and a redirecting server.
+  - **L1** progressive JPEGs are budgeted 6 more bytes per pixel (libjpeg coefficient buffers); default
+    `upload.max_pixels` is 24 MP.
+  - **L2** proxied downloads are streamed in 64 KiB chunks and cut at the size stored at upload.
+  - **L3** retired profiles no file uses can be forgotten with their credentials: *Forget previous buckets* on the Move
+    page and `nowo:storage-kit:forget-retired [--scope=|--all] [--dry-run]`, audited `profiles_forgotten`.
+  - **I1** bucket, region and prefix patterns anchored with `D`; **I2** `S3Settings` secret private (`secret()`),
+    masked in `json_encode()`, serialization refused; **I3** a *Switch* the `storage` section refuses is a handled
+    error (flash) and changes nothing; **I4** Azure's wire server `168.63.129.16` refused like the other metadata
+    endpoints, also at connect time; **I6** stable upload rate-limit key for non-`UserInterface` users (session, else
+    client IP).
 - **Fail-closed wiring**: no DoctrineEncrypt, no Instance Settings (when the section is needed), no SecurityBundle or no
   CSRF with the pages on, debug-only switches outside debug, non-literal security switches, empty role lists, scopes
   without an access checker — the container does not compile.

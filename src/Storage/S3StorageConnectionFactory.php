@@ -55,7 +55,7 @@ final readonly class S3StorageConnectionFactory implements StorageConnectionFact
             'region'            => $settings->region,
             'endpoint'          => $endpoint,
             'accessKeyId'       => $settings->accessKey,
-            'accessKeySecret'   => $settings->secret,
+            'accessKeySecret'   => $settings->secret(),
             'pathStyleEndpoint' => $settings->usesPathStyle() ? 'true' : 'false',
             // S3-compatible services differ in their support of aws-chunked uploads: send plain bodies.
             'sendChunkedBody' => 'false',

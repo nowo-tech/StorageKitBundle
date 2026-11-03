@@ -171,7 +171,7 @@ final class IssueContext implements FileContextInterface   // autoconfigured
 
 Every key, its default and its validation are documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md), including
 the `storage` section fields per provider. Safe defaults: instance bucket in Instance Settings, private endpoints
-refused, 10 MiB / 40 MP uploads, 30 uploads per user and minute, `attachment` downloads, 7-day orphan retention, pages
+refused, 10 MiB / 24 MP uploads, 30 uploads per user and minute, `attachment` downloads, 7-day orphan retention, pages
 under `/admin/storage` for `ROLE_ADMIN`, uploads for `ROLE_USER`.
 
 ## Usage

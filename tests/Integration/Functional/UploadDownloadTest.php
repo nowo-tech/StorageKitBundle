@@ -16,12 +16,14 @@ use Nowo\StorageKitBundle\Upload\UploadEndpoint;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 use function array_keys;
 use function file_put_contents;
 use function is_array;
 use function json_decode;
 use function str_repeat;
+use function strlen;
 use function sys_get_temp_dir;
 use function tempnam;
 
@@ -86,7 +88,10 @@ final class UploadDownloadTest extends KernelTestCase
         self::assertSame('attachment; filename=evil_x.png', $response->headers->get('Content-Disposition'));
         self::assertStringContainsString('private', (string) $response->headers->get('Cache-Control'));
         self::assertSame('noindex', $response->headers->get('X-Robots-Tag'));
-        self::assertSame('image/png', ImageProcessor::sniff((string) $response->getContent()));
+        $body = $client->getInternalResponse()->getContent();
+        self::assertSame('image/png', ImageProcessor::sniff($body));
+        self::assertInstanceOf(StreamedResponse::class, $response, 'streamed, never loaded whole in memory');
+        self::assertSame((string) strlen($body), $response->headers->get('Content-Length'));
 
         // Who may not read the board gets a 404, like a missing file.
         foreach (['bob' => 200, 'guest' => 404] as $user => $status) {

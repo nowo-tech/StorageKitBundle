@@ -17,6 +17,7 @@ use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\Session\SessionInterface;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Core\User\UserInterface;
@@ -29,7 +30,6 @@ use function hash;
 use function in_array;
 use function pathinfo;
 use function preg_replace;
-use function spl_object_id;
 use function sprintf;
 use function trim;
 
@@ -108,6 +108,24 @@ final class FileUploadController
     }
 
     /**
+     * Rate-limit key of an uploader: the user identifier, or — for a non-Symfony user object, which has no stable
+     * identity across requests — the session id, else the client IP (audit CJ I6). Hashed: no identifier in the
+     * limiter storage.
+     */
+    public static function rateKey(object $user, Request $request): string
+    {
+        if ($user instanceof UserInterface) {
+            return 'u:' . hash('sha256', $user->getUserIdentifier());
+        }
+        $session = $request->hasSession() ? $request->getSession() : null;
+        if ($session instanceof SessionInterface && $session->isStarted() && $session->getId() !== '') {
+            return 's:' . hash('sha256', $session->getId());
+        }
+
+        return 'ip:' . hash('sha256', (string) $request->getClientIp());
+    }
+
+    /**
      * @throws UploadRefused
      */
     private function store(Request $request, string $type, string $id): StoredFile
@@ -120,8 +138,7 @@ final class FileUploadController
         if ($user === null || !$this->guard->canUpload()) {
             throw new UploadRefused(UploadRefused::ACCESS);
         }
-        $key = $user instanceof UserInterface ? 'u:' . hash('sha256', $user->getUserIdentifier()) : 'o:' . spl_object_id($user);
-        if (!$this->limiter->create($key)->consume()->isAccepted()) {
+        if (!$this->limiter->create(self::rateKey($user, $request))->consume()->isAccepted()) {
             throw new UploadRefused(UploadRefused::RATE);
         }
         $file = $request->files->get(UploadEndpoint::FILE_FIELD);

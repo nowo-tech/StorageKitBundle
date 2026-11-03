@@ -10,6 +10,7 @@ use Nowo\OutboundUrlGuardBundle\Network\PrivateNetworkTarget;
 use Nowo\StorageKitBundle\Storage\S3Settings;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\HttpClient\NoPrivateNetworkHttpClient;
+use Symfony\Component\HttpFoundation\IpUtils;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 use function array_map;
@@ -49,13 +50,16 @@ use const PHP_URL_HOST;
 final readonly class EndpointGuard
 {
     /** Ranges closed at connect time even for allow-listed / private endpoints (link-local covers 169.254.169.254). */
-    public const METADATA_SUBNETS = ['169.254.0.0/16', 'fe80::/10', '100.100.100.200/32', 'fd00:ec2::254/128', '::ffff:169.254.0.0/112'];
+    public const METADATA_SUBNETS = ['169.254.0.0/16', 'fe80::/10', '100.100.100.200/32', 'fd00:ec2::254/128', '::ffff:169.254.0.0/112', '168.63.129.16/32', '::ffff:168.63.129.16/128'];
 
     /** Reason: the endpoint is private, local, reserved or cloud metadata. */
     public const NOT_ALLOWED = 'endpoint_not_allowed';
 
     /** Reason: the endpoint host does not resolve. */
     public const UNRESOLVABLE = 'endpoint_unresolvable';
+
+    /** Total duration limit of one storage request, as a multiple of the idle timeout. */
+    public const DURATION_FACTOR = 4;
 
     /** Reason: the endpoint is not a valid http(s) origin. */
     public const INVALID = 'endpoint_invalid';
@@ -108,18 +112,42 @@ final readonly class EndpointGuard
 
     /**
      * The HTTP client the bucket's requests go through: for restricted settings, the connect-time private-network
-     * filter, no redirects; always the request timeout.
+     * filter; always the idle timeout (`request_timeout`), a total limit of {@see self::DURATION_FACTOR} times it and no
+     * redirects.
      */
     public function httpClient(?HttpClientInterface $client, S3Settings $settings): HttpClientInterface
     {
-        $client = ($client ?? HttpClient::create())->withOptions(['timeout' => $this->requestTimeout, 'max_duration' => $this->requestTimeout * 4]);
+        $client  = $client ?? HttpClient::create();
+        $options = ['timeout' => $this->requestTimeout, 'max_duration' => $this->requestTimeout * self::DURATION_FACTOR, 'max_redirects' => 0];
         if (!$settings->restricted) {
-            return $client;
+            return $client->withOptions($options);
         }
         $host    = $settings->endpoint === null ? null : parse_url($settings->endpoint, PHP_URL_HOST);
         $relaxed = $this->allowPrivate || (is_string($host) && $this->isAllowListed($host));
 
-        return new NoPrivateNetworkHttpClient($client->withOptions(['max_redirects' => 0]), $relaxed ? self::METADATA_SUBNETS : null);
+        // The options go on the filter itself: NoPrivateNetworkHttpClient applies its own defaults (no total limit,
+        // default_socket_timeout, 20 redirects it follows itself) over whatever the inner client was given (audit CJ M1).
+        return (new NoPrivateNetworkHttpClient($client, $relaxed ? self::METADATA_SUBNETS : self::blockedSubnets()))->withOptions($options);
+    }
+
+    /**
+     * Ranges refused at connect time for restricted settings: Symfony's private ranges plus the cloud metadata ones
+     * (some are public addresses, such as Azure's 168.63.129.16 wire server).
+     *
+     * @return list<string>
+     */
+    public static function blockedSubnets(): array
+    {
+        return array_values(array_unique([...IpUtils::PRIVATE_SUBNETS, ...self::METADATA_SUBNETS]));
+    }
+
+    /**
+     * Whether an address is a cloud metadata endpoint (AWS / GCP / Azure / Oracle / DigitalOcean 169.254.0.0/16,
+     * Alibaba 100.100.100.200, AWS IPv6 fd00:ec2::254, Azure wire server 168.63.129.16).
+     */
+    public static function isMetadataIp(string $ip): bool
+    {
+        return PrivateNetworkTarget::isCloudMetadataIp($ip) || IpUtils::checkIp($ip, self::METADATA_SUBNETS);
     }
 
     /**
@@ -135,7 +163,7 @@ final readonly class EndpointGuard
         // check() passes a host S3Settings::endpoint() validated: a valid name or IP literal.
         $ascii = rtrim((string) PrivateNetworkTarget::asciiHost(trim($host, '[] ')), '.');
         $ip    = PrivateNetworkTarget::canonicalIp($ascii);
-        if (PrivateNetworkTarget::isCloudMetadataHost($ascii) || ($ip !== null && PrivateNetworkTarget::isCloudMetadataIp($ip))) {
+        if (PrivateNetworkTarget::isCloudMetadataHost($ascii) || ($ip !== null && self::isMetadataIp($ip))) {
             return self::NOT_ALLOWED;
         }
         if ($this->isAllowListed($ascii) || $this->allowPrivate) {
@@ -160,7 +188,7 @@ final readonly class EndpointGuard
         }
         foreach ($addresses as $address) {
             $canonical = PrivateNetworkTarget::canonicalIp($address) ?? $address;
-            if (PrivateNetworkTarget::isBlockedIp($canonical) || PrivateNetworkTarget::isCloudMetadataIp($canonical)) {
+            if (PrivateNetworkTarget::isBlockedIp($canonical) || self::isMetadataIp($canonical)) {
                 return self::NOT_ALLOWED;
             }
         }

@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Tests\Unit\Upload;
 
+use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Upload\ImageProcessor;
 use Nowo\StorageKitBundle\Upload\UploadRefused;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
+use function memory_get_usage;
 use function strlen;
 
 use const PHP_INT_MAX;
@@ -43,6 +45,28 @@ final class ImageProcessorTest extends TestCase
         self::assertFalse(ImageProcessor::fitsInMemory(1_000_000, '4194304', 0));
         self::assertTrue(ImageProcessor::fitsInMemory(PHP_INT_MAX >> 4, '-1', 0));
         self::assertTrue(ImageProcessor::fitsInMemory(1, '', 0));
+        // A progressive JPEG adds 6 bytes per pixel: 24 MP = 192 MB + 144 MB.
+        self::assertTrue(ImageProcessor::fitsInMemory(24_000_000, '300M', 0));
+        self::assertFalse(ImageProcessor::fitsInMemory(24_000_000, '300M', 0, ImageProcessor::PROGRESSIVE_BYTES_PER_PIXEL));
+    }
+
+    public function testProgressiveJpegsAreBudgetedForTheDecoderMemory(): void
+    {
+        $progressive = Images::jpeg(1000, 1000, true);
+        $baseline    = Images::jpeg(1000, 1000);
+        self::assertTrue(ImageProcessor::jpegIsProgressive($progressive));
+        self::assertFalse(ImageProcessor::jpegIsProgressive($baseline));
+        self::assertFalse(ImageProcessor::jpegIsProgressive("\xFF\xD8\xFF\xDA\x00\x01"));
+
+        // Room for the two decoded copies (8 MB) but not for the 6 MB coefficient buffer on top.
+        $limit = (string) (memory_get_usage(true) + 11 * 1024 ** 2);
+        self::assertSame(1000, (new ImageProcessor(memoryLimit: $limit))->process($baseline)->original['width']);
+        try {
+            (new ImageProcessor(memoryLimit: $limit))->process($progressive);
+            self::fail('accepted');
+        } catch (UploadRefused $e) {
+            self::assertSame(UploadRefused::PIXELS, $e->reason);
+        }
     }
 
     public function testAnImageThatWouldNotFitInMemoryIsRefusedBeforeDecoding(): void

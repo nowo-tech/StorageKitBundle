@@ -52,8 +52,10 @@ use const IMG_FLIP_VERTICAL;
  *
  * Memory: GD holds a decoded image as 4 bytes per pixel. Before decoding, the dimensions must fit twice (the image
  * plus a rotated copy or a variant) in what is left of `memory_limit`, or the upload is refused like one above
- * `max_pixels` instead of ending the request in a fatal out-of-memory. Each variant is made from the previous one, so
- * at most two decoded images are alive at once.
+ * `max_pixels` instead of ending the request in a fatal out-of-memory. A progressive JPEG also makes libjpeg keep
+ * every DCT coefficient while it decodes, about {@see self::PROGRESSIVE_BYTES_PER_PIXEL} more bytes per pixel that
+ * `memory_limit` does not even see (a 40 MP progressive 4:4:4 JPEG peaked at 407 MB, audit CJ L1): that is budgeted
+ * too. Each variant is made from the previous one, so at most two decoded images are alive at once.
  */
 final readonly class ImageProcessor
 {
@@ -61,13 +63,16 @@ final readonly class ImageProcessor
     public const MAX_BYTES = 10 * 1024 * 1024;
 
     /** Default `upload.max_pixels`. */
-    public const MAX_PIXELS = 40_000_000;
+    public const MAX_PIXELS = 24_000_000;
 
     /** GD truecolor: 4 bytes per pixel. */
     public const BYTES_PER_PIXEL = 4;
 
     /** Decoded images alive at the peak. */
     public const DECODED_COPIES = 2;
+
+    /** Extra decoder memory per pixel of a progressive JPEG (libjpeg coefficient buffer, outside memory_limit). */
+    public const PROGRESSIVE_BYTES_PER_PIXEL = 6;
 
     /** Default `upload.variants` (name => longest side in pixels), largest first. */
     public const SIZES = [StoredFile::VARIANT_PREVIEW => 1600, StoredFile::VARIANT_THUMB => 400];
@@ -141,7 +146,8 @@ final readonly class ImageProcessor
         if ($mime === 'image/gif' || ($mime === 'image/webp' && str_contains(substr($bytes, 0, 64), 'ANIM'))) {
             return new ProcessedImage(['bytes' => $bytes, 'mime' => $mime, 'width' => $width, 'height' => $height]);
         }
-        if (!self::fitsInMemory($width * $height, $this->memoryLimit ?? ini_get('memory_limit'), memory_get_usage(true))) {
+        $extra = $mime === 'image/jpeg' && self::jpegIsProgressive($bytes) ? self::PROGRESSIVE_BYTES_PER_PIXEL : 0;
+        if (!self::fitsInMemory($width * $height, $this->memoryLimit ?? ini_get('memory_limit'), memory_get_usage(true), $extra)) {
             throw new UploadRefused(UploadRefused::PIXELS);
         }
         $image = @imagecreatefromstring($bytes);
@@ -166,14 +172,37 @@ final readonly class ImageProcessor
     }
 
     /**
-     * Whether `$pixels` decoded {@see self::DECODED_COPIES} times fit in what `$memoryLimit` (an ini value: `512M`,
-     * `-1`…) leaves above `$usage` bytes. No limit (`-1`, `0`, empty) always fits.
+     * Whether `$pixels` decoded {@see self::DECODED_COPIES} times, plus `$extraPerPixel` decoder bytes per pixel (a
+     * progressive JPEG), fit in what `$memoryLimit` (an ini value: `512M`, `-1`…) leaves above `$usage` bytes. No limit
+     * (`-1`, `0`, empty) always fits.
      */
-    public static function fitsInMemory(int $pixels, string $memoryLimit, int $usage): bool
+    public static function fitsInMemory(int $pixels, string $memoryLimit, int $usage, int $extraPerPixel = 0): bool
     {
         $limit = self::iniBytes($memoryLimit);
 
-        return $limit <= 0 || $usage + $pixels * self::BYTES_PER_PIXEL * self::DECODED_COPIES <= $limit;
+        return $limit <= 0 || $usage + $pixels * (self::BYTES_PER_PIXEL * self::DECODED_COPIES + $extraPerPixel) <= $limit;
+    }
+
+    /**
+     * Whether a JPEG is progressive (an SOF2 / SOF6 / SOF10 / SOF14 frame before the scan data).
+     */
+    public static function jpegIsProgressive(string $bytes): bool
+    {
+        $offset = 2;
+        $length = strlen($bytes);
+        while ($offset + 4 <= $length && $bytes[$offset] === "\xFF") {
+            $marker = ord($bytes[$offset + 1]);
+            if (in_array($marker, [0xC2, 0xC6, 0xCA, 0xCE], true)) {
+                return true;
+            }
+            $size = self::number('n', $bytes, $offset + 2);
+            if ($marker === 0xDA || $size < 2) {
+                break;
+            }
+            $offset += 2 + $size;
+        }
+
+        return false;
     }
 
     /**

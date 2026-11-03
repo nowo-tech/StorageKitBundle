@@ -97,13 +97,19 @@ SECURITY.md), DoctrineEncrypt's key management, the bucket provider, or the Mark
 ### Size, pixel and memory limits
 
 - `upload.max_bytes` (default 10 MiB) before and after PHP's own limits.
-- `upload.max_pixels` (default 40 MP) read from the header **before** decoding: no decompression bomb.
+- `upload.max_pixels` (default 24 MP) read from the header **before** decoding: no decompression bomb.
 - Before decoding, the image must fit twice (4 bytes per pixel × 2) in what is left of `memory_limit`, or it is refused
   like an oversized image instead of a fatal out-of-memory; variants are made one from the other (at most two decoded
-  images alive).
+  images alive). A **progressive JPEG** is budgeted 6 more bytes per pixel: libjpeg keeps every DCT coefficient while
+  it decodes one, in memory `memory_limit` does not see (a 40 MP progressive 4:4:4 JPEG peaked at 407 MB RSS in the
+  audit, CJ L1). At the 24 MP default: about 192 MB for a baseline image, about 336 MB for a progressive JPEG.
+- Proxied downloads are **streamed** in 64 KiB chunks (never the whole object in memory) and cut at the size stored at
+  upload: a bucket object that grew is not sent beyond it (CJ L2).
 - Per-user upload rate limit (`upload.rate_limit` per `upload.rate_interval`, sliding window); optional owner quota
   (`UploadLimitInterface`) checked before anything is written.
-- Storage requests: idle timeout `endpoints.request_timeout`, total 4×; DNS lookups `endpoints.dns_timeout`.
+- Storage requests: idle timeout `endpoints.request_timeout`, total 4× (`max_duration`), no redirects followed — set on
+  the private-network filter itself, which would otherwise apply its own defaults (60 s idle, no total limit, 20
+  redirects; CJ M1); DNS lookups `endpoints.dns_timeout`.
 - Purge and moves work in bounded keyset batches; `--check` listings are capped (100 keys, 100 000 objects scanned).
 
 ### Downloads and pre-signed URLs
@@ -159,7 +165,9 @@ section unless `endpoints.guard_instance_profile: false`):
 3. **Connect-time filter**: every request of a guarded bucket goes through Symfony's `NoPrivateNetworkHttpClient`
    (checks the address actually connected to: DNS rebinding) with redirects off. For an allow-listed host or
    `allow_private`, only the metadata ranges stay blocked (`169.254.0.0/16`, `fe80::/10`, `100.100.100.200/32`,
-   `fd00:ec2::254/128`, `::ffff:169.254.0.0/112`).
+   `fd00:ec2::254/128`, `::ffff:169.254.0.0/112`, Azure's wire server `168.63.129.16`); for every other guarded bucket
+   Symfony's private ranges plus these metadata ranges (CJ I4: the Azure address is public, so it is listed explicitly).
+   The filter carries the request timeout, the total limit and "no redirects" (CJ M1).
 4. Guarded buckets with a custom endpoint always use path-style addressing, so the host connected to is exactly the
    checked endpoint host (no `<bucket>.` sub-domain).
 5. The public endpoint is only signed for, never fetched by the server.
@@ -178,7 +186,9 @@ section unless `endpoints.guard_instance_profile: false`):
 - Configuration profiles: environment variables / Symfony secrets; a malformed entry is logged by name only.
 - Credentials come only from the settings — no instance-metadata or environment fallback in the S3 client.
 - Secrets never appear in logs, exceptions, audit events, flashes, view models or `var_dump()` output:
-  `#[SensitiveParameter]`, `S3Settings::__debugInfo()` masks key and secret, the connection fingerprint hashes the
+  `#[SensitiveParameter]`, `S3Settings::__debugInfo()` / `jsonSerialize()` mask key and secret, the secret is a private
+  property read through `secret()` and `S3Settings` refuses to be serialized (CJ I2); bucket, region and prefix patterns
+  are anchored with `D` (no trailing newline, CJ I1); the connection fingerprint hashes the
   secret, `ErrorScrubber` masks the key, the secret and `X-Amz-Signature` / `X-Amz-Credential` / `X-Amz-Security-Token`
   values in logged messages (cut to 500 characters), `StorageSync::error` and probe results hold generic reasons only,
   audit events carry field **names** only.
@@ -253,9 +263,11 @@ extracted with (SEC-STORAGE-SSRF, SEC-STORAGE-CSP-GLOBAL, SEC-FILE-REF-PIN; PERF
 - **GIF / animated WebP metadata (SEC-INFO-GIF-METADATA).** They are stored as uploaded (re-encoding would lose the
   animation): comments, XMP and other extension blocks survive. Privacy only; stripping them is on the
   [ROADMAP](ROADMAP.md).
-- **GD peak memory (PERF-IMAGE-GD-PEAK-MEMORY).** A 40 MP image needs about 160 MB decoded (320 MB at the peak with a
-  variant). The memory check refuses what does not fit, but in worker mode every thread keeps its peak RSS. Lower
-  `upload.max_pixels` (16–24 MP) for small hosts and set FrankenPHP `max_requests`.
+- **GD peak memory (PERF-IMAGE-GD-PEAK-MEMORY, CJ L1).** A 24 MP image (the default cap) needs about 96 MB decoded
+  (about 192 MB at the peak with a variant), plus about 144 MB of libjpeg coefficient buffers for a progressive JPEG —
+  that part is outside `memory_limit`, so the check budgets it but only RSS limits really bound it. A 40 MP
+  progressive 4:4:4 JPEG peaked at 407 MB. In worker mode every thread keeps its peak RSS: lower `upload.max_pixels`
+  (16 MP) for small hosts and set FrankenPHP `max_requests`.
 - **CSP origins of redirect profiles.** Origins of `delivery: redirect` profiles are added to `img-src` for every page
   (ops-chosen buckets only, never page-edited ones). Use `delivery: proxy` if that is too wide.
 - **One request per image (PERF-FILE-DOWNLOAD-REQUEST).** Proxy downloads go through PHP and pre-signed URLs change on
@@ -267,8 +279,15 @@ extracted with (SEC-STORAGE-SSRF, SEC-STORAGE-CSP-GLOBAL, SEC-FILE-REF-PIN; PERF
   they control, and *Switch* re-points every existing file after copying it there. Restrict the `storage` section with
   Instance Settings area roles and watch `profile_saved` / `move_switched` audit events.
 - **Old buckets keep their objects.** A switch never deletes objects from the old bucket, and the retired profile keeps
-  its (encrypted) credentials so stray files still download. Delete the objects and rotate the old keys when you no
-  longer need them.
+  its (encrypted) credentials so stray files still download. Once no file points at a retired profile, *Forget previous
+  buckets* (Move page, CSRF) or `nowo:storage-kit:forget-retired` deletes it with its credentials (audited
+  `profiles_forgotten`, CJ L3). Delete the objects and rotate the old keys yourself.
+- **Switch of the settings-backed instance bucket (CJ I3).** The `storage` section validates the target again on
+  *Switch*; a refusal (for example an allow-list changed since the target was saved) is a handled error and nothing
+  changes. Race: someone saving the `storage` section between the copy and *Switch* is overwritten by the switch (the
+  retired row keeps what was in the section); coordinate moves with the people who manage the section.
+- **Rate-limit key of non-Symfony users (CJ I6).** Uploaders that are not `UserInterface` objects are limited per session
+  (or per client IP without a session), never per object instance.
 - **`download.disposition: inline`** is safe for streamed files (sandbox CSP, `nosniff`), but makes redirect-delivered
   files render on the bucket's origin.
 - **Your hooks are the policy.** A `readable()` that returns too much exposes files; a `writableTarget()` that returns

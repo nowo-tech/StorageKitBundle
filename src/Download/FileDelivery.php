@@ -10,15 +10,22 @@ use Nowo\StorageKitBundle\Profile\ConfigProfiles;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Storage\FileStorage;
 use Nowo\StorageKitBundle\Upload\ImageProcessor;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
+use function fclose;
+use function flush;
+use function fread;
 use function in_array;
 use function max;
+use function min;
 use function pathinfo;
 use function preg_replace;
+use function strlen;
 use function trim;
 
 use const PATHINFO_FILENAME;
@@ -33,6 +40,9 @@ use const PATHINFO_FILENAME;
  */
 final readonly class FileDelivery
 {
+    /** Bytes read from the bucket and sent per step. */
+    public const CHUNK = 65536;
+
     /** CSP of a streamed file. */
     public const SANDBOX_CSP = "default-src 'none'; sandbox";
 
@@ -65,7 +75,16 @@ final readonly class FileDelivery
         if ($this->profiles->deliveryOf($file->getProfile()) === ConfigProfiles::DELIVERY_REDIRECT) {
             $response = new RedirectResponse($connection->presign($object['key'], $object['mime'], $disposition, new DateTimeImmutable('+' . $this->ttl . ' seconds')), Response::HTTP_FOUND);
         } else {
-            $response = new Response($connection->read($object['key']), Response::HTTP_OK, [
+            $stream = $connection->readStream($object['key']);
+            $size   = $object['size'];
+            // @igor-ignore - The closure is the response body callback of this request only.
+            $response = new StreamedResponse(static function () use ($stream, $size): void {
+                self::copy($stream, $size, static function (string $chunk): void {
+                    echo $chunk;
+                    flush();
+                });
+            }, Response::HTTP_OK, [
+                'Content-Length'               => (string) $size,
                 'Content-Type'                 => in_array($object['mime'], ImageProcessor::MIME_TYPES, true) ? $object['mime'] : 'application/octet-stream',
                 'Content-Disposition'          => $disposition,
                 'X-Content-Type-Options'       => 'nosniff',
@@ -79,6 +98,34 @@ final readonly class FileDelivery
         $response->headers->set('Referrer-Policy', 'no-referrer');
 
         return $response;
+    }
+
+    /**
+     * Copies at most `$size` bytes of `$stream` to `$write` in {@see self::CHUNK} chunks (audit CJ L2: never the whole
+     * object in memory); an object longer than the size stored at upload is cut there and logged as an error by the
+     * caller's stream (the response length is the stored size). Returns the bytes written.
+     *
+     * @param resource $stream
+     * @param callable(string): void $write
+     *
+     * @throws RuntimeException when the object is longer than the stored size (the rest is not sent)
+     */
+    public static function copy($stream, int $size, callable $write): int
+    {
+        $sent = 0;
+        try {
+            while ($sent < $size && ($chunk = fread($stream, max(1, min(self::CHUNK, $size - $sent)))) !== false && $chunk !== '') {
+                $sent += strlen($chunk);
+                $write($chunk);
+            }
+            if ($sent >= $size && fread($stream, 1) !== '') {
+                throw new RuntimeException('The stored object is larger than the size recorded at upload; the download was cut.');
+            }
+        } finally {
+            fclose($stream);
+        }
+
+        return $sent;
     }
 
     private function disposition(StoredFile $file, string $mime): string

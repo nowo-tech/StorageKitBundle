@@ -57,4 +57,15 @@ final readonly class StorageEntityManager
     {
         return $this->manager()->getClassMetadata($class)->getTableName();
     }
+
+    /**
+     * Replaces the entity manager when a failed transaction closed it (Doctrine closes it on any exception inside
+     * wrapInTransaction()), so the rest of the request — and the next one in a worker — keeps a usable manager.
+     */
+    public function resetIfClosed(): void
+    {
+        if (!$this->manager()->isOpen()) {
+            $this->registry->resetManager($this->name);
+        }
+    }
 }

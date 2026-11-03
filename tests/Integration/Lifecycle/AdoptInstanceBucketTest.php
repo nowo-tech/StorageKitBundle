@@ -46,7 +46,7 @@ final class AdoptInstanceBucketTest extends KernelTestCase
         self::assertTrue($active->isSettingsBacked());
         self::assertNull($active->getSecret());
         $settings = $this->service($kernel, InstanceStorageSettings::class)->settings();
-        self::assertSame(['files', 'test-secret-not-real', 'http://minio:9000'], [$settings?->bucket, $settings?->secret, $settings?->endpoint]);
+        self::assertSame(['files', 'test-secret-not-real', 'http://minio:9000'], [$settings?->bucket, $settings?->secret(), $settings?->endpoint]);
         self::assertContains(StorageAuditEvent::PROFILE_SAVED, $this->audit($kernel)->actions());
 
         // Idempotent.
