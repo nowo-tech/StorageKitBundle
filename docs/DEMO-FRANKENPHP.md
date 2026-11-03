@@ -164,8 +164,11 @@ make demo-screenshots    # refreshes docs/images/demo/*.webp
 
 Both run in the official Playwright image (`mcr.microsoft.com/playwright`, host network, one worker) and reseed the
 demo first. The specs live in `demo/symfony8/e2e/tests/`: `demo.spec.ts` (public home and admin-only storage pages,
-saving and testing the instance bucket, private and metadata endpoints refused by the SSRF guard, an image uploaded
+the `storage` section showing only the selected provider's fields (`visible-when` peer), the secret never rendered
+back, *Test connection* from the section, private and metadata endpoints refused by the SSRF guard, an image uploaded
 into a note and downloaded through the application, SVG and a forged CSRF token refused by the JSON endpoint, a
-verified copy to the archive bucket and the switch) and `screenshots.spec.ts` (`notes.webp`, `storage-settings.webp`,
-`storage-move.webp`, with the demo masthead, the bundle UI and the web debug toolbar; PNGs are converted with `sharp`
+verified copy to the archive bucket and the switch), `a11y.spec.ts` (axe, WCAG 2.1 A / AA, on the notes, Storage,
+Move and `storage` section pages; the web debug toolbar and the UiKit settings-card intro — an upstream contrast
+issue of the bootstrap5 theme — are excluded) and `screenshots.spec.ts` (`storage-section.webp`, `notes.webp`,
+`storage-settings.webp`, `storage-move.webp`, with the demo masthead, the bundle UI and the web debug toolbar; PNGs are converted with `sharp`
 and deleted).

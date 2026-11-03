@@ -239,8 +239,8 @@ make release-check
 - Tests: PHPUnit (PHP) — unit tests (S3 settings and DSN parsing, SSRF guard, image processing, contexts, references,
   profiles, configuration) plus kernel integration tests (upload / download end to end on an in-memory bucket, the
   `storage` Instance Settings section, Storage and Move pages with SecurityBundle and CSRF, references and purge, sync
-  and switch, opt-in routes, invalid configuration) and the UiKit page contract test; Playwright e2e on the demo
-- PHP: 100% (2938/2938 statements, 3382/3382 elements, 286 tests; gate enforced in CI by `composer test-coverage-100`, no exclusions)
+  and switch, opt-in routes, invalid configuration) and the UiKit page contract test; Playwright e2e and axe (WCAG 2.1 AA) checks on the demo
+- PHP: 100% (2990/2990 statements, 3437/3437 elements, 290 tests; gate enforced in CI by `composer test-coverage-100`, no exclusions)
 - TS/JS: N/A
 - Python: N/A
 
