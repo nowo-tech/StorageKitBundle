@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Ui;
 
 use DateTimeInterface;
+use Nowo\StorageKitBundle\Controller\StorageSettingsController;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Storage\S3Settings;
+use Nowo\UiKitBundle\Form\VisibleWhen;
 use Nowo\UiKitBundle\View\Action;
 use Nowo\UiKitBundle\View\Confirm;
 use Nowo\UiKitBundle\View\Crumb;
@@ -42,7 +44,7 @@ final readonly class AdminPages
      * @param array{files: int, bytes: int} $usage
      * @param list<Action> $actions secondary actions (test, move)
      */
-    public function settingsPage(?string $scope, ?FormView $form, StorageProfile $profile, bool $envManaged, array $usage, array $actions): FormPage
+    public function settingsPage(?string $scope, ?FormView $form, StorageProfile $profile, ?string $managed, array $usage, array $actions): FormPage
     {
         $usable = $profile->getId() !== null && $this->profiles->usable($profile);
         $title  = $scope === null ? StorageKitPages::label('settings.title') : StorageKitPages::label('settings.scope_title', ['%scope%' => $scope]);
@@ -50,7 +52,12 @@ final readonly class AdminPages
         return new FormPage(
             new PageHeader(
                 $title,
-                StorageKitPages::label($envManaged ? 'settings.intro_env' : ($scope === null ? 'settings.intro' : 'settings.intro_scope')),
+                StorageKitPages::label(match (true) {
+                    $managed === StorageSettingsController::MANAGED_CONFIG   => 'settings.intro_env',
+                    $managed === StorageSettingsController::MANAGED_SETTINGS => 'settings.intro_settings',
+                    $scope === null                                          => 'settings.intro',
+                    default                                                  => 'settings.intro_scope',
+                }),
                 [],
                 [new Crumb($title)],
                 status: new PageStatus(StorageKitPages::label($usable ? 'status.on' : 'status.off'), $usable ? 'success' : 'neutral'),
@@ -60,7 +67,7 @@ final readonly class AdminPages
             secondaryActions: $actions,
             bundle: StorageKitPages::BUNDLE,
             layout: $this->pages->layout(),
-            attributes: ['data-testid' => 'storage-kit-settings'],
+            attributes: ['data-testid' => 'storage-kit-settings'] + ($form instanceof FormView ? VisibleWhen::containerAttributes() : []),
         );
     }
 
@@ -104,7 +111,7 @@ final readonly class AdminPages
             secondaryActions: $actions,
             bundle: StorageKitPages::BUNDLE,
             layout: $this->pages->layout(),
-            attributes: ['data-testid' => 'storage-kit-move'],
+            attributes: ['data-testid' => 'storage-kit-move'] + ($form instanceof FormView ? VisibleWhen::containerAttributes() : []),
             secondaryActionsInHeader: false,
         );
     }

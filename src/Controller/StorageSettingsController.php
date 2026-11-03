@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Controller;
 
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
+use Nowo\InstanceSettingsBundle\Routing\InstanceSettingsRoutes;
 use Nowo\StorageKitBundle\Audit\AuditRecorder;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
@@ -16,6 +17,7 @@ use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Nowo\StorageKitBundle\Repository\StoredFileRepository;
 use Nowo\StorageKitBundle\Scope\StorageScope;
 use Nowo\StorageKitBundle\Security\AccessGuard;
+use Nowo\StorageKitBundle\Settings\StorageSettingsSection;
 use Nowo\StorageKitBundle\Ui\AdminPages;
 use Nowo\StorageKitBundle\Ui\ProfileTester;
 use Nowo\StorageKitBundle\Ui\StorageKitPages;
@@ -28,6 +30,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Routing\Exception\RouteNotFoundException;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 use function array_filter;
@@ -59,8 +62,20 @@ final class StorageSettingsController extends AbstractController
     /** Scope *Test connection*. */
     public const ROUTE_SCOPE_TEST = 'nowo_storage_kit_scope_settings_test';
 
+    /** Instance Settings section page route (`nowo_instance_settings_section`). */
+    public const SETTINGS_SECTION_ROUTE = InstanceSettingsRoutes::SECTION;
+
     /** Fields compared to name the changed ones in the audit event. */
-    private const FIELDS = ['enabled', 'endpoint', 'public_endpoint', 'region', 'bucket', 'prefix', 'access_key', 'path_style'];
+    /** `from` query value of the instance test posted from the Instance Settings section (redirects back there). */
+    public const FROM_SETTINGS = 'settings';
+
+    /** Instance page notice: the bucket comes from the configuration. */
+    public const MANAGED_CONFIG = 'config';
+
+    /** Instance page notice: the bucket is edited in the `storage` Instance Settings section. */
+    public const MANAGED_SETTINGS = 'settings';
+
+    private const FIELDS = ['provider', 'enabled', 'endpoint', 'public_endpoint', 'region', 'bucket', 'prefix', 'access_key', 'path_style'];
 
     /**
      * Dependencies and configuration.
@@ -127,10 +142,14 @@ final class StorageSettingsController extends AbstractController
 
     private function edit(Request $request, ?string $scope): Response
     {
-        $envManaged = $this->resolver->isEnvManaged($scope);
-        $profile    = $envManaged ? $this->resolver->activeOf(null) : $this->profiles->activeOf($scope);
+        $managed = match (true) {
+            $this->resolver->isEnvManaged($scope)                => self::MANAGED_CONFIG,
+            $scope === null && $this->resolver->settingsBacked() => self::MANAGED_SETTINGS,
+            default                                              => null,
+        };
+        $profile = $managed !== null ? $this->resolver->activeOf(null) : $this->profiles->activeOf($scope);
         $profile ??= new StorageProfile($scope);
-        $form = $envManaged ? null : $this->form($profile, $scope);
+        $form = $managed !== null ? null : $this->form($profile, $scope);
         if ($form instanceof FormInterface) {
             $form->handleRequest($request);
             if ($form->isSubmitted() && $form->isValid()) {
@@ -147,14 +166,22 @@ final class StorageSettingsController extends AbstractController
             $testUrl                  = $this->generateUrl($testRoute, $testParams);
             $actions[]                = AdminPages::postAction('settings.action.test', $testUrl, $this->csrfForms->createNamed($testUrl, self::testTokenId($scope))->createView(), 'storage-kit-test');
         }
+        if ($managed === self::MANAGED_SETTINGS) {
+            try {
+                $actions[] = new Action('custom', StorageKitPages::label('settings.action.edit'), href: $this->generateUrl(self::SETTINGS_SECTION_ROUTE, ['section' => StorageSettingsSection::NAME]), variant: 'primary', attributes: ['data-testid' => 'storage-kit-edit-link']);
+            } catch (RouteNotFoundException) {
+                // The host did not import the Instance Settings routes: the section is edited elsewhere.
+            }
+        }
         [$moveRoute, $moveParams] = StorageMoveController::route($scope);
         $actions[]                = new Action('custom', StorageKitPages::label('settings.action.move'), href: $this->generateUrl($moveRoute, $moveParams), variant: 'secondary', attributes: ['data-testid' => 'storage-kit-move-link']);
 
         $response = $this->render($this->pages->template('settings'), [
-            'page'        => $this->adminPages->settingsPage($scope, $form?->createView(), $profile, $envManaged, $usage, $actions),
-            'aside'       => $this->adminPages->settingsAside($profile, $envManaged, $usage),
+            'page'        => $this->adminPages->settingsPage($scope, $form?->createView(), $profile, $managed, $usage, $actions),
+            'aside'       => $this->adminPages->settingsAside($profile, $managed === self::MANAGED_CONFIG, $usage),
             'scope'       => $scope,
-            'env_managed' => $envManaged,
+            'managed'     => $managed,
+            'env_managed' => $managed === self::MANAGED_CONFIG,
         ], new Response(status: $form?->isSubmitted() === true ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK));
 
         return $this->noStore($response);
@@ -165,10 +192,11 @@ final class StorageSettingsController extends AbstractController
      */
     private function save(FormInterface $form, StorageProfile $profile, ?string $scope): void
     {
-        /** @var array{enabled: bool|null, endpoint: string|null, public_endpoint: string|null, region: string|null, bucket: string|null, prefix: string|null, access_key: string|null, secret: string|null, path_style: bool|null} $data */
+        /** @var array{provider: string|null, enabled: bool|null, endpoint: string|null, public_endpoint: string|null, region: string|null, bucket: string|null, prefix: string|null, access_key: string|null, secret: string|null, path_style: bool|null} $data */
         $data   = $form->getData();
         $before = $this->snapshot($profile);
         $profile->configure(
+            (string) $data['provider'],
             $data['enabled'] === true,
             $data['endpoint'],
             $data['public_endpoint'],
@@ -194,16 +222,20 @@ final class StorageSettingsController extends AbstractController
     {
         $form = $this->csrfForms->createNamed('', self::testTokenId($scope));
         $form->handleRequest($request);
-        $profile = $this->resolver->isEnvManaged($scope) ? $this->resolver->activeOf(null) : $this->profiles->activeOf($scope);
+        $profile = $scope === null ? $this->resolver->activeOf(null) : $this->profiles->activeOf($scope);
+        // Only the literal value: the redirect target is a fixed route, never taken from the request (no open redirect).
+        $back = $scope === null && $this->resolver->settingsBacked() && $request->query->get('from') === self::FROM_SETTINGS
+            ? [self::SETTINGS_SECTION_ROUTE, ['section' => StorageSettingsSection::NAME]]
+            : self::route($scope);
         if (!$profile instanceof StorageProfile || !$form->isSubmitted() || !$form->isValid()) {
-            $this->addFlash('error', $this->trans('test.flash.unavailable'));
+            $this->addFlash('error', $this->trans($scope === null && $this->resolver->settingsBacked() ? 'test.flash.unavailable_settings' : 'test.flash.unavailable'));
 
-            return $this->redirectToRoute(...self::route($scope));
+            return $this->redirectToRoute(...$back);
         }
         [$type, $message] = $this->tester->test($profile, $this->guard->user());
         $this->addFlash($type, $message);
 
-        return $this->redirectToRoute(...self::route($scope));
+        return $this->redirectToRoute(...$back);
     }
 
     /**
@@ -238,6 +270,7 @@ final class StorageSettingsController extends AbstractController
     private function form(StorageProfile $profile, ?string $scope): FormInterface
     {
         return $this->formFactory->createNamed('storage_profile', StorageProfileType::class, [
+            'provider'        => $profile->getProvider(),
             'enabled'         => $profile->isEnabled(),
             'endpoint'        => $profile->getEndpoint(),
             'public_endpoint' => $profile->getPublicEndpoint(),
@@ -268,6 +301,7 @@ final class StorageSettingsController extends AbstractController
     private function snapshot(StorageProfile $profile): array
     {
         return [
+            'provider'        => $profile->getProvider(),
             'enabled'         => $profile->isEnabled(),
             'endpoint'        => $profile->getEndpoint(),
             'public_endpoint' => $profile->getPublicEndpoint(),

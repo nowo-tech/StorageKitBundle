@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle;
 
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\CsrfProtectionPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\DebugOnlySwitchesPass;
+use Nowo\StorageKitBundle\DependencyInjection\Compiler\InstanceSettingsPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\MessengerIntegrationPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\TwigPathsPass;
 use Nowo\StorageKitBundle\DependencyInjection\NowoStorageKitExtension;
@@ -41,6 +42,7 @@ final class NowoStorageKitBundle extends Bundle
         $container->addCompilerPass(new MessengerIntegrationPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION, 10);
         $container->addCompilerPass(new CsrfProtectionPass());
         $container->addCompilerPass(new DebugOnlySwitchesPass());
+        $container->addCompilerPass(new InstanceSettingsPass());
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Tests\Integration\Contract;
 
+use Nowo\StorageKitBundle\Controller\StorageSettingsController;
 use Nowo\StorageKitBundle\Tests\Support\PageFixtures;
 use Nowo\UiKitBundle\Test\PageContractTestCase;
 use Nowo\UiKitBundle\Test\PageFixture;
@@ -21,7 +22,8 @@ final class PageContractTest extends PageContractTestCase
     {
         yield 'storage (instance)' => new PageFixture('@NowoStorageKitBundle/settings/edit.html.twig', PageFixtures::settings());
         yield 'storage (scope)' => new PageFixture('@NowoStorageKitBundle/settings/edit.html.twig', PageFixtures::settings('acme'));
-        yield 'storage (configuration-managed)' => new PageFixture('@NowoStorageKitBundle/settings/edit.html.twig', PageFixtures::settings(null, true));
+        yield 'storage (configuration-managed)' => new PageFixture('@NowoStorageKitBundle/settings/edit.html.twig', PageFixtures::settings(null, StorageSettingsController::MANAGED_CONFIG));
+        yield 'storage (instance settings)' => new PageFixture('@NowoStorageKitBundle/settings/edit.html.twig', PageFixtures::settings(null, StorageSettingsController::MANAGED_SETTINGS));
         yield 'move (idle)' => new PageFixture('@NowoStorageKitBundle/move/edit.html.twig', PageFixtures::move());
         yield 'move (running)' => new PageFixture('@NowoStorageKitBundle/move/edit.html.twig', PageFixtures::move(true));
     }

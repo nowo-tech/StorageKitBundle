@@ -143,10 +143,10 @@ final class StorageMoveController extends AbstractController
         $form    = $this->form($target, $scope, $running);
         $form->handleRequest($request);
         if (!$running && $form->isSubmitted() && $form->isValid()) {
-            /** @var array{endpoint: string|null, public_endpoint: string|null, region: string|null, bucket: string|null, prefix: string|null, access_key: string|null, secret: string|null, path_style: bool|null} $data */
+            /** @var array{provider: string|null, endpoint: string|null, public_endpoint: string|null, region: string|null, bucket: string|null, prefix: string|null, access_key: string|null, secret: string|null, path_style: bool|null} $data */
             $data   = $form->getData();
             $before = $this->snapshot($target);
-            $target->configure(false, $data['endpoint'], $data['public_endpoint'], (string) $data['region'], (string) $data['bucket'], (string) $data['prefix'], (string) $data['access_key'], $data['secret'], $data['path_style'] === true);
+            $target->configure((string) $data['provider'], false, $data['endpoint'], $data['public_endpoint'], (string) $data['region'], (string) $data['bucket'], (string) $data['prefix'], (string) $data['access_key'], $data['secret'], $data['path_style'] === true);
             if ($target->isComplete()) {
                 $fields = StorageSettingsController::changed($before, $this->snapshot($target));
                 if ($data['secret'] !== null && $data['secret'] !== '') {
@@ -291,6 +291,7 @@ final class StorageMoveController extends AbstractController
     private function form(StorageProfile $target, ?string $scope, bool $running): FormInterface
     {
         return $this->formFactory->createNamed('storage_target', StorageProfileType::class, [
+            'provider'        => $target->getProvider(),
             'endpoint'        => $target->getEndpoint(),
             'public_endpoint' => $target->getPublicEndpoint(),
             'region'          => $target->getRegion(),
@@ -313,6 +314,7 @@ final class StorageMoveController extends AbstractController
     private function snapshot(StorageProfile $profile): array
     {
         return [
+            'provider'        => $profile->getProvider(),
             'endpoint'        => $profile->getEndpoint(),
             'public_endpoint' => $profile->getPublicEndpoint(),
             'region'          => $profile->getRegion(),

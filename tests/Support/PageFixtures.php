@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Tests\Support;
 
 use Nowo\FormKitBundle\Form\Constraint\ConstraintDefinitionFactory;
 use Nowo\FormKitBundle\Form\FormOptionsMerger;
+use Nowo\StorageKitBundle\Controller\StorageSettingsController;
 use Nowo\StorageKitBundle\DependencyInjection\NowoStorageKitExtension;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
@@ -17,6 +18,7 @@ use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Nowo\StorageKitBundle\Scope\TargetScopeResolver;
 use Nowo\StorageKitBundle\Security\EndpointGuard;
+use Nowo\StorageKitBundle\Storage\StorageProvider;
 use Nowo\StorageKitBundle\Ui\AdminPages;
 use Nowo\StorageKitBundle\Ui\StorageKitPages;
 use Symfony\Component\Form\Extension\Core\Type\FormType;
@@ -66,7 +68,7 @@ final class PageFixtures
     public static function profile(?string $scope = null, bool $tested = true, ?string $state = null): StorageProfile
     {
         $profile = new StorageProfile($scope, $state ?? StorageProfile::STATE_ACTIVE);
-        $profile->configure(true, 'https://s3.example.com', null, 'eu-west-1', 'files', 'app', 'test-key', 'test-secret-not-real', true);
+        $profile->configure(StorageProvider::S3_COMPATIBLE, true, 'https://s3.example.com', null, 'eu-west-1', 'files', 'app', 'test-key', 'test-secret-not-real', true);
         if ($tested) {
             $profile->recordTest(true, false);
         }
@@ -87,19 +89,32 @@ final class PageFixtures
     /**
      * @return array<string, mixed>
      */
-    public static function settings(?string $scope = null, bool $envManaged = false): array
+    public static function settings(?string $scope = null, ?string $managed = null): array
     {
         $pages   = self::pages();
-        $profile = $envManaged ? new StorageProfile(null, StorageProfile::STATE_ACTIVE, 'main') : self::profile($scope);
-        $usage   = ['files' => 3, 'bytes' => 4096];
-        $test    = AdminPages::postAction('settings.action.test', '/admin/storage/test', self::factory()->createNamed('csrf_only', FormType::class)->createView(), 'storage-kit-test');
+        $profile = match ($managed) {
+            StorageSettingsController::MANAGED_CONFIG   => new StorageProfile(null, StorageProfile::STATE_ACTIVE, 'main'),
+            StorageSettingsController::MANAGED_SETTINGS => self::settingsBacked(),
+            default                                     => self::profile($scope),
+        };
+        $usage = ['files' => 3, 'bytes' => 4096];
+        $test  = AdminPages::postAction('settings.action.test', '/admin/storage/test', self::factory()->createNamed('csrf_only', FormType::class)->createView(), 'storage-kit-test');
 
         return [
-            'page'        => $pages->settingsPage($scope, $envManaged ? null : self::form('storage_profile', true), $profile, $envManaged, $usage, [$test]),
-            'aside'       => $pages->settingsAside($profile, $envManaged, $usage),
+            'page'        => $pages->settingsPage($scope, $managed !== null ? null : self::form('storage_profile', true), $profile, $managed, $usage, [$test]),
+            'aside'       => $pages->settingsAside($profile, $managed === StorageSettingsController::MANAGED_CONFIG, $usage),
             'scope'       => $scope,
-            'env_managed' => $envManaged,
+            'managed'     => $managed,
+            'env_managed' => $managed === StorageSettingsController::MANAGED_CONFIG,
         ];
+    }
+
+    private static function settingsBacked(): StorageProfile
+    {
+        $profile = new StorageProfile();
+        $profile->useInstanceSettings();
+
+        return $profile;
     }
 
     /**

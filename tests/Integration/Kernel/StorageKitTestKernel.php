@@ -8,6 +8,7 @@ use Closure;
 use Doctrine\Bundle\DoctrineBundle\DoctrineBundle;
 use Nowo\DoctrineEncryptBundle\NowoDoctrineEncryptBundle;
 use Nowo\FormKitBundle\NowoFormKitBundle;
+use Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle;
 use Nowo\StorageKitBundle\Message\RunStorageSyncMessage;
 use Nowo\StorageKitBundle\NowoStorageKitBundle;
 use Nowo\UiKitBundle\NowoUiKitBundle;
@@ -31,7 +32,7 @@ use function sys_get_temp_dir;
 /**
  * Kernel of the integration tests: Framework (optional Messenger on an in-memory transport, in-memory lock), Security
  * (http_basic, in-memory users), Twig + Twig Extra, Doctrine on in-memory SQLite (or STORAGE_KIT_TEST_DATABASE_URL),
- * DoctrineEncrypt (Halite key in the cache dir), FormKit, UiKit and the bundle. Configuration and routes per test.
+ * DoctrineEncrypt (Halite key in the cache dir), FormKit, UiKit, Instance Settings and the bundle. Configuration and routes per test.
  */
 final class StorageKitTestKernel extends Kernel
 {
@@ -40,7 +41,8 @@ final class StorageKitTestKernel extends Kernel
     /**
      * @param Closure(ContainerConfigurator): void $services extension configs and services
      * @param Closure(RoutingConfigurator): void $routes routes
-     * @param list<string> $without bundles / features to leave out (security, messenger, csrf, encrypt)
+     * @param list<string> $without bundles / features to leave out (security, messenger, csrf, encrypt, settings —
+     *                              Instance Settings also needs encrypt)
      */
     public function __construct(
         private readonly string $id,
@@ -66,6 +68,9 @@ final class StorageKitTestKernel extends Kernel
         }
         yield new NowoFormKitBundle();
         yield new NowoUiKitBundle();
+        if (!in_array('encrypt', $this->without, true) && !in_array('settings', $this->without, true)) {
+            yield new NowoInstanceSettingsBundle();
+        }
         yield new NowoStorageKitBundle();
     }
 

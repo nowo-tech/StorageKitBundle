@@ -11,6 +11,7 @@ settings:
         save: 'Enregistrer'
         test: 'Tester la connexion'
         move: 'Déplacer vers un autre bucket'
+        edit: 'Modifier la connexion'
     flash:
         saved: 'Les paramètres de stockage ont été enregistrés.'
     section:
@@ -18,6 +19,8 @@ settings:
     field:
         config_profile: 'Profil'
         delivery: 'Téléchargements'
+    intro_settings: 'Le bucket de l’instance se configure dans Paramètres → Stockage. Cette page montre son utilisation et son dernier test de connexion, et déplace ses fichiers vers un autre bucket.'
+    settings_managed: 'La connexion de ce bucket se modifie dans la section Stockage des paramètres (identifiants chiffrés au repos).'
 status:
     on: 'Envois activés'
     off: 'Envois désactivés'
@@ -41,6 +44,7 @@ test:
         failed: 'Le test a échoué à l''étape %step% : %error%'
         public: 'La connexion fonctionne, mais tout le monde peut lire ce bucket. Rendez-le privé avant d''y stocker des fichiers.'
         ok: 'La connexion fonctionne : un objet a été écrit, lu, signé et supprimé.'
+        unavailable_settings: 'Choisissez un fournisseur et enregistrez les paramètres de Stockage avant de les tester.'
 probe:
     step:
         endpoint: 'endpoint'
@@ -65,20 +69,22 @@ profile:
         access_key: 'Clé d''accès'
         secret: 'Clé secrète'
         path_style: 'Adressage par chemin (path-style)'
+        provider: 'Fournisseur'
     help:
-        enabled: 'Nécessite un bucket, une clé d''accès et une clé secrète.'
-        endpoint: 'Laissez vide pour AWS S3. Autres services : https://hôte[:port] (sans chemin).'
-        endpoint_restricted: 'Laissez vide pour AWS S3. Autres services : https://hôte[:port]. Les adresses privées, locales et de métadonnées cloud sont refusées.'
+        enabled: 'Nécessite un bucket, une clé d’accès, une clé secrète et, pour un service compatible S3, un endpoint.'
+        endpoint: 'https://hôte[:port] du service (sans chemin).'
+        endpoint_restricted: 'https://hôte[:port] du service. Les adresses privées, locales et de métadonnées cloud sont refusées.'
         public_endpoint: 'Uniquement si les navigateurs atteignent le bucket à une autre adresse que le serveur. Sinon, laissez vide.'
         prefix: 'Dossier facultatif dans le bucket, par exemple uploads/app.'
         secret: 'Stockée chiffrée. Elle n''est plus jamais affichée.'
         secret_kept: 'Une clé secrète est enregistrée. Laissez vide pour la conserver.'
         path_style: 'Requis par la plupart des services auto-hébergés (MinIO, RustFS).'
+        provider: 'Seuls les champs du fournisseur choisi sont affichés et enregistrés.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
     error:
-        incomplete: 'Renseignez d''abord le bucket, la clé d''accès et la clé secrète.'
+        incomplete: 'Renseignez d’abord le bucket, la clé d’accès, la clé secrète et (service compatible S3) l’endpoint.'
         region: 'Utilisez des minuscules, des chiffres et des tirets, par exemple eu-west-1.'
         bucket: 'Utilisez 3 à 63 minuscules, chiffres, points et tirets.'
         prefix: 'Utilisez uniquement des lettres, des chiffres, des barres obliques et !_.*''()-, sans dossier "." ni "..".'
@@ -87,6 +93,7 @@ profile:
         endpoint_invalid: 'Utilisez une adresse http(s) comme https://s3.example.com, sans chemin, requête ni identifiants.'
         endpoint_not_allowed: 'Cette adresse n''est pas autorisée : les hôtes privés, locaux et de métadonnées cloud sont refusés.'
         endpoint_unresolvable: 'Ce nom d''hôte ne se résout pas.'
+        provider: 'Choisissez un fournisseur.'
 move:
     title: 'Déplacer vers un autre bucket'
     intro: 'Copiez tous les fichiers vers un nouveau bucket, vérifiez chaque copie, puis basculez. Les envois continuent vers le bucket actuel jusqu''à la bascule.'
@@ -153,3 +160,18 @@ upload:
         csrf: 'La page a expiré. Rechargez-la et réessayez.'
         rate: 'Trop d''envois. Patientez un instant et réessayez.'
         access: 'Vous n''êtes pas autorisé à envoyer des fichiers.'
+provider:
+    aws_s3: 'Amazon S3'
+    s3_compatible: 'Service compatible S3 (R2, B2, Wasabi, RustFS…)'
+section:
+    label: 'Stockage'
+    intro: 'Le bucket S3 où sont stockés les fichiers envoyés. Les fichiers restent privés : ils sont téléchargés via l’application, qui vérifie qui peut les lire. Sans fournisseur, les envois sont désactivés.'
+    help:
+        provider: 'Laissez vide pour désactiver les envois. Seuls les champs du fournisseur choisi sont affichés et enregistrés ; les autres gardent leurs valeurs.'
+        secret: 'Stockée chiffrée et jamais réaffichée. Laissez vide pour conserver celle enregistrée.'
+    action:
+        overview: 'Utilisation et déplacement'
+    notice:
+        off: 'Aucun fournisseur n’est choisi : les envois d’images sont désactivés.'
+        incomplete: 'Il manque un champ au fournisseur choisi (bucket, clé d’accès, clé secrète ou endpoint), ou un champ n’est pas valide : les envois restent désactivés.'
+        test_failed: 'Le dernier test de connexion a échoué. Vérifiez les champs et relancez Tester la connexion.'

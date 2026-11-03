@@ -11,6 +11,7 @@ settings:
         save: 'Save'
         test: 'Test connection'
         move: 'Move to another bucket'
+        edit: 'Edit connection'
     flash:
         saved: 'The storage settings were saved.'
     section:
@@ -18,6 +19,8 @@ settings:
     field:
         config_profile: 'Profile'
         delivery: 'Downloads'
+    intro_settings: 'The instance bucket is set in Settings → Storage. This page shows its usage and its last connection test, and moves its files to another bucket.'
+    settings_managed: 'The connection of this bucket is edited in the Storage settings section (credentials encrypted at rest).'
 status:
     on: 'Uploads on'
     off: 'Uploads off'
@@ -41,6 +44,7 @@ test:
         failed: 'The test failed at the %step% step: %error%'
         public: 'The connection works, but anyone can read this bucket. Make it private before storing files.'
         ok: 'The connection works: an object was written, read, signed and deleted.'
+        unavailable_settings: 'Choose a provider and save the Storage settings before testing them.'
 probe:
     step:
         endpoint: 'endpoint'
@@ -65,20 +69,22 @@ profile:
         access_key: 'Access key'
         secret: 'Secret key'
         path_style: 'Path-style addressing'
+        provider: 'Provider'
     help:
-        enabled: 'Needs a bucket, an access key and a secret key.'
-        endpoint: 'Leave empty for AWS S3. Other services: https://host[:port] (no path).'
-        endpoint_restricted: 'Leave empty for AWS S3. Other services: https://host[:port]. Private, local and cloud-metadata addresses are refused.'
+        enabled: 'Needs a bucket, an access key, a secret key and, for an S3-compatible service, an endpoint.'
+        endpoint: 'https://host[:port] of the service (no path).'
+        endpoint_restricted: 'https://host[:port] of the service. Private, local and cloud-metadata addresses are refused.'
         public_endpoint: 'Only when browsers reach the bucket at another address than the server. Leave empty otherwise.'
         prefix: 'Optional folder inside the bucket, for example uploads/app.'
         secret: 'Stored encrypted. It is never shown again.'
         secret_kept: 'A secret key is saved. Leave empty to keep it.'
         path_style: 'Needed by most self-hosted services (MinIO, RustFS).'
+        provider: 'Only the fields of the selected provider are shown and saved.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
     error:
-        incomplete: 'Set the bucket, the access key and the secret key first.'
+        incomplete: 'Set the bucket, the access key, the secret key and (S3-compatible service) the endpoint first.'
         region: 'Use lowercase letters, digits and dashes, for example eu-west-1.'
         bucket: 'Use 3 to 63 lowercase letters, digits, dots and dashes.'
         prefix: 'Use letters, digits, slashes and !_.*''()- only, without "." or ".." folders.'
@@ -87,6 +93,7 @@ profile:
         endpoint_invalid: 'Use an http(s) address such as https://s3.example.com, without path, query or credentials.'
         endpoint_not_allowed: 'This address is not allowed: private, local and cloud-metadata hosts are refused.'
         endpoint_unresolvable: 'This host name does not resolve.'
+        provider: 'Choose a provider.'
 move:
     title: 'Move to another bucket'
     intro: 'Copy every file to a new bucket, check each copy, then switch. Uploads keep going to the current bucket until you switch.'
@@ -153,3 +160,18 @@ upload:
         csrf: 'The page expired. Reload it and try again.'
         rate: 'Too many uploads. Wait a moment and try again.'
         access: 'You are not allowed to upload files.'
+provider:
+    aws_s3: 'Amazon S3'
+    s3_compatible: 'S3-compatible service (R2, B2, Wasabi, RustFS…)'
+section:
+    label: 'Storage'
+    intro: 'The S3 bucket uploaded files are stored in. Files stay private: they are downloaded through the application, which checks who may read them. Without a provider, uploads are off.'
+    help:
+        provider: 'Leave empty to turn uploads off. Only the fields of the selected provider are shown and saved; the others keep their values.'
+        secret: 'Stored encrypted and never shown again. Leave empty to keep the saved one.'
+    action:
+        overview: 'Usage and move'
+    notice:
+        off: 'No provider is selected: image uploads are off.'
+        incomplete: 'The selected provider is missing a field (bucket, access key, secret key or endpoint), or a field is not valid: uploads stay off.'
+        test_failed: 'The last connection test failed. Check the fields and run Test connection again.'

@@ -10,6 +10,7 @@ use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
+use Nowo\StorageKitBundle\Storage\StorageProvider;
 use PHPUnit\Framework\TestCase;
 
 use function str_repeat;
@@ -23,8 +24,8 @@ final class EntitiesTest extends TestCase
         self::assertSame(StorageProfile::SOURCE_DATABASE, $profile->getSource());
         self::assertFalse($profile->isEnabled());
 
-        $profile->configure(true, ' https://s3.example.com ', '', '', ' files ', '/app/', ' key ', 'test-secret-not-real', true);
-        $profile->configure(true, 'https://s3.example.com', null, 'eu-west-1', 'files', 'app', 'key', '  ', true);
+        $profile->configure(StorageProvider::S3_COMPATIBLE, true, ' https://s3.example.com ', '', '', ' files ', '/app/', ' key ', 'test-secret-not-real', true);
+        $profile->configure(StorageProvider::S3_COMPATIBLE, true, 'https://s3.example.com', null, 'eu-west-1', 'files', 'app', 'key', '  ', true);
 
         self::assertTrue($profile->isComplete());
         self::assertTrue($profile->hasSecret());
@@ -122,5 +123,36 @@ final class EntitiesTest extends TestCase
         self::assertNull($empty->getId());
         self::assertMatchesRegularExpression('/^[0-9a-f-]{36}$/', $empty->getUuid());
         self::assertLessThanOrEqual($empty->getUpdatedAt(), $empty->getCreatedAt());
+    }
+
+    public function testAnUnknownProviderIsRefused(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        (new StorageProfile())->configure('ftp', true, null, null, 'us-east-1', 'files', '', 'key', 'secret', false);
+    }
+
+    public function testASettingsBackedRowHoldsNoConnectionUntilItKeepsOne(): void
+    {
+        $profile = new StorageProfile();
+        $profile->configure(StorageProvider::S3_COMPATIBLE, true, 'https://s3.example.com', null, 'eu-west-1', 'files', 'app', 'key', 'test-secret-not-real', true);
+        $profile->recordTest(false, false);
+        $profile->useInstanceSettings();
+        self::assertSame([StorageProfile::SOURCE_SETTINGS, true, true, '', null], [$profile->getSource(), $profile->isSettingsBacked(), $profile->isComplete(), $profile->getBucket(), $profile->getSecret()]);
+        $profile->forgetTest();
+        self::assertSame([null, null, false], [$profile->getTestedAt(), $profile->getTestOk(), $profile->isTestPublicRead()]);
+
+        $profile->keepConnection(['provider' => StorageProvider::AWS_S3, 'endpoint' => 'https://ignored.example.com', 'public_endpoint' => null, 'region' => 'eu-west-1', 'bucket' => 'old', 'prefix' => '', 'access_key' => 'key', 'path_style' => true], 'old-secret-not-real');
+        self::assertSame([StorageProfile::SOURCE_DATABASE, StorageProvider::AWS_S3, 'old', 'old-secret-not-real'], [$profile->getSource(), $profile->getProvider(), $profile->getBucket(), $profile->getSecret()]);
+        self::assertTrue($profile->isComplete(), 'Amazon S3 needs no endpoint');
+        self::assertSame([null, false], [$profile->settings(true)->endpoint, $profile->settings(true)->pathStyle]);
+    }
+
+    public function testAReferenceKnowsItsSource(): void
+    {
+        $profile   = new StorageProfile();
+        $file      = new StoredFile($profile, 'board', 'b1', '2026/11/x', 'a.png', 'image/png', 10, 1, 1, str_repeat('a', 64));
+        $reference = new StoredFileReference($file, 'note', '7');
+        self::assertSame(['note', '7'], [$reference->getSourceType(), $reference->getSourceId()]);
+        self::assertLessThanOrEqual(time(), $reference->getCreatedAt()->getTimestamp());
     }
 }

@@ -10,6 +10,7 @@ use Doctrine\ORM\Tools\SchemaTool;
 use Doctrine\Persistence\ManagerRegistry;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
+use Nowo\StorageKitBundle\Storage\StorageProvider;
 use Nowo\StorageKitBundle\Tests\Fixtures\AuditLog;
 use Nowo\StorageKitBundle\Tests\Fixtures\Boards;
 use Nowo\StorageKitBundle\Tests\Fixtures\NoteContext;
@@ -87,8 +88,11 @@ abstract class KernelTestCase extends TestCase
                     $extra($container);
                 }
             },
-            $routes ?? static function (RoutingConfigurator $routes): void {
+            $routes ?? static function (RoutingConfigurator $routes) use ($without): void {
                 $routes->import('.', 'nowo_storage_kit');
+                if (!in_array('encrypt', $without, true) && !in_array('settings', $without, true)) {
+                    $routes->import('.', 'nowo_instance_settings');
+                }
             },
             $without,
             $debug,
@@ -180,7 +184,7 @@ abstract class KernelTestCase extends TestCase
     protected function profile(StorageKitTestKernel $kernel, ?string $scope = null, string $bucket = 'files', string $state = StorageProfile::STATE_ACTIVE, ?string $endpoint = 'http://minio:9000'): StorageProfile
     {
         $profile = new StorageProfile($scope, $state);
-        $profile->configure(true, $endpoint, null, 'us-east-1', $bucket, 'app', 'test-key', 'test-secret-not-real', true);
+        $profile->configure(StorageProvider::S3_COMPATIBLE, true, $endpoint, null, 'us-east-1', $bucket, 'app', 'test-key', 'test-secret-not-real', true);
         $manager = $this->entityManager($kernel);
         $manager->persist($profile);
         $manager->flush();

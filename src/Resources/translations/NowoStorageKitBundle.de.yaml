@@ -11,6 +11,7 @@ settings:
         save: 'Speichern'
         test: 'Verbindung testen'
         move: 'In einen anderen Bucket verschieben'
+        edit: 'Verbindung bearbeiten'
     flash:
         saved: 'Die Speichereinstellungen wurden gespeichert.'
     section:
@@ -18,6 +19,8 @@ settings:
     field:
         config_profile: 'Profil'
         delivery: 'Downloads'
+    intro_settings: 'Der Bucket der Instanz wird unter Einstellungen → Speicher festgelegt. Diese Seite zeigt seine Nutzung und den letzten Verbindungstest und verschiebt seine Dateien in einen anderen Bucket.'
+    settings_managed: 'Die Verbindung dieses Buckets wird im Einstellungsabschnitt Speicher bearbeitet (Zugangsdaten verschlüsselt gespeichert).'
 status:
     on: 'Uploads an'
     off: 'Uploads aus'
@@ -41,6 +44,7 @@ test:
         failed: 'Der Test ist im Schritt %step% fehlgeschlagen: %error%'
         public: 'Die Verbindung funktioniert, aber jeder kann diesen Bucket lesen. Machen Sie ihn privat, bevor Sie Dateien speichern.'
         ok: 'Die Verbindung funktioniert: Ein Objekt wurde geschrieben, gelesen, signiert und gelöscht.'
+        unavailable_settings: 'Wählen Sie einen Anbieter und speichern Sie die Speicher-Einstellungen, bevor Sie sie testen.'
 probe:
     step:
         endpoint: 'Endpoint'
@@ -65,20 +69,22 @@ profile:
         access_key: 'Zugriffsschlüssel'
         secret: 'Geheimer Schlüssel'
         path_style: 'Pfadbasierte Adressierung (path-style)'
+        provider: 'Anbieter'
     help:
-        enabled: 'Erfordert einen Bucket, einen Zugriffsschlüssel und einen geheimen Schlüssel.'
-        endpoint: 'Für AWS S3 leer lassen. Andere Dienste: https://host[:port] (ohne Pfad).'
-        endpoint_restricted: 'Für AWS S3 leer lassen. Andere Dienste: https://host[:port]. Private, lokale und Cloud-Metadaten-Adressen werden abgelehnt.'
+        enabled: 'Benötigt einen Bucket, einen Zugriffsschlüssel, einen geheimen Schlüssel und bei einem S3-kompatiblen Dienst einen Endpunkt.'
+        endpoint: 'https://host[:port] des Dienstes (ohne Pfad).'
+        endpoint_restricted: 'https://host[:port] des Dienstes. Private, lokale und Cloud-Metadaten-Adressen werden abgelehnt.'
         public_endpoint: 'Nur wenn Browser den Bucket unter einer anderen Adresse als der Server erreichen. Sonst leer lassen.'
         prefix: 'Optionaler Ordner im Bucket, zum Beispiel uploads/app.'
         secret: 'Wird verschlüsselt gespeichert und nie wieder angezeigt.'
         secret_kept: 'Ein geheimer Schlüssel ist gespeichert. Leer lassen, um ihn zu behalten.'
         path_style: 'Von den meisten selbst gehosteten Diensten benötigt (MinIO, RustFS).'
+        provider: 'Nur die Felder des gewählten Anbieters werden angezeigt und gespeichert.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
     error:
-        incomplete: 'Geben Sie zuerst Bucket, Zugriffsschlüssel und geheimen Schlüssel an.'
+        incomplete: 'Geben Sie zuerst Bucket, Zugriffsschlüssel, geheimen Schlüssel und (S3-kompatibler Dienst) Endpunkt an.'
         region: 'Verwenden Sie Kleinbuchstaben, Ziffern und Bindestriche, zum Beispiel eu-west-1.'
         bucket: 'Verwenden Sie 3 bis 63 Kleinbuchstaben, Ziffern, Punkte und Bindestriche.'
         prefix: 'Verwenden Sie nur Buchstaben, Ziffern, Schrägstriche und !_.*''()-, ohne Ordner "." oder "..".'
@@ -87,6 +93,7 @@ profile:
         endpoint_invalid: 'Verwenden Sie eine http(s)-Adresse wie https://s3.example.com, ohne Pfad, Query oder Zugangsdaten.'
         endpoint_not_allowed: 'Diese Adresse ist nicht erlaubt: Private, lokale und Cloud-Metadaten-Hosts werden abgelehnt.'
         endpoint_unresolvable: 'Dieser Hostname lässt sich nicht auflösen.'
+        provider: 'Wählen Sie einen Anbieter.'
 move:
     title: 'In einen anderen Bucket verschieben'
     intro: 'Kopieren Sie alle Dateien in einen neuen Bucket, prüfen Sie jede Kopie und wechseln Sie dann. Uploads gehen bis zum Wechsel in den aktuellen Bucket.'
@@ -153,3 +160,18 @@ upload:
         csrf: 'Die Seite ist abgelaufen. Laden Sie sie neu und versuchen Sie es erneut.'
         rate: 'Zu viele Uploads. Warten Sie einen Moment und versuchen Sie es erneut.'
         access: 'Sie dürfen keine Dateien hochladen.'
+provider:
+    aws_s3: 'Amazon S3'
+    s3_compatible: 'S3-kompatibler Dienst (R2, B2, Wasabi, RustFS…)'
+section:
+    label: 'Speicher'
+    intro: 'Der S3-Bucket, in dem hochgeladene Dateien gespeichert werden. Dateien bleiben privat: Sie werden über die Anwendung heruntergeladen, die prüft, wer sie lesen darf. Ohne Anbieter sind Uploads aus.'
+    help:
+        provider: 'Leer lassen, um Uploads auszuschalten. Nur die Felder des gewählten Anbieters werden angezeigt und gespeichert; die anderen behalten ihre Werte.'
+        secret: 'Wird verschlüsselt gespeichert und nie wieder angezeigt. Leer lassen, um den gespeicherten zu behalten.'
+    action:
+        overview: 'Nutzung und Umzug'
+    notice:
+        off: 'Kein Anbieter gewählt: Bild-Uploads sind aus.'
+        incomplete: 'Beim gewählten Anbieter fehlt ein Feld (Bucket, Zugriffsschlüssel, geheimer Schlüssel oder Endpunkt) oder ein Feld ist ungültig: Uploads bleiben aus.'
+        test_failed: 'Der letzte Verbindungstest ist fehlgeschlagen. Prüfen Sie die Felder und führen Sie Verbindung testen erneut aus.'

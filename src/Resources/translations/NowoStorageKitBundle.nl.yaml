@@ -11,6 +11,7 @@ settings:
         save: 'Opslaan'
         test: 'Verbinding testen'
         move: 'Naar een andere bucket verplaatsen'
+        edit: 'Verbinding bewerken'
     flash:
         saved: 'De opslaginstellingen zijn opgeslagen.'
     section:
@@ -18,6 +19,8 @@ settings:
     field:
         config_profile: 'Profiel'
         delivery: 'Downloads'
+    intro_settings: 'De bucket van de instantie stel je in onder Instellingen → Opslag. Deze pagina toont het gebruik en de laatste verbindingstest en verplaatst de bestanden naar een andere bucket.'
+    settings_managed: 'De verbinding van deze bucket bewerk je in de instellingensectie Opslag (inloggegevens versleuteld opgeslagen).'
 status:
     on: 'Uploads aan'
     off: 'Uploads uit'
@@ -41,6 +44,7 @@ test:
         failed: 'De test is mislukt bij de stap %step%: %error%'
         public: 'De verbinding werkt, maar iedereen kan deze bucket lezen. Maak hem privé voordat u bestanden opslaat.'
         ok: 'De verbinding werkt: een object is geschreven, gelezen, ondertekend en verwijderd.'
+        unavailable_settings: 'Kies een provider en sla de opslaginstellingen op voordat je ze test.'
 probe:
     step:
         endpoint: 'endpoint'
@@ -65,20 +69,22 @@ profile:
         access_key: 'Toegangssleutel'
         secret: 'Geheime sleutel'
         path_style: 'Adressering via pad (path-style)'
+        provider: 'Provider'
     help:
-        enabled: 'Vereist een bucket, een toegangssleutel en een geheime sleutel.'
-        endpoint: 'Leeg laten voor AWS S3. Andere diensten: https://host[:poort] (zonder pad).'
-        endpoint_restricted: 'Leeg laten voor AWS S3. Andere diensten: https://host[:poort]. Privé-, lokale en cloudmetadata-adressen worden geweigerd.'
+        enabled: 'Vereist een bucket, een toegangssleutel, een geheime sleutel en, voor een S3-compatibele dienst, een endpoint.'
+        endpoint: 'https://host[:poort] van de dienst (zonder pad).'
+        endpoint_restricted: 'https://host[:poort] van de dienst. Privé-, lokale en cloud-metadata-adressen worden geweigerd.'
         public_endpoint: 'Alleen als browsers de bucket op een ander adres bereiken dan de server. Anders leeg laten.'
         prefix: 'Optionele map in de bucket, bijvoorbeeld uploads/app.'
         secret: 'Wordt versleuteld opgeslagen en nooit meer getoond.'
         secret_kept: 'Er is een geheime sleutel opgeslagen. Laat leeg om hem te behouden.'
         path_style: 'Nodig voor de meeste zelf gehoste diensten (MinIO, RustFS).'
+        provider: 'Alleen de velden van de gekozen provider worden getoond en opgeslagen.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
     error:
-        incomplete: 'Vul eerst de bucket, de toegangssleutel en de geheime sleutel in.'
+        incomplete: 'Vul eerst de bucket, de toegangssleutel, de geheime sleutel en (S3-compatibele dienst) het endpoint in.'
         region: 'Gebruik kleine letters, cijfers en streepjes, bijvoorbeeld eu-west-1.'
         bucket: 'Gebruik 3 tot 63 kleine letters, cijfers, punten en streepjes.'
         prefix: 'Gebruik alleen letters, cijfers, schuine strepen en !_.*''()-, zonder mappen "." of "..".'
@@ -87,6 +93,7 @@ profile:
         endpoint_invalid: 'Gebruik een http(s)-adres zoals https://s3.example.com, zonder pad, query of inloggegevens.'
         endpoint_not_allowed: 'Dit adres is niet toegestaan: privé-, lokale en cloudmetadata-hosts worden geweigerd.'
         endpoint_unresolvable: 'Deze hostnaam kan niet worden opgezocht.'
+        provider: 'Kies een provider.'
 move:
     title: 'Naar een andere bucket verplaatsen'
     intro: 'Kopieer alle bestanden naar een nieuwe bucket, controleer elke kopie en schakel dan over. Uploads gaan naar de huidige bucket tot u overschakelt.'
@@ -153,3 +160,18 @@ upload:
         csrf: 'De pagina is verlopen. Laad haar opnieuw en probeer het nog eens.'
         rate: 'Te veel uploads. Wacht even en probeer het opnieuw.'
         access: 'U mag geen bestanden uploaden.'
+provider:
+    aws_s3: 'Amazon S3'
+    s3_compatible: 'S3-compatibele dienst (R2, B2, Wasabi, RustFS…)'
+section:
+    label: 'Opslag'
+    intro: 'De S3-bucket waarin geüploade bestanden worden opgeslagen. Bestanden blijven privé: ze worden gedownload via de applicatie, die controleert wie ze mag lezen. Zonder provider staan uploads uit.'
+    help:
+        provider: 'Laat leeg om uploads uit te zetten. Alleen de velden van de gekozen provider worden getoond en opgeslagen; de andere behouden hun waarden.'
+        secret: 'Versleuteld opgeslagen en nooit meer getoond. Laat leeg om de opgeslagen sleutel te behouden.'
+    action:
+        overview: 'Gebruik en verhuizing'
+    notice:
+        off: 'Geen provider gekozen: het uploaden van afbeeldingen staat uit.'
+        incomplete: 'Bij de gekozen provider ontbreekt een veld (bucket, toegangssleutel, geheime sleutel of endpoint) of een veld is ongeldig: uploads blijven uit.'
+        test_failed: 'De laatste verbindingstest is mislukt. Controleer de velden en voer Verbinding testen opnieuw uit.'

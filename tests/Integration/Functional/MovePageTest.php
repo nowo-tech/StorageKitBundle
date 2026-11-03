@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Tests\Integration\Functional;
 
+use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Message\RunStorageSyncMessage;
 use Nowo\StorageKitBundle\MessageHandler\RunStorageSyncHandler;
+use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
+use Nowo\StorageKitBundle\Settings\InstanceStorageSettings;
+use Nowo\StorageKitBundle\Storage\StorageProvider;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
@@ -116,7 +120,7 @@ final class MovePageTest extends KernelTestCase
         // An incomplete target is refused.
         $this->saveTarget($client, secret: '');
         self::assertSame(422, $client->getResponse()->getStatusCode());
-        self::assertStringContainsString('Set the bucket, the access key and the secret key first.', (string) $client->getResponse()->getContent());
+        self::assertStringContainsString('Set the bucket, the access key, the secret key and (S3-compatible service) the endpoint first.', (string) $client->getResponse()->getContent());
 
         $this->saveTarget($client);
         self::assertSame('/admin/storage/move', $client->getResponse()->headers->get('Location'));
@@ -164,6 +168,43 @@ final class MovePageTest extends KernelTestCase
             StorageAuditEvent::MOVE_SYNC_STARTED,
             StorageAuditEvent::MOVE_SWITCHED,
         ], $this->audit($kernel)->actions());
+    }
+
+    public function testMovingTheInstanceSettingsBucketSwapsTheSection(): void
+    {
+        $kernel   = $this->bootKernel();
+        $settings = $this->service($kernel, InstanceSettingsInterface::class);
+        $settings->save('storage', ['provider' => StorageProvider::S3_COMPATIBLE, 'endpoint' => 'http://minio:9000', 'region' => 'us-east-1', 'bucket' => 'files', 'prefix' => 'app', 'access_key' => 'test-key', 'path_style' => true, 'secret' => 'old-secret-not-real']);
+        $file   = $this->upload($kernel);
+        $active = $file->getProfile();
+        self::assertTrue($active->isSettingsBacked());
+        $client = $this->client($kernel);
+
+        $this->saveTarget($client);
+        $this->act($client, 'sync', kernel: $kernel);
+        $this->runWorker($kernel);
+        self::assertStringContainsString('Every file now comes from the new bucket.', $this->act($client, 'switch', kernel: $kernel));
+
+        $this->entityManager($kernel)->clear();
+        $repository = $this->service($kernel, StorageProfileRepository::class);
+        $target     = $repository->activeOf(null);
+        self::assertNotNull($target);
+        self::assertTrue($target->isSettingsBacked(), 'the new active row reads the section');
+        self::assertNull($target->getSecret());
+        $instance = $this->service($kernel, InstanceStorageSettings::class);
+        self::assertSame(['new-files', 'test-secret-not-real'], [$instance->settings()?->bucket, $instance->secret()]);
+
+        // The retired row keeps a copy of the old connection, so its bucket stays readable.
+        $retired = $repository->findOneByUuid($active->getUuid());
+        self::assertNotNull($retired);
+        self::assertSame([StorageProfile::STATE_RETIRED, StorageProfile::SOURCE_DATABASE, 'files', 'old-secret-not-real'], [$retired->getState(), $retired->getSource(), $retired->getBucket(), $retired->getSecret()]);
+        self::assertSame('files', $this->service($kernel, StorageProfiles::class)->settingsOf($retired)?->bucket);
+        self::assertSame($target->getUuid(), $this->entityManager($kernel)->find(StoredFile::class, $file->getId())?->getProfile()->getUuid());
+
+        $client->request('GET', '/admin/settings/sections/storage');
+        $html = (string) $client->getResponse()->getContent();
+        self::assertStringContainsString('new-files', $html);
+        self::assertStringNotContainsString('secret-not-real', $html);
     }
 
     public function testCancelResumeAndDiscard(): void

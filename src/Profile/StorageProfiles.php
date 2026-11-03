@@ -10,6 +10,7 @@ use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Nowo\StorageKitBundle\Scope\ScopeResolverInterface;
+use Nowo\StorageKitBundle\Settings\InstanceStorageSettings;
 use Nowo\StorageKitBundle\Storage\S3Settings;
 use Symfony\Contracts\Service\ResetInterface;
 
@@ -45,6 +46,7 @@ final class StorageProfiles implements ResetInterface
         private readonly ?string $instanceProfile = null,
         private readonly bool $guardInstance = true,
         private readonly bool $scopesEnabled = false,
+        private readonly ?InstanceStorageSettings $instanceSettings = null,
     ) {
     }
 
@@ -82,6 +84,9 @@ final class StorageProfiles implements ResetInterface
         $name = $profile->getConfigName();
         if ($name !== null) {
             return $this->config->settings($name);
+        }
+        if ($profile->isSettingsBacked()) {
+            return $this->instanceSettings?->settings();
         }
         try {
             return $profile->settings($this->isRestricted($profile->getScope()));
@@ -140,13 +145,41 @@ final class StorageProfiles implements ResetInterface
         }
         if ($scope === null) {
             // @igor-ignore - Request-scoped memo, cleared by reset() (kernel.reset).
-            $this->memo['instance'] ??= $this->profiles->activeOf(null) ?? false;
+            $this->memo['instance'] ??= $this->profiles->activeOf(null) ?? $this->settingsRow() ?? false;
             $profile = $this->memo['instance'];
 
             return $profile instanceof StorageProfile ? $profile : null;
         }
 
         return $this->profiles->activeOf($scope);
+    }
+
+    /**
+     * Whether the instance bucket is edited in the `storage` Instance Settings section (not managed by the
+     * configuration).
+     */
+    public function settingsBacked(): bool
+    {
+        return $this->instanceProfile === null && $this->instanceSettings instanceof InstanceStorageSettings;
+    }
+
+    /**
+     * The instance's active row for the `storage` Instance Settings section, created on first use once a provider is
+     * selected there (files point at it, so it must exist before the first upload). Null when the section is not in
+     * use or no provider is selected.
+     */
+    private function settingsRow(): ?StorageProfile
+    {
+        if (!$this->settingsBacked() || $this->instanceSettings?->provider() === null) {
+            return null;
+        }
+        $profile = new StorageProfile();
+        $profile->useInstanceSettings();
+        $manager = $this->entityManager->manager();
+        $manager->persist($profile);
+        $manager->flush();
+
+        return $profile;
     }
 
     /**

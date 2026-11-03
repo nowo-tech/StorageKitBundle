@@ -188,9 +188,9 @@ final class EdgeCasesTest extends KernelTestCase
     public function testDisablingUploadsKeepsTheExistingProfile(): void
     {
         $kernel = $this->bootKernel();
-        $this->profile($kernel);
-        $client  = $this->client($kernel);
-        $crawler = $client->request('GET', '/admin/storage');
+        $this->profile($kernel, 'acme');
+        $client  = $this->client($kernel, 'scopeadmin');
+        $crawler = $client->request('GET', '/storage/scopes/acme');
         $form    = $crawler->selectButton('Save')->form();
         $field   = $form['storage_profile[enabled]'];
         self::assertInstanceOf(ChoiceFormField::class, $field);

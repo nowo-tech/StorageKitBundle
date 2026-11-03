@@ -11,6 +11,7 @@ settings:
         save: 'Salva'
         test: 'Prova la connessione'
         move: 'Sposta in un altro bucket'
+        edit: 'Modifica la connessione'
     flash:
         saved: 'Le impostazioni di archiviazione sono state salvate.'
     section:
@@ -18,6 +19,8 @@ settings:
     field:
         config_profile: 'Profilo'
         delivery: 'Download'
+    intro_settings: 'Il bucket dell’istanza si imposta in Impostazioni → Archiviazione. Questa pagina mostra il suo utilizzo e l’ultimo test di connessione, e sposta i suoi file in un altro bucket.'
+    settings_managed: 'La connessione di questo bucket si modifica nella sezione Archiviazione delle impostazioni (credenziali cifrate a riposo).'
 status:
     on: 'Caricamenti attivi'
     off: 'Caricamenti disattivati'
@@ -41,6 +44,7 @@ test:
         failed: 'Il test non è riuscito al passaggio %step%: %error%'
         public: 'La connessione funziona, ma chiunque può leggere questo bucket. Rendilo privato prima di salvarci file.'
         ok: 'La connessione funziona: un oggetto è stato scritto, letto, firmato ed eliminato.'
+        unavailable_settings: 'Scegli un provider e salva le impostazioni di Archiviazione prima di provarle.'
 probe:
     step:
         endpoint: 'endpoint'
@@ -65,20 +69,22 @@ profile:
         access_key: 'Chiave di accesso'
         secret: 'Chiave segreta'
         path_style: 'Indirizzamento per percorso (path-style)'
+        provider: 'Provider'
     help:
-        enabled: 'Richiede un bucket, una chiave di accesso e una chiave segreta.'
-        endpoint: 'Lascia vuoto per AWS S3. Altri servizi: https://host[:porta] (senza percorso).'
-        endpoint_restricted: 'Lascia vuoto per AWS S3. Altri servizi: https://host[:porta]. Gli indirizzi privati, locali e di metadati cloud vengono rifiutati.'
+        enabled: 'Richiede un bucket, una chiave di accesso, una chiave segreta e, per un servizio compatibile con S3, un endpoint.'
+        endpoint: 'https://host[:porta] del servizio (senza percorso).'
+        endpoint_restricted: 'https://host[:porta] del servizio. Gli indirizzi privati, locali e di metadati cloud vengono rifiutati.'
         public_endpoint: 'Solo se i browser raggiungono il bucket a un indirizzo diverso da quello del server. Altrimenti lascia vuoto.'
         prefix: 'Cartella facoltativa nel bucket, ad esempio uploads/app.'
         secret: 'Salvata cifrata. Non viene più mostrata.'
         secret_kept: 'È salvata una chiave segreta. Lascia vuoto per mantenerla.'
         path_style: 'Necessario per la maggior parte dei servizi self-hosted (MinIO, RustFS).'
+        provider: 'Vengono mostrati e salvati solo i campi del provider selezionato.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
     error:
-        incomplete: 'Indica prima il bucket, la chiave di accesso e la chiave segreta.'
+        incomplete: 'Imposta prima il bucket, la chiave di accesso, la chiave segreta e (servizio compatibile con S3) l’endpoint.'
         region: 'Usa lettere minuscole, cifre e trattini, ad esempio eu-west-1.'
         bucket: 'Usa da 3 a 63 lettere minuscole, cifre, punti e trattini.'
         prefix: 'Usa solo lettere, cifre, barre e !_.*''()-, senza cartelle "." o "..".'
@@ -87,6 +93,7 @@ profile:
         endpoint_invalid: 'Usa un indirizzo http(s) come https://s3.example.com, senza percorso, query o credenziali.'
         endpoint_not_allowed: 'Questo indirizzo non è consentito: gli host privati, locali e di metadati cloud vengono rifiutati.'
         endpoint_unresolvable: 'Questo nome host non si risolve.'
+        provider: 'Scegli un provider.'
 move:
     title: 'Sposta in un altro bucket'
     intro: 'Copia tutti i file in un nuovo bucket, verifica ogni copia e poi passa al nuovo. I caricamenti continuano nel bucket attuale finché non passi.'
@@ -153,3 +160,18 @@ upload:
         csrf: 'La pagina è scaduta. Ricaricala e riprova.'
         rate: 'Troppi caricamenti. Attendi un momento e riprova.'
         access: 'Non hai il permesso di caricare file.'
+provider:
+    aws_s3: 'Amazon S3'
+    s3_compatible: 'Servizio compatibile con S3 (R2, B2, Wasabi, RustFS…)'
+section:
+    label: 'Archiviazione'
+    intro: 'Il bucket S3 in cui sono archiviati i file caricati. I file restano privati: si scaricano tramite l’applicazione, che controlla chi può leggerli. Senza provider, i caricamenti sono disattivati.'
+    help:
+        provider: 'Lascia vuoto per disattivare i caricamenti. Vengono mostrati e salvati solo i campi del provider selezionato; gli altri mantengono i loro valori.'
+        secret: 'Salvata cifrata e mai più mostrata. Lascia vuoto per mantenere quella salvata.'
+    action:
+        overview: 'Utilizzo e spostamento'
+    notice:
+        off: 'Nessun provider selezionato: i caricamenti di immagini sono disattivati.'
+        incomplete: 'Al provider selezionato manca un campo (bucket, chiave di accesso, chiave segreta o endpoint), oppure un campo non è valido: i caricamenti restano disattivati.'
+        test_failed: 'L’ultimo test di connessione non è riuscito. Controlla i campi ed esegui di nuovo Prova la connessione.'

@@ -4,33 +4,40 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Form;
 
-use InvalidArgumentException;
 use Nowo\FormKitBundle\Attribute\FormKitConfig;
 use Nowo\FormKitBundle\Form\FormOptionsTrait;
 use Nowo\StorageKitBundle\NowoStorageKitBundle;
 use Nowo\StorageKitBundle\Security\EndpointGuard;
 use Nowo\StorageKitBundle\Storage\S3Settings;
+use Nowo\StorageKitBundle\Storage\StorageProvider;
+use Nowo\UiKitBundle\Form\VisibleWhen;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
+use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Form\FormEvent;
+use Symfony\Component\Form\FormEvents;
 use Symfony\Component\Form\FormInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 use Symfony\Component\Validator\Constraints\Callback;
-use Symfony\Component\Validator\Constraints\Length;
+use Symfony\Component\Validator\Constraints\Choice;
+use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
 use function assert;
-use function is_string;
-use function preg_match;
+use function is_array;
 use function trim;
 
 /**
- * An S3-compatible bucket (REQ-TWIG-005 rule 11: FormKit type, profile `storage_kit`) — the Storage page (with the
- * `enabled` switch) and the Move page's target (`with_enabled: false`). The secret is write-only (`always_empty`;
- * blank keeps the saved one). Turning uploads on needs a bucket, an access key and a secret (typed or saved:
- * `has_secret`). `read_only` greys everything out (environment-managed instance profile). SEC-STORAGE-SSRF: every
+ * A bucket connection (REQ-TWIG-005 rule 11: FormKit type, profile `storage_kit`) — a scope's Storage page (with the
+ * `enabled` switch) and the Move page's target (`with_enabled: false`). The provider choice decides which fields are
+ * shown ({@see StorageProvider}): the endpoint, public endpoint and path-style rows carry UiKit `visible-when`
+ * attributes and are hidden for Amazon S3; on submit the submitted provider decides, and hidden rows keep their
+ * stored values (never validated, never cleared). The secret is write-only (`always_empty`; blank keeps the saved
+ * one). Turning uploads on needs a bucket, an access key, a secret (typed or saved: `has_secret`) and, for an
+ * S3-compatible provider, an endpoint. `read_only` greys everything out (environment-managed instance profile). SEC-STORAGE-SSRF: every
  * URL-building field is validated with the same rules as {@see S3Settings} (endpoints are bare http(s) origins, the
  * region a plain token), and `restricted` profiles also refuse server-side endpoints the {@see EndpointGuard}
  * refuses (private, loopback, link-local, metadata, unresolvable). The CSRF token id comes from the controller
@@ -52,15 +59,27 @@ final class StorageProfileType extends AbstractType
     }
 
     /**
-     * Fields: enabled (optional), endpoint, public_endpoint, region, bucket, prefix, access_key, secret, path_style.
+     * Provider choice, enabled switch, bucket fields (endpoint fields only for an S3-compatible provider), write-only
+     * secret.
+     *
+     * @param FormBuilderInterface<mixed> $builder form builder
+     * @param array<string, mixed> $options resolved options (read_only, has_secret, restricted, with_enabled)
      */
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
-        $readOnly   = $options['read_only'] === true;
-        $hasSecret  = $options['has_secret'] === true;
-        $restricted = $options['restricted'] === true;
-        $guard      = $this->guard;
+        $readOnly     = $options['read_only'] === true;
+        $hasSecret    = $options['has_secret'] === true;
+        $restricted   = $options['restricted'] === true;
+        $controller   = $builder->getName() . '[provider]';
+        $endpointOnly = VisibleWhen::attributes($controller, [StorageProvider::S3_COMPATIBLE]);
 
+        $this->addWithDefaults($builder, 'provider', ChoiceType::class, [
+            'label'       => 'profile.field.provider',
+            'help'        => 'profile.help.provider',
+            'choices'     => StorageProvider::choices(),
+            'disabled'    => $readOnly,
+            'constraints' => [new NotBlank(message: 'profile.error.provider'), new Choice(choices: StorageProvider::ALL, message: 'profile.error.provider')],
+        ]);
         if ($options['with_enabled'] === true) {
             $this->addWithDefaults($builder, 'enabled', CheckboxType::class, [
                 'label'       => 'profile.field.enabled',
@@ -73,8 +92,9 @@ final class StorageProfileType extends AbstractType
                     }
                     $form = $context->getRoot();
                     assert($form instanceof FormInterface);
-                    $value = static fn (string $name): string => trim((string) $form->get($name)->getData());
-                    if ($value('bucket') === '' || $value('access_key') === '' || (!$hasSecret && $value('secret') === '')) {
+                    $value           = static fn (string $name): string => trim((string) $form->get($name)->getData());
+                    $endpointMissing = $value('provider') === StorageProvider::S3_COMPATIBLE && $value('endpoint') === '';
+                    if ($endpointMissing || $value('bucket') === '' || $value('access_key') === '' || (!$hasSecret && $value('secret') === '')) {
                         $context->buildViolation('profile.error.incomplete')->setTranslationDomain(NowoStorageKitBundle::TRANSLATION_DOMAIN)->addViolation();
                     }
                 })],
@@ -85,29 +105,31 @@ final class StorageProfileType extends AbstractType
             'help'        => $restricted ? 'profile.help.endpoint_restricted' : 'profile.help.endpoint',
             'required'    => false,
             'disabled'    => $readOnly,
-            'constraints' => [new Length(max: 255), $this->endpointConstraint($guard, $restricted)],
+            'constraints' => ProfileConstraints::endpoint($this->guard, $restricted),
             'attr'        => ['autocomplete' => 'off', 'spellcheck' => 'false', 'placeholder' => 'profile.placeholder.endpoint'],
+            'row_attr'    => $endpointOnly,
         ]);
         $this->addWithDefaults($builder, 'public_endpoint', TextType::class, [
             'label'       => 'profile.field.public_endpoint',
             'help'        => 'profile.help.public_endpoint',
             'required'    => false,
             'disabled'    => $readOnly,
-            'constraints' => [new Length(max: 255), $this->endpointConstraint(null, false)],
+            'constraints' => ProfileConstraints::endpoint(null, false),
             'attr'        => ['autocomplete' => 'off', 'spellcheck' => 'false'],
+            'row_attr'    => $endpointOnly,
         ]);
         $this->addWithDefaults($builder, 'region', TextType::class, [
             'label'       => 'profile.field.region',
             'required'    => false,
             'disabled'    => $readOnly,
-            'constraints' => [new Length(max: S3Settings::REGION_MAX), $this->pattern(S3Settings::REGION_PATTERN, 'profile.error.region')],
+            'constraints' => ProfileConstraints::region(),
             'attr'        => ['autocomplete' => 'off', 'spellcheck' => 'false', 'placeholder' => 'profile.placeholder.region'],
         ]);
         $this->addWithDefaults($builder, 'bucket', TextType::class, [
             'label'       => 'profile.field.bucket',
             'required'    => false,
             'disabled'    => $readOnly,
-            'constraints' => [$this->pattern(S3Settings::BUCKET_PATTERN, 'profile.error.bucket'), $this->pattern('/\.\./', 'profile.error.bucket', false)],
+            'constraints' => ProfileConstraints::bucket(),
             'attr'        => ['autocomplete' => 'off', 'spellcheck' => 'false'],
         ]);
         $this->addWithDefaults($builder, 'prefix', TextType::class, [
@@ -115,20 +137,14 @@ final class StorageProfileType extends AbstractType
             'help'        => 'profile.help.prefix',
             'required'    => false,
             'disabled'    => $readOnly,
-            'constraints' => [new Callback(static function (mixed $prefix, ExecutionContextInterface $context): void {
-                try {
-                    S3Settings::prefix(is_string($prefix) ? $prefix : '');
-                } catch (InvalidArgumentException) {
-                    $context->buildViolation('profile.error.prefix')->setTranslationDomain(NowoStorageKitBundle::TRANSLATION_DOMAIN)->addViolation();
-                }
-            })],
-            'attr' => ['autocomplete' => 'off', 'spellcheck' => 'false'],
+            'constraints' => ProfileConstraints::prefix(),
+            'attr'        => ['autocomplete' => 'off', 'spellcheck' => 'false'],
         ]);
         $this->addWithDefaults($builder, 'access_key', TextType::class, [
             'label'       => 'profile.field.access_key',
             'required'    => false,
             'disabled'    => $readOnly,
-            'constraints' => [new Length(max: S3Settings::ACCESS_KEY_MAX), $this->pattern('/^[^\x00-\x20\x7F]*$/', 'profile.error.access_key')],
+            'constraints' => ProfileConstraints::accessKey(),
             'attr'        => ['autocomplete' => 'off', 'spellcheck' => 'false'],
         ]);
         $this->addWithDefaults($builder, 'secret', PasswordType::class, [
@@ -137,7 +153,7 @@ final class StorageProfileType extends AbstractType
             'required'     => false,
             'disabled'     => $readOnly,
             'always_empty' => true,
-            'constraints'  => [new Length(max: S3Settings::SECRET_MAX), $this->pattern('/^[^\x00-\x1F\x7F]*$/', 'profile.error.secret')],
+            'constraints'  => ProfileConstraints::secret(),
             'attr'         => ['autocomplete' => 'new-password'],
         ]);
         $this->addWithDefaults($builder, 'path_style', CheckboxType::class, [
@@ -145,11 +161,31 @@ final class StorageProfileType extends AbstractType
             'help'     => 'profile.help.path_style',
             'required' => false,
             'disabled' => $readOnly,
+            'row_attr' => $endpointOnly,
         ]);
+        // The submitted provider decides which fields count (InstanceSettings 1.3 rules): the endpoint fields hidden
+        // for Amazon S3 get their current values back, so they are neither validated nor changed.
+        $builder->addEventListener(FormEvents::PRE_SUBMIT, static function (FormEvent $event): void {
+            $data = $event->getData();
+            if (!is_array($data) || ($data['provider'] ?? null) !== StorageProvider::AWS_S3) {
+                return;
+            }
+            $form = $event->getForm();
+            foreach (StorageProvider::ENDPOINT_FIELDS as $name) {
+                $view = $form->get($name)->getViewData();
+                if ($view === null) {
+                    unset($data[$name]);
+                } else {
+                    $data[$name] = $view;
+                }
+            }
+            $event->setData($data);
+        });
     }
 
     /**
-     * POST with CSRF (token id from the controller), bundle translation domain.
+     * POST with CSRF (token id from the controller), bundle translation domain; options read_only, has_secret,
+     * restricted, with_enabled.
      */
     public function configureOptions(OptionsResolver $resolver): void
     {
@@ -177,38 +213,7 @@ final class StorageProfileType extends AbstractType
         return 'storage_profile';
     }
 
-    /**
+    /*
      * A non-empty value must (`$match`) or must not match `$regex`; the message is a bundle-domain key.
      */
-    private function pattern(string $regex, string $key, bool $match = true): Callback
-    {
-        return new Callback(static function (mixed $value, ExecutionContextInterface $context) use ($regex, $key, $match): void {
-            if (!is_string($value) || $value === '') {
-                return;
-            }
-            if ((preg_match($regex, $value) === 1) !== $match) {
-                $context->buildViolation($key)->setTranslationDomain(NowoStorageKitBundle::TRANSLATION_DOMAIN)->addViolation();
-            }
-        });
-    }
-
-    private function endpointConstraint(?EndpointGuard $guard, bool $restricted): Callback
-    {
-        return new Callback(static function (mixed $value, ExecutionContextInterface $context) use ($guard, $restricted): void {
-            if (!is_string($value) || trim($value) === '') {
-                return;
-            }
-            try {
-                S3Settings::endpoint($value);
-            } catch (InvalidArgumentException) {
-                $context->buildViolation('profile.error.' . EndpointGuard::INVALID)->setTranslationDomain(NowoStorageKitBundle::TRANSLATION_DOMAIN)->addViolation();
-
-                return;
-            }
-            $reason = $restricted && $guard instanceof EndpointGuard ? $guard->check($value) : null;
-            if ($reason !== null) {
-                $context->buildViolation('profile.error.' . $reason)->setTranslationDomain(NowoStorageKitBundle::TRANSLATION_DOMAIN)->addViolation();
-            }
-        });
-    }
 }

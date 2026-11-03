@@ -15,6 +15,7 @@ use Nowo\StorageKitBundle\Message\RunStorageSyncMessage;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Nowo\StorageKitBundle\Repository\StorageSyncRepository;
+use Nowo\StorageKitBundle\Settings\InstanceStorageSettings;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 
@@ -55,6 +56,7 @@ final readonly class StorageMove
         private StorageEntityManager $entityManager,
         private AuditRecorder $audit,
         private ?MessageBusInterface $bus = null,
+        private ?InstanceStorageSettings $instanceSettings = null,
     ) {
     }
 
@@ -151,16 +153,29 @@ final readonly class StorageMove
         if ($this->syncer->remaining($sync) > 0) {
             return self::NEW_FILES;
         }
-        $manager = $this->entityManager->manager();
-        $files   = $this->entityManager->table(StoredFile::class);
-        $moved   = 0;
+        $manager  = $this->entityManager->manager();
+        $files    = $this->entityManager->table(StoredFile::class);
+        $moved    = 0;
+        $settings = $active->isSettingsBacked() ? $this->instanceSettings : null;
+        $previous = $settings?->connection();
+        $secret   = $settings?->secret();
         // @igor-ignore - The closure runs synchronously inside the transaction; it is not stored.
-        $manager->wrapInTransaction(static function () use ($manager, $files, $active, $target, $sync, &$moved): void {
+        $manager->wrapInTransaction(static function () use ($manager, $files, $active, $target, $sync, $settings, $previous, $secret, &$moved): void {
             $moved = (int) $manager->getConnection()->executeStatement(
                 'UPDATE ' . $files . ' SET profile_id = ? WHERE profile_id = ? AND id <= ?',
                 [$target->getId(), $active->getId(), $sync->getCursor()],
                 [Types::INTEGER, Types::INTEGER, Types::INTEGER],
             );
+            if ($settings instanceof InstanceStorageSettings && $previous !== null) {
+                // The instance bucket lives in the `storage` section: the retired row keeps a copy of the old
+                // connection (encrypted by DoctrineEncrypt) so its files stay readable, the section takes the target's
+                // connection and the target row reads it from there.
+                $connection = self::connectionOf($target);
+                $newSecret  = (string) $target->getSecret();
+                $active->keepConnection($previous, $secret);
+                $target->useInstanceSettings();
+                $settings->write($connection, $newSecret);
+            }
             $active->retire();
             $manager->flush();
             $target->activate();
@@ -170,5 +185,24 @@ final readonly class StorageMove
         $this->audit->record(StorageAuditEvent::MOVE_SWITCHED, $target->getScope(), $actor, ['from' => $active->getUuid(), 'to' => $target->getUuid(), 'files' => $moved]);
 
         return self::SWITCHED;
+    }
+
+    /**
+     * The plain connection fields of a database row, in the shape of the `storage` section.
+     *
+     * @return array{provider: string, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string, prefix: string, access_key: string, path_style: bool}
+     */
+    private static function connectionOf(StorageProfile $profile): array
+    {
+        return [
+            'provider'        => $profile->getProvider(),
+            'endpoint'        => $profile->getEndpoint(),
+            'public_endpoint' => $profile->getPublicEndpoint(),
+            'region'          => $profile->getRegion(),
+            'bucket'          => $profile->getBucket(),
+            'prefix'          => $profile->getPrefix(),
+            'access_key'      => $profile->getAccessKey(),
+            'path_style'      => $profile->isPathStyle(),
+        ];
     }
 }

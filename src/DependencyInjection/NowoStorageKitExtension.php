@@ -7,6 +7,9 @@ namespace Nowo\StorageKitBundle\DependencyInjection;
 use LogicException;
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
 use Nowo\HttpHardeningBundle\Csp\CspSourceProviderInterface;
+use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
+use Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle;
+use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\OutboundUrlGuardBundle\Dns\HostnameDnsLookup;
 use Nowo\StorageKitBundle\Audit\AuditRecorder;
 use Nowo\StorageKitBundle\Command\PurgeFilesCommand;
@@ -17,11 +20,13 @@ use Nowo\StorageKitBundle\Controller\FileDownloadController;
 use Nowo\StorageKitBundle\Controller\FileUploadController;
 use Nowo\StorageKitBundle\Controller\StorageMoveController;
 use Nowo\StorageKitBundle\Controller\StorageSettingsController;
+use Nowo\StorageKitBundle\DependencyInjection\Compiler\InstanceSettingsPass;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Doctrine\TablePrefixListener;
 use Nowo\StorageKitBundle\Download\FileDelivery;
 use Nowo\StorageKitBundle\Download\FileUrls;
 use Nowo\StorageKitBundle\Download\StoredImageResolver;
+use Nowo\StorageKitBundle\EventListener\InstanceSettingsListener;
 use Nowo\StorageKitBundle\EventListener\StorageKitAccessListener;
 use Nowo\StorageKitBundle\Form\StorageProfileType;
 use Nowo\StorageKitBundle\Http\StorageCspSources;
@@ -50,6 +55,8 @@ use Nowo\StorageKitBundle\Security\AllowAllStorageAccessChecker;
 use Nowo\StorageKitBundle\Security\EndpointGuard;
 use Nowo\StorageKitBundle\Security\RoleAccessChecker;
 use Nowo\StorageKitBundle\Security\StorageAccessCheckerInterface;
+use Nowo\StorageKitBundle\Settings\InstanceStorageSettings;
+use Nowo\StorageKitBundle\Settings\StorageSettingsSection;
 use Nowo\StorageKitBundle\Storage\FileStorage;
 use Nowo\StorageKitBundle\Storage\S3StorageConnectionFactory;
 use Nowo\StorageKitBundle\Storage\StorageConnectionFactoryInterface;
@@ -186,9 +193,11 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
      */
     private function registerStorage(ContainerBuilder $container, array $config): void
     {
-        /** @var array{profiles: array<string, array<string, mixed>>, instance_profile: string|null, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, scopes: array{enabled: bool, resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}} $config */
-        $logger    = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
-        $endpoints = $config['endpoints'];
+        /** @var array{profiles: array<string, array<string, mixed>>, instance_profile: string|null, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, scopes: array{enabled: bool, resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool}} $config */
+        $logger         = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+        $endpoints      = $config['endpoints'];
+        $settingsBacked = $config['instance_profile'] === null;
+        $webUi          = $config['web_ui']['enabled'];
 
         $container->setDefinition(StorageEntityManager::class, new Definition(StorageEntityManager::class, [new Reference('doctrine'), $config['doctrine']['entity_manager']]));
         $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$config['doctrine']['table_prefix']]))
@@ -232,7 +241,30 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             $config['instance_profile'],
             $endpoints['guard_instance_profile'],
             $config['scopes']['enabled'],
+            $settingsBacked ? new Reference(InstanceStorageSettings::class) : null,
         ]))->setPublic(true)->addTag('kernel.reset', ['method' => 'reset']));
+        $container->setParameter(InstanceSettingsPass::PARAMETER, $settingsBacked);
+        if ($settingsBacked) {
+            $container->setDefinition(InstanceStorageSettings::class, (new Definition(InstanceStorageSettings::class, [
+                new Reference(InstanceSettingsInterface::class),
+                $endpoints['guard_instance_profile'],
+            ]))->setPublic(true));
+            $container->setDefinition(StorageSettingsSection::class, (new Definition(StorageSettingsSection::class, [
+                new Reference(EndpointGuard::class),
+                new Reference(InstanceStorageSettings::class),
+                new Reference(StorageProfiles::class),
+                $webUi ? new Reference('router') : null,
+                $webUi ? new Reference(CsrfOnlyFormFactory::class) : null,
+                $endpoints['guard_instance_profile'],
+            ]))->setPublic(true)->addTag(NowoInstanceSettingsBundle::SECTION_TAG, ['priority' => StorageSettingsSection::PRIORITY]));
+            $container->setDefinition(InstanceSettingsListener::class, (new Definition(InstanceSettingsListener::class, [
+                new Reference(StorageProfiles::class),
+                new Reference(FileStorage::class),
+                new Reference(StorageEntityManager::class),
+                new Reference(AuditRecorder::class),
+                new Reference('security.token_storage', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            ]))->addTag('kernel.event_listener', ['event' => SettingsChangedEvent::class]));
+        }
         $container->setDefinition(AuditRecorder::class, (new Definition(AuditRecorder::class, [
             new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE),
             $logger,
@@ -307,7 +339,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
      */
     private function registerLifecycle(ContainerBuilder $container, array $config): void
     {
-        /** @var array{purge: array{retention_days: int, batch_size: int, max_batches: int}, sync: array{batch_size: int, slice_seconds: int, stale_seconds: int}} $config */
+        /** @var array{instance_profile: string|null, purge: array{retention_days: int, batch_size: int, max_batches: int}, sync: array{batch_size: int, slice_seconds: int, stale_seconds: int}} $config */
         $logger = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
 
         $container->setDefinition(FilePurger::class, (new Definition(FilePurger::class, [
@@ -340,6 +372,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             new Reference(StorageEntityManager::class),
             new Reference(AuditRecorder::class),
             new Reference('messenger.default_bus', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $config['instance_profile'] === null ? new Reference(InstanceStorageSettings::class) : null,
         ]))->setPublic(true));
         // Removed by MessengerIntegrationPass when the host has no message bus.
         $container->setDefinition(RunStorageSyncHandler::class, (new Definition(RunStorageSyncHandler::class, [

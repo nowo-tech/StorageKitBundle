@@ -7,6 +7,8 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Kernel;
 use LogicException;
 use Nowo\StorageKitBundle\Security\AccessGuard;
 use Nowo\StorageKitBundle\Security\EndpointGuard;
+use Nowo\StorageKitBundle\Settings\InstanceStorageSettings;
+use Nowo\StorageKitBundle\Settings\StorageSettingsSection;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
@@ -19,6 +21,9 @@ use Throwable;
  */
 final class InvalidConfigurationTest extends KernelTestCase
 {
+    /** The instance bucket managed by the configuration (no Instance Settings section). */
+    private const CONFIG_INSTANCE = ['profiles' => ['main' => ['dsn' => 's3://test-key:test-secret-not-real@minio:9000/main?tls=0']], 'instance_profile' => 'main'];
+
     /**
      * @return iterable<string, array{array<string, mixed>, string}>
      */
@@ -64,22 +69,22 @@ final class InvalidConfigurationTest extends KernelTestCase
 
     public function testCsrfIsRequiredByThePagesAndTheUploadEndpoint(): void
     {
-        foreach ([[], ['web_ui' => ['enabled' => false]]] as $config) {
+        foreach ([self::CONFIG_INSTANCE, ['web_ui' => ['enabled' => false]] + self::CONFIG_INSTANCE] as $config) {
             try {
-                $this->bootKernel($config, ['csrf']);
+                $this->bootKernel($config, ['csrf', 'settings']);
                 self::fail('accepted');
             } catch (LogicException $e) {
                 self::assertStringContainsString('CSRF', $e->getMessage());
             }
         }
-        $kernel = $this->bootKernel(['web_ui' => ['enabled' => false], 'upload' => ['enabled' => false]], ['csrf']);
+        $kernel = $this->bootKernel(['web_ui' => ['enabled' => false], 'upload' => ['enabled' => false]] + self::CONFIG_INSTANCE, ['csrf', 'settings']);
         self::assertTrue($this->container($kernel)->has(UploadEndpoint::class));
     }
 
     public function testFormCsrfIsRequiredByThePages(): void
     {
         try {
-            $this->bootKernel(extra: static function (ContainerConfigurator $container): void {
+            $this->bootKernel(self::CONFIG_INSTANCE, ['settings'], extra: static function (ContainerConfigurator $container): void {
                 $container->extension('framework', ['form' => ['csrf_protection' => false]]);
             });
             self::fail('accepted');
@@ -90,16 +95,30 @@ final class InvalidConfigurationTest extends KernelTestCase
 
     public function testTheRequiredBundles(): void
     {
-        foreach ([['encrypt'], ['security']] as $without) {
+        foreach ([[['encrypt'], 'doctrine-encrypt-bundle'], [['security', 'settings'], 'symfony/security-bundle']] as [$without, $message]) {
             try {
-                $this->bootKernel([], $without);
+                $this->bootKernel(self::CONFIG_INSTANCE, $without);
                 self::fail('accepted without ' . $without[0]);
             } catch (Throwable $e) {
                 self::assertInstanceOf(LogicException::class, $e);
+                self::assertStringContainsString($message, $e->getMessage());
             }
         }
-        $kernel = $this->bootKernel(['web_ui' => ['enabled' => false]], ['security']);
+        $kernel = $this->bootKernel(['web_ui' => ['enabled' => false]] + self::CONFIG_INSTANCE, ['security', 'settings']);
         self::assertTrue($this->container($kernel)->has(AccessGuard::class));
+        self::assertFalse($this->container($kernel)->has(StorageSettingsSection::class));
+    }
+
+    public function testInstanceSettingsIsRequiredUnlessTheConfigurationManagesTheInstanceBucket(): void
+    {
+        try {
+            $this->bootKernel([], ['settings']);
+            self::fail('accepted');
+        } catch (LogicException $e) {
+            self::assertStringContainsString('requires nowo-tech/instance-settings-bundle', $e->getMessage());
+        }
+        $kernel = $this->bootKernel(self::CONFIG_INSTANCE, ['settings']);
+        self::assertFalse($this->container($kernel)->has(InstanceStorageSettings::class));
     }
 
     public function testDebugSwitchesAreAcceptedInDebug(): void

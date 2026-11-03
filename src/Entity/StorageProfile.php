@@ -11,6 +11,7 @@ use Nowo\DoctrineEncryptBundle\Configuration\Encrypted;
 use Nowo\StorageKitBundle\Scope\ScopeResolverInterface;
 use Nowo\StorageKitBundle\Scope\StorageScope;
 use Nowo\StorageKitBundle\Storage\S3Settings;
+use Nowo\StorageKitBundle\Storage\StorageProvider;
 use SensitiveParameter;
 use Symfony\Component\Uid\Uuid;
 
@@ -20,9 +21,12 @@ use function trim;
  * An S3-compatible bucket files are stored in, owned by a scope (`scope` key, see
  * {@see ScopeResolverInterface}) or by the instance (scope null).
  *
- * Two sources: `database` rows hold their own fields, edited on the Storage / Move pages — the secret is encrypted at
- * rest by DoctrineEncrypt and write-only (a blank value keeps the stored one); `config` rows only name a profile of the
- * `nowo_storage_kit.profiles` tree (ops configuration, credentials from the environment) so files can point at it.
+ * Three sources: `database` rows hold their own fields (a scope's bucket, a move target, a retired bucket), edited on
+ * the Storage / Move pages — the secret is encrypted at rest by DoctrineEncrypt and write-only (a blank value keeps
+ * the stored one); `settings` is the instance's active row whose connection lives in the `storage` Instance Settings
+ * section (secret encrypted by Instance Settings), so the row holds no connection data; `config` rows only name a
+ * profile of the `nowo_storage_kit.profiles` tree (ops configuration, credentials from the environment) so files can
+ * point at it. `provider` ({@see StorageProvider}) decides whether the endpoint fields are used.
  *
  * `enabled` false turns uploads off for its owner (existing files stay readable). Every {@see StoredFile} remembers its
  * profile, so downloads, purges and moves keep using the right bucket. `state`: an owner has one `active` profile (the
@@ -50,6 +54,9 @@ class StorageProfile
     /** Settings from the `profiles` configuration tree. */
     public const SOURCE_CONFIG = 'config';
 
+    /** The connection is the `storage` Instance Settings section (the instance's active row). */
+    public const SOURCE_SETTINGS = 'settings';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -60,6 +67,12 @@ class StorageProfile
 
     #[ORM\Column]
     private bool $enabled = false;
+
+    #[ORM\Column(length: 16)]
+    private string $source = self::SOURCE_DATABASE;
+
+    #[ORM\Column(length: 32)]
+    private string $provider = StorageProvider::S3_COMPATIBLE;
 
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $endpoint = null;
@@ -122,6 +135,7 @@ class StorageProfile
         $this->updatedAt = $this->createdAt;
         if ($configName !== null) {
             $this->enabled = true;
+            $this->source  = self::SOURCE_CONFIG;
         }
     }
 
@@ -150,11 +164,58 @@ class StorageProfile
     }
 
     /**
-     * {@see self::SOURCE_CONFIG} or {@see self::SOURCE_DATABASE}.
+     * {@see self::SOURCE_DATABASE}, {@see self::SOURCE_SETTINGS} or {@see self::SOURCE_CONFIG}.
      */
     public function getSource(): string
     {
-        return $this->configName === null ? self::SOURCE_DATABASE : self::SOURCE_CONFIG;
+        return $this->source;
+    }
+
+    /**
+     * Whether the connection is the `storage` Instance Settings section.
+     */
+    public function isSettingsBacked(): bool
+    {
+        return $this->source === self::SOURCE_SETTINGS;
+    }
+
+    /**
+     * Makes this row read its connection from the `storage` Instance Settings section: its own connection fields and
+     * secret are cleared (the section holds them, encrypted by Instance Settings). Used for the instance's active
+     * row and when a move switches the instance to its target.
+     */
+    public function useInstanceSettings(): void
+    {
+        $this->source         = self::SOURCE_SETTINGS;
+        $this->enabled        = true;
+        $this->endpoint       = null;
+        $this->publicEndpoint = null;
+        $this->bucket         = '';
+        $this->prefix         = '';
+        $this->accessKey      = '';
+        $this->secret         = null;
+        $this->pathStyle      = false;
+        $this->updatedAt      = new DateTimeImmutable();
+    }
+
+    /**
+     * Makes a settings-backed row hold its own connection again (a copy of the section taken before a move switches
+     * the section to another bucket), so the retired bucket stays readable.
+     *
+     * @param array{provider: string, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string, prefix: string, access_key: string, path_style: bool} $connection
+     */
+    public function keepConnection(array $connection, #[SensitiveParameter] ?string $secret): void
+    {
+        $this->source = self::SOURCE_DATABASE;
+        $this->configure($connection['provider'], true, $connection['endpoint'], $connection['public_endpoint'], $connection['region'], $connection['bucket'], $connection['prefix'], $connection['access_key'], $secret, $connection['path_style']);
+    }
+
+    /**
+     * The provider ({@see StorageProvider}).
+     */
+    public function getProvider(): string
+    {
+        return $this->provider;
     }
 
     /**
@@ -217,40 +278,53 @@ class StorageProfile
     }
 
     /**
-     * Bucket, key and secret are set (config rows: the configuration decides).
+     * Bucket, key, secret and (S3-compatible provider) endpoint are set. Config and settings rows: their source decides.
      */
     public function isComplete(): bool
     {
-        return $this->configName !== null || ($this->bucket !== '' && $this->accessKey !== '' && $this->hasSecret());
+        if ($this->source !== self::SOURCE_DATABASE) {
+            return true;
+        }
+
+        return $this->bucket !== '' && $this->accessKey !== '' && $this->hasSecret() && (!StorageProvider::usesEndpoint($this->provider) || $this->endpoint !== null);
     }
 
     /**
-     * The connection settings of a database row (`restricted`: through the SSRF guard).
+     * The connection settings of a database row (`restricted`: through the SSRF guard). The endpoint fields count only
+     * for an S3-compatible provider.
      *
      * @throws InvalidArgumentException when the stored fields are malformed or incomplete
      */
     public function settings(bool $restricted): S3Settings
     {
+        $endpoints = StorageProvider::usesEndpoint($this->provider);
+
         return new S3Settings(
             bucket: $this->bucket,
             accessKey: $this->accessKey,
             secret: (string) $this->secret,
             region: $this->region,
-            endpoint: $this->endpoint,
-            publicEndpoint: $this->publicEndpoint,
+            endpoint: $endpoints ? $this->endpoint : null,
+            publicEndpoint: $endpoints ? $this->publicEndpoint : null,
             prefix: $this->prefix,
-            pathStyle: $this->pathStyle,
+            pathStyle: $endpoints && $this->pathStyle,
             restricted: $restricted,
         );
     }
 
     /**
      * Saves the form's fields. A null / blank secret keeps the stored one (write-only field); DoctrineEncrypt encrypts
-     * on flush, so the raw value is set here.
+     * on flush, so the raw value is set here. An unknown provider is refused.
+     *
+     * @throws InvalidArgumentException when the provider is unknown
      */
-    public function configure(bool $enabled, ?string $endpoint, ?string $publicEndpoint, string $region, string $bucket, string $prefix, string $accessKey, #[SensitiveParameter] ?string $secret, bool $pathStyle): void
+    public function configure(string $provider, bool $enabled, ?string $endpoint, ?string $publicEndpoint, string $region, string $bucket, string $prefix, string $accessKey, #[SensitiveParameter] ?string $secret, bool $pathStyle): void
     {
+        if (!StorageProvider::isValid($provider)) {
+            throw new InvalidArgumentException('Unknown storage provider.');
+        }
         $blank                = static fn (?string $value): ?string => $value === null || trim($value) === '' ? null : trim($value);
+        $this->provider       = $provider;
         $this->enabled        = $enabled;
         $this->endpoint       = $blank($endpoint);
         $this->publicEndpoint = $blank($publicEndpoint);
@@ -261,6 +335,16 @@ class StorageProfile
         $this->secret         = $blank($secret) ?? $this->secret;
         $this->pathStyle      = $pathStyle;
         $this->updatedAt      = new DateTimeImmutable();
+    }
+
+    /**
+     * Forgets the last *Test connection* result (the connection changed).
+     */
+    public function forgetTest(): void
+    {
+        $this->testedAt       = null;
+        $this->testOk         = null;
+        $this->testPublicRead = false;
     }
 
     /**
