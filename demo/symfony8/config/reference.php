@@ -1305,6 +1305,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     css_framework?: "bootstrap"|"bootstrap5"|"bootstrap4"|"tailwind"|"foundation"|"custom"|"tabler"|"none"|Param, // Host CSS stack: bootstrap5|bootstrap4|tailwind|foundation|custom|none|tabler (bootstrap alias → bootstrap5). // Default: "bootstrap5"
  *     icon_set?: "bootstrap-icons"|"tabler-icons"|"ux_icon"|"svg_inline"|"none"|Param, // Icon rendering: bootstrap-icons|tabler-icons|ux_icon|svg_inline|none. // Default: "bootstrap-icons"
  *     row_actions_display?: "icon"|"text"|"icon_text"|Param, // Table/list row actions: icon (glyph only) | text (label only) | icon_text (both). // Default: "icon"
+ *     row_actions_confirm?: "inline"|"native"|"dialog"|Param, // confirm_message of 1.x row_actions POST hashes (2.22, REQ-UI-003): inline = onsubmit="return confirm(…)" (default, unchanged markup); native | dialog = no inline handler, the confirm-submit Stimulus peer asks (window.confirm or the kit <dialog>). native / dialog need the confirm-submit peer registered. // Default: "inline"
  *     panel_path_rewrites?: array<string, scalar|Param|null>,
  *     release_check?: array{ // Optional GitHub release-version checker (footer dialog + JSON endpoint). Off by default.
  *         enabled?: bool|Param, // Register the checker service + controller. Also import @NowoUiKitBundle/Resources/config/routes/release_check.yaml. // Default: false
@@ -1313,6 +1314,8 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         cache_ttl?: int|Param, // Seconds to cache the GitHub answer (cache.app). Default 12h. // Default: 43200
  *         default_branch?: scalar|Param|null, // Branch used as compare target when the installed version is already the latest. // Default: "main"
  *         user_agent?: scalar|Param|null, // User-Agent sent to api.github.com. // Default: "nowo-ui-kit-release-check"
+ *         timeout?: float|Param, // Idle timeout in seconds of the GitHub "releases/latest" request (HttpClient "timeout"). Keep it below PHP max_execution_time (REQ-RUNTIME-001). // Default: 5.0
+ *         releases_timeout?: float|Param, // Idle timeout in seconds of the GitHub "releases" listing used to count versions behind. Keep it below PHP max_execution_time (REQ-RUNTIME-001). // Default: 8.0
  *     },
  *     route_links?: array{ // Route (or route prefix) → link map read by nowo_ui_route_link(), e.g. for the page-edge "manual" tab (partials/_edge_tab.html.twig). A prefix matches the route itself or any route starting with "<prefix>_"; the longest prefix wins.
  *         base_url?: scalar|Param|null, // Prepended to every relative path (paths starting with "/", "//", "http://" or "https://" are used as is). // Default: ""
@@ -1587,6 +1590,30 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     dns_timeout?: float|Param, // Socket timeout in seconds for DNS lookups. Must stay below the host PHP max_execution_time. // Default: 2.0
  *     php_binary?: scalar|Param|null, // PHP CLI used for the bounded DNS child process. Null auto-detects it (PHP_BINARY is not the CLI under php-fpm or FrankenPHP). An empty string, or no CLI found, resolves in-process without the dns_timeout bound. // Default: null
  * }
+ * @psalm-type NowoInstanceSettingsConfig = array{ // Nowo Instance Settings — runtime settings store split into sections, encrypted secrets, admin UI, import / export.
+ *     doctrine?: array{
+ *         table_prefix?: scalar|Param|null, // Prefix of the bundle table and index names (REQ-ORM-002): "app_" gives app_instance_setting_value. // Default: ""
+ *         entity_manager?: scalar|Param|null, // Doctrine ORM entity manager name (null = default). // Default: null
+ *     },
+ *     web_ui?: array{ // Admin UI (REQ-UI-001 / REQ-UI-003): one UiKit settings page per section + the import / export page.
+ *         enabled?: bool|Param, // false = no admin UI (no routes, no controller); the PHP / Twig / CLI API stays available. // Default: true
+ *         path_prefix?: scalar|Param|null, // URL prefix of the admin routes; protect it with security.access_control in the host. // Default: "/admin/settings"
+ *         layout_template?: scalar|Param|null, // Layout the pages extend. Null (default) = nowo_ui_kit.layouts.admin. // Default: null
+ *         templates?: array<string, scalar|Param|null>,
+ *     },
+ *     security?: array{ // REQ-UI-002 private access of the admin UI.
+ *         access_roles?: list<scalar|Param|null>,
+ *         area_roles?: array<string, list<scalar|Param|null>>,
+ *         access_checker?: scalar|Param|null, // Service id implementing InstanceSettingsAccessCheckerInterface; null = role-based default. // Default: null
+ *         allow_unauthenticated?: bool|Param, // DEV / DEMO only (refused without kernel.debug): open the UI without login. // Default: false
+ *     },
+ *     portability?: array{ // Versioned JSON export / import of the settings and of the tagged portability providers.
+ *         web_ui?: bool|Param, // Show the import / export page in the admin UI (the CLI commands are always available). // Default: true
+ *         schema?: scalar|Param|null, // Envelope "schema" value; imports with another schema are refused. // Default: "nowo-instance-settings"
+ *         max_upload_bytes?: int|Param, // Size cap of imported files (upload and CLI), in bytes. // Default: 1048576
+ *         sealed_secrets?: bool|Param, // Allow exporting / importing secrets sealed with the instance DoctrineEncrypt key. false = secrets never leave the instance. // Default: true
+ *     },
+ * }
  * @psalm-type NowoStorageKitConfig = array{ // Nowo Storage Kit — S3-compatible buckets per scope, image uploads, reference-aware purge, verified bucket moves.
  *     profiles?: array<string, array{ // Default: []
  *         dsn?: scalar|Param|null, // Default: null
@@ -1720,6 +1747,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     nowo_ui_kit?: NowoUiKitConfig,
  *     nowo_form_kit?: NowoFormKitConfig,
  *     nowo_outbound_url_guard?: NowoOutboundUrlGuardConfig,
+ *     nowo_instance_settings?: NowoInstanceSettingsConfig,
  *     nowo_storage_kit?: NowoStorageKitConfig,
  *     "when@dev"?: array{
  *         imports?: ImportsConfig,
@@ -1734,6 +1762,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         nowo_ui_kit?: NowoUiKitConfig,
  *         nowo_form_kit?: NowoFormKitConfig,
  *         nowo_outbound_url_guard?: NowoOutboundUrlGuardConfig,
+ *         nowo_instance_settings?: NowoInstanceSettingsConfig,
  *         nowo_storage_kit?: NowoStorageKitConfig,
  *         debug?: DebugConfig,
  *         web_profiler?: WebProfilerConfig,
@@ -1753,6 +1782,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         nowo_ui_kit?: NowoUiKitConfig,
  *         nowo_form_kit?: NowoFormKitConfig,
  *         nowo_outbound_url_guard?: NowoOutboundUrlGuardConfig,
+ *         nowo_instance_settings?: NowoInstanceSettingsConfig,
  *         nowo_storage_kit?: NowoStorageKitConfig,
  *     },
  *     "when@test"?: array{
@@ -1768,6 +1798,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         nowo_ui_kit?: NowoUiKitConfig,
  *         nowo_form_kit?: NowoFormKitConfig,
  *         nowo_outbound_url_guard?: NowoOutboundUrlGuardConfig,
+ *         nowo_instance_settings?: NowoInstanceSettingsConfig,
  *         nowo_storage_kit?: NowoStorageKitConfig,
  *         web_profiler?: WebProfilerConfig,
  *         nowo_hot_reload?: NowoHotReloadConfig,

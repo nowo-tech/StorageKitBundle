@@ -1,6 +1,6 @@
 {#
   Demo host admin layout (REQ-UI-003, nowo_ui_kit.layouts.admin): the demo shell (base.html.twig: masthead,
-  Bootstrap 5) with the UiKit canonical blocks through the UiKit bridge. The Storage and Move pages render here.
+  Bootstrap 5) with the UiKit canonical blocks through the UiKit bridge. The Storage and Move pages and the Instance Settings sections render here.
 #}
 {% extends 'base.html.twig' %}
 {% use '@NowoUiKit/layout/_bridge.html.twig' %}
@@ -22,4 +22,6 @@
 {% block javascripts %}
     {{ include(nowo_ui_partial('scripts', nowo_ui_bundle|default(null))) }}
     {{ block('nowo_ui_bridge_end') }}
+    {# UiKit visible-when peer (provider-dependent fields): demo Stimulus app; a real host registers the peer in its own app. #}
+    <script src="{{ asset('js/nowo-ui-demo-peers.js') }}" defer></script>
 {% endblock %}

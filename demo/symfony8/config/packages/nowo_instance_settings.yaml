@@ -1,0 +1,4 @@
+# Instance Settings (the "storage" section of Storage Kit): admin pages under /admin/settings for ROLE_ADMIN.
+nowo_instance_settings:
+    security:
+        access_roles: [ROLE_ADMIN]

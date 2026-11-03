@@ -18,23 +18,42 @@ test.describe('Storage Kit demo', () => {
   test.describe('as the administrator', () => {
     test.use({ httpCredentials: ADMIN });
 
-    test('saves the instance bucket and tests the connection', async ({ page }) => {
-      await page.goto('/admin/storage');
-      await expect(page.getByTestId('storage-kit-settings')).toBeVisible();
-      await page.locator('#storage_profile_bucket').fill('storage-kit-demo');
-      await page.locator('#storage_profile_secret').fill('demo-secret-key-not-real');
-      await page.getByRole('button', { name: 'Save' }).click();
-      await expect(page.getByText('The storage settings were saved.')).toBeVisible();
-      await expect(page.locator('#storage_profile_secret')).toHaveValue('');
-      expect(await page.content()).not.toContain('demo-secret-key-not-real');
+    test('the storage section shows only the selected provider\'s fields, keeps the secret and tests the connection', async ({ page }) => {
+      await page.goto('/admin/settings/sections/storage');
+      const provider = page.locator('#settings_section_provider');
+      const endpointRow = page.locator('[data-nowo-ui-visible-when-field="settings_section[provider]"]').filter({ has: page.locator('#settings_section_endpoint') });
+      await expect(provider).toHaveValue('s3_compatible');
+      await expect(endpointRow).toBeVisible();
 
-      await page.getByTestId('storage-kit-test').click();
+      // Amazon S3: no endpoint, public endpoint or path style.
+      await provider.selectOption('aws_s3');
+      await expect(endpointRow).toBeHidden();
+      await expect(page.locator('#settings_section_bucket')).toBeVisible();
+      // No provider: every bucket field is hidden (uploads off).
+      await provider.selectOption('');
+      await expect(page.locator('#settings_section_bucket')).toBeHidden();
+      await provider.selectOption('s3_compatible');
+      await expect(endpointRow).toBeVisible();
+
+      // The secret is never rendered back; blank keeps it.
+      await expect(page.locator('#settings_section_secret_value')).toHaveValue('');
+      expect(await page.content()).not.toContain('demo-secret-key-not-real');
+      await page.locator('#settings_section_prefix').fill('demo');
+      await page.getByRole('button', { name: 'Save' }).click();
+      await expect(page).toHaveURL(/\/admin\/settings\/sections\/storage$/);
+
+      await page.getByTestId('storage-kit-section-test').click();
+      await expect(page).toHaveURL(/\/admin\/settings\/sections\/storage$/);
       await expect(page.getByText('The connection works')).toBeVisible();
+
+      await page.goto('/admin/storage');
+      await expect(page.getByTestId('storage-kit-settings-managed')).toBeVisible();
+      await expect(page.getByTestId('storage-kit-edit-link')).toHaveAttribute('href', '/admin/settings/sections/storage');
     });
 
     test('refuses a private or metadata endpoint (SSRF guard)', async ({ page }) => {
-      await page.goto('/admin/storage');
-      await page.locator('#storage_profile_endpoint').fill('http://169.254.169.254');
+      await page.goto('/admin/settings/sections/storage');
+      await page.locator('#settings_section_endpoint').fill('http://169.254.169.254');
       await page.getByRole('button', { name: 'Save' }).click();
       await expect(page.getByText('This address is not allowed')).toBeVisible();
     });
@@ -61,7 +80,11 @@ test.describe('Storage Kit demo', () => {
       expect(download.status()).toBe(200);
       expect(download.headers()['content-type']).toBe('image/png');
       expect(download.headers()['x-content-type-options']).toBe('nosniff');
-      expect(download.headers()['content-security-policy']).toContain('sandbox');
+      // The dev web profiler strips CSP headers from every response; without it the bundle's sandbox CSP is sent
+      // (asserted by the PHPUnit UploadDownloadTest).
+      if (!download.headers()['x-debug-token']) {
+        expect(download.headers()['content-security-policy']).toContain('sandbox');
+      }
       expect(download.headers()['content-disposition']).toContain('attachment');
     });
 
@@ -106,7 +129,9 @@ test.describe('Storage Kit demo', () => {
 
       page.once('dialog', (dialog) => dialog.accept());
       await page.getByTestId('storage-kit-move-switch').click();
+      // UiKit confirm runtime: an in-page dialog (or the native confirm() fallback accepted above).
       const confirm = page.getByRole('dialog').getByRole('button').filter({ hasText: /confirm|switch|ok/i });
+      await confirm.first().waitFor({ state: 'visible', timeout: 3000 }).catch(() => undefined);
       if (await confirm.count()) {
         await confirm.first().click();
       }

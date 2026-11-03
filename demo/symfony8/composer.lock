@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "152bbea2085afc71332bbdcbc704d224",
+    "content-hash": "d4554f5858cb1060e548bc96f27a7917",
     "packages": [
         {
             "name": "async-aws/core",
@@ -81,16 +81,16 @@
         },
         {
             "name": "async-aws/s3",
-            "version": "2.10.0",
+            "version": "3.5.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/async-aws/s3.git",
-                "reference": "9c826ab620dbdc99528f0ad0b728ef9d478714db"
+                "reference": "43b1f00d16f2c5c05b37337ccdc2aa1b1a24a18a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/async-aws/s3/zipball/9c826ab620dbdc99528f0ad0b728ef9d478714db",
-                "reference": "9c826ab620dbdc99528f0ad0b728ef9d478714db",
+                "url": "https://api.github.com/repos/async-aws/s3/zipball/43b1f00d16f2c5c05b37337ccdc2aa1b1a24a18a",
+                "reference": "43b1f00d16f2c5c05b37337ccdc2aa1b1a24a18a",
                 "shasum": ""
             },
             "require": {
@@ -99,12 +99,17 @@
                 "ext-filter": "*",
                 "ext-hash": "*",
                 "ext-simplexml": "*",
-                "php": "^7.2.5 || ^8.0"
+                "php": "^8.2"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^11.5.42",
+                "symfony/error-handler": "^7.3.2 || ^8.0",
+                "symfony/phpunit-bridge": "^7.3.2 || ^8.0"
             },
             "type": "library",
             "extra": {
                 "branch-alias": {
-                    "dev-master": "2.10-dev"
+                    "dev-master": "3.5-dev"
                 }
             },
             "autoload": {
@@ -125,7 +130,7 @@
                 "sdk"
             ],
             "support": {
-                "source": "https://github.com/async-aws/s3/tree/2.10.0"
+                "source": "https://github.com/async-aws/s3/tree/3.5.0"
             },
             "funding": [
                 {
@@ -137,8 +142,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2025-08-11T10:03:27+00:00",
-            "published-time": "2025-08-11T10:10:58+00:00"
+            "time": "2026-09-09T11:10:02+00:00",
+            "published-time": "2026-09-09T11:13:04+00:00"
         },
         {
             "name": "doctrine/collections",
@@ -1545,6 +1550,135 @@
             "published-time": "2026-10-30T21:59:52+00:00"
         },
         {
+            "name": "nowo-tech/instance-settings-bundle",
+            "version": "v1.3.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/nowo-tech/InstanceSettingsBundle.git",
+                "reference": "96bd39620d8a26e0552f4243e5deb54035b40c1e"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/nowo-tech/InstanceSettingsBundle/zipball/96bd39620d8a26e0552f4243e5deb54035b40c1e",
+                "reference": "96bd39620d8a26e0552f4243e5deb54035b40c1e",
+                "shasum": ""
+            },
+            "require": {
+                "doctrine/doctrine-bundle": "^2.13 || ^3.0",
+                "doctrine/orm": "^3.3",
+                "doctrine/persistence": "^3.1 || ^4.0",
+                "nowo-tech/doctrine-encrypt-bundle": "^2.10",
+                "nowo-tech/form-kit-bundle": "^2.17",
+                "nowo-tech/ui-kit-bundle": "^2.23",
+                "php": ">=8.2 <8.6",
+                "psr/clock": "^1.0",
+                "psr/event-dispatcher": "^1.0",
+                "psr/log": "^2.0 || ^3.0",
+                "symfony/clock": "^7.4 || ^8.0",
+                "symfony/config": "^7.4 || ^8.0",
+                "symfony/console": "^7.4 || ^8.0",
+                "symfony/dependency-injection": "^7.4 || ^8.0",
+                "symfony/event-dispatcher": "^7.4 || ^8.0",
+                "symfony/form": "^7.4 || ^8.0",
+                "symfony/framework-bundle": "^7.4 || ^8.0",
+                "symfony/http-foundation": "^7.4 || ^8.0",
+                "symfony/http-kernel": "^7.4 || ^8.0",
+                "symfony/mime": "^7.4 || ^8.0",
+                "symfony/routing": "^7.4 || ^8.0",
+                "symfony/security-core": "^7.4 || ^8.0",
+                "symfony/security-csrf": "^7.4 || ^8.0",
+                "symfony/service-contracts": "^3.5",
+                "symfony/translation-contracts": "^3.5",
+                "symfony/twig-bundle": "^7.4 || ^8.0",
+                "symfony/validator": "^7.4 || ^8.0",
+                "twig/extra-bundle": "^3.12",
+                "twig/string-extra": "^3.12",
+                "twig/twig": "^3.12"
+            },
+            "require-dev": {
+                "doctrine/dbal": "^3.8 || ^4.0",
+                "friendsofphp/php-cs-fixer": "^3.0",
+                "igor-php/igor-php": "^0.10.1",
+                "nowo-tech/phpstan-frankenphp": "^1.0",
+                "phpstan/extension-installer": "^1.4",
+                "phpstan/phpstan": "^2.0",
+                "phpstan/phpstan-phpunit": "^2.0",
+                "phpstan/phpstan-symfony": "^2.0",
+                "phpunit/phpunit": "^11.5",
+                "rector/rector": "^2.0",
+                "symfony/browser-kit": "^7.4 || ^8.0",
+                "symfony/css-selector": "^7.4 || ^8.0",
+                "symfony/dom-crawler": "^7.4 || ^8.0",
+                "symfony/filesystem": "^7.4 || ^8.0",
+                "symfony/phpunit-bridge": "^7.4 || ^8.0",
+                "symfony/security-bundle": "^7.4 || ^8.0",
+                "symfony/translation": "^7.4 || ^8.0",
+                "symfony/yaml": "^7.4 || ^8.0"
+            },
+            "suggest": {
+                "symfony/flex": "For automatic recipe installation",
+                "symfony/security-bundle": "Required for the admin UI unless security.allow_unauthenticated is true (dev / demo only)",
+                "symfony/translation": "To return a TranslatableMessage (key + parameters) from SettingsSectionInterface::getIntro()"
+            },
+            "type": "symfony-bundle",
+            "extra": {
+                "symfony": {
+                    "bundle": "Nowo\\InstanceSettingsBundle\\NowoInstanceSettingsBundle"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Nowo\\InstanceSettingsBundle\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Héctor Franco Aceituno",
+                    "email": "hectorfranco@nowo.tech",
+                    "homepage": "https://github.com/HecFranco",
+                    "role": "Developer"
+                },
+                {
+                    "name": "Nowo.tech",
+                    "homepage": "https://nowo.tech"
+                }
+            ],
+            "description": "Runtime instance settings for Symfony apps: one settings store split into tagged sections, encrypted secret fields, admin forms and import / export (portability).",
+            "homepage": "https://github.com/nowo-tech/InstanceSettingsBundle",
+            "keywords": [
+                "Settings",
+                "admin",
+                "configuration",
+                "doctrine",
+                "encryption",
+                "frankenphp",
+                "import-export",
+                "instance-settings",
+                "php",
+                "runtime",
+                "symfony",
+                "symfony-bundle"
+            ],
+            "support": {
+                "changelog": "https://github.com/nowo-tech/InstanceSettingsBundle/blob/main/docs/CHANGELOG.md",
+                "docs": "https://github.com/nowo-tech/InstanceSettingsBundle/tree/main/docs",
+                "issues": "https://github.com/nowo-tech/InstanceSettingsBundle/issues",
+                "source": "https://github.com/nowo-tech/InstanceSettingsBundle"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/HecFranco",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-11-02T18:11:55+00:00",
+            "published-time": "2026-11-02T18:14:10+00:00"
+        },
+        {
             "name": "nowo-tech/outbound-url-guard-bundle",
             "version": "v1.3.0",
             "source": {
@@ -1642,11 +1776,11 @@
             "dist": {
                 "type": "path",
                 "url": "/var/storage-kit-bundle",
-                "reference": "b60f59e6b610324236eea9f234167dece2a33ac8"
+                "reference": "c76e4782d2b569b93deec100ee795ddac55872ab"
             },
             "require": {
                 "async-aws/core": "^1.27",
-                "async-aws/s3": "^2.8",
+                "async-aws/s3": "^2.8 || ^3.0",
                 "doctrine/dbal": "^3.8 || ^4.0",
                 "doctrine/doctrine-bundle": "^2.13 || ^3.0",
                 "doctrine/orm": "^3.3",
@@ -1656,8 +1790,9 @@
                 "league/flysystem-async-aws-s3": "^3.29",
                 "nowo-tech/doctrine-encrypt-bundle": "^2.10",
                 "nowo-tech/form-kit-bundle": "^2.17",
+                "nowo-tech/instance-settings-bundle": "^1.3.1",
                 "nowo-tech/outbound-url-guard-bundle": "^1.3",
-                "nowo-tech/ui-kit-bundle": "^2.21",
+                "nowo-tech/ui-kit-bundle": "^2.23",
                 "php": ">=8.2 <8.6",
                 "psr/log": "^2.0 || ^3.0",
                 "symfony/config": "^7.4 || ^8.0",
@@ -1824,16 +1959,16 @@
         },
         {
             "name": "nowo-tech/ui-kit-bundle",
-            "version": "v2.21.0",
+            "version": "v2.23.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/UiKitBundle.git",
-                "reference": "e0f552ed48ba35a690c39ac9a239e3238bc327ca"
+                "reference": "f433e09e70bc6075fe103791fc330b3533eb6009"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/e0f552ed48ba35a690c39ac9a239e3238bc327ca",
-                "reference": "e0f552ed48ba35a690c39ac9a239e3238bc327ca",
+                "url": "https://api.github.com/repos/nowo-tech/UiKitBundle/zipball/f433e09e70bc6075fe103791fc330b3533eb6009",
+                "reference": "f433e09e70bc6075fe103791fc330b3533eb6009",
                 "shasum": ""
             },
             "require": {
@@ -1914,8 +2049,8 @@
                 "issues": "https://github.com/nowo-tech/UiKitBundle/issues",
                 "source": "https://github.com/nowo-tech/UiKitBundle"
             },
-            "time": "2026-11-01T09:40:10+00:00",
-            "published-time": "2026-11-01T09:53:36+00:00"
+            "time": "2026-11-02T16:08:25+00:00",
+            "published-time": "2026-11-02T16:09:47+00:00"
         },
         {
             "name": "paragonie/constant_time_encoding",
@@ -4566,6 +4701,93 @@
             ],
             "time": "2026-10-27T15:51:13+00:00",
             "published-time": "2026-10-28T18:24:15+00:00"
+        },
+        {
+            "name": "symfony/mime",
+            "version": "v8.1.10",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/symfony/mime.git",
+                "reference": "8d1232052c9cdef170ed9608b3147bca4f61ff69"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/symfony/mime/zipball/8d1232052c9cdef170ed9608b3147bca4f61ff69",
+                "reference": "8d1232052c9cdef170ed9608b3147bca4f61ff69",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.4.1",
+                "symfony/polyfill-intl-idn": "^1.10",
+                "symfony/polyfill-mbstring": "^1.0"
+            },
+            "conflict": {
+                "egulias/email-validator": "~3.0.0",
+                "phpdocumentor/reflection-docblock": "<5.2|>=7",
+                "phpdocumentor/type-resolver": "<1.5.1"
+            },
+            "require-dev": {
+                "egulias/email-validator": "^2.1.10|^3.1|^4",
+                "league/html-to-markdown": "^5.0",
+                "phpdocumentor/reflection-docblock": "^5.2|^6.0",
+                "symfony/dependency-injection": "^7.4|^8.0",
+                "symfony/process": "^7.4|^8.0",
+                "symfony/property-access": "^7.4|^8.0",
+                "symfony/property-info": "^7.4|^8.0",
+                "symfony/serializer": "^7.4.17|^8.1.5"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Symfony\\Component\\Mime\\": ""
+                },
+                "exclude-from-classmap": [
+                    "/Tests/"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Fabien Potencier",
+                    "email": "fabien@symfony.com"
+                },
+                {
+                    "name": "Symfony Community",
+                    "homepage": "https://symfony.com/contributors"
+                }
+            ],
+            "description": "Allows manipulating MIME messages",
+            "homepage": "https://symfony.com",
+            "keywords": [
+                "mime",
+                "mime-type"
+            ],
+            "support": {
+                "source": "https://github.com/symfony/mime/tree/v8.1.10"
+            },
+            "funding": [
+                {
+                    "url": "https://symfony.com/sponsor",
+                    "type": "custom"
+                },
+                {
+                    "url": "https://github.com/fabpot",
+                    "type": "github"
+                },
+                {
+                    "url": "https://github.com/nicolas-grekas",
+                    "type": "github"
+                },
+                {
+                    "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
+                    "type": "tidelift"
+                }
+            ],
+            "time": "2026-10-28T17:58:38+00:00",
+            "published-time": "2026-10-28T18:23:55+00:00"
         },
         {
             "name": "symfony/options-resolver",

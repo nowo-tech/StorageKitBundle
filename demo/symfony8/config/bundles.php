@@ -10,6 +10,7 @@ return [
     Nowo\UiKitBundle\NowoUiKitBundle::class => ['all' => true],
     Nowo\FormKitBundle\NowoFormKitBundle::class => ['all' => true],
     Nowo\OutboundUrlGuardBundle\NowoOutboundUrlGuardBundle::class => ['all' => true],
+    Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle::class => ['all' => true],
     Nowo\StorageKitBundle\NowoStorageKitBundle::class => ['all' => true],
     Symfony\Bundle\DebugBundle\DebugBundle::class => ['dev' => true],
     Symfony\Bundle\WebProfilerBundle\WebProfilerBundle::class => ['dev' => true, 'test' => true],

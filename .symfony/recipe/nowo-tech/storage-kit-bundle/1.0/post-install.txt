@@ -1,0 +1,12 @@
+Nowo Storage Kit Bundle installed.
+
+1. Make sure nowo-tech/instance-settings-bundle is configured and its routes imported (DoctrineEncrypt key for the
+   encrypted secrets), and register the UiKit `visible-when` Stimulus peer (provider-dependent fields).
+2. Create the tables: php bin/console doctrine:migrations:diff && php bin/console doctrine:migrations:migrate
+3. Protect /admin/storage and /admin/settings with security.access_control.
+4. Open Settings → Storage, choose a provider, enter the bucket and click "Test connection".
+5. Tag your FileContextInterface services (who may read / write files of each context).
+6. Schedule php bin/console nowo:storage-kit:purge (orphan retention); route RunStorageSyncMessage to an async
+   transport for background bucket moves.
+
+Docs: https://github.com/nowo-tech/StorageKitBundle/tree/main/docs

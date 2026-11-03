@@ -41,6 +41,16 @@ test.describe('Storage Kit screenshots', () => {
     await context.close();
   });
 
+  test('storage-section — the storage settings section with the S3-compatible fields', async ({ browser }) => {
+    const context = await browser.newContext({ httpCredentials: ADMIN, viewport: { width: 1280, height: 1100 } });
+    const page = await context.newPage();
+    await page.goto('/admin/settings/sections/storage');
+    await expect(page.locator('#settings_section_endpoint')).toBeVisible();
+    await waitForWebProfiler(page);
+    await page.screenshot({ path: resolve(outDir, 'storage-section.png'), fullPage: true });
+    await context.close();
+  });
+
   test('storage-move — a verified copy to another bucket', async ({ browser }) => {
     const context = await browser.newContext({ httpCredentials: ADMIN, viewport: { width: 1280, height: 1100 } });
     const page = await context.newPage();

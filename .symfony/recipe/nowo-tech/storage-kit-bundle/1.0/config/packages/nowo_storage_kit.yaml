@@ -1,0 +1,27 @@
+# Nowo Storage Kit Bundle — see https://github.com/nowo-tech/StorageKitBundle/blob/main/docs/CONFIGURATION.md
+# The instance bucket is edited in Settings → Storage (Instance Settings, /admin/settings/sections/storage): provider,
+# bucket and credentials (secret encrypted at rest). Or manage it here: profiles + instance_profile (credentials from env).
+nowo_storage_kit:
+    # profiles:
+    #     main: { dsn: '%env(STORAGE_KIT_DSN)%' }   # s3://KEY:SECRET@host/bucket?region=…&path_style=1
+    # instance_profile: main
+    endpoints:
+        guard_instance_profile: true    # SSRF guard on the instance endpoint too
+        allowed_hosts: []               # internal S3 hosts you operate, e.g. [rustfs]
+    upload:
+        enabled: true
+        max_bytes: 10485760
+    purge:
+        retention_days: 7               # schedule: php bin/console nowo:storage-kit:purge
+    web_ui:
+        enabled: true
+        path_prefix: /admin/storage
+    security:
+        access_roles: [ROLE_ADMIN]
+        # DEV/DEMO only — never enable in production (refused without kernel.debug):
+        allow_unauthenticated: false
+
+# Protect the prefixes in config/packages/security.yaml:
+#   access_control:
+#       - { path: ^/admin/storage, roles: ROLE_ADMIN }
+#       - { path: ^/admin/settings, roles: ROLE_ADMIN }

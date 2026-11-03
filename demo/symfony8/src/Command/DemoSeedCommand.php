@@ -9,11 +9,14 @@ use AsyncAws\Core\Credentials\ConfigurationProvider;
 use AsyncAws\S3\Exception\BucketAlreadyOwnedByYouException;
 use AsyncAws\S3\S3Client;
 use Doctrine\ORM\EntityManagerInterface;
+use Nowo\InstanceSettingsBundle\Entity\SettingValue;
+use Nowo\InstanceSettingsBundle\Event\SettingsChangedEvent;
+use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
+use Nowo\StorageKitBundle\Storage\StorageProvider;
 use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
-use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -27,7 +30,7 @@ use function sprintf;
 
 /**
  * Demo seed (idempotent): creates the two private RustFS buckets (`storage-kit-demo`, `storage-kit-archive`) and the
- * instance storage profile on the first one. `--reset` first removes the notes, files, moves and profiles (e2e).
+ * instance bucket (the "storage" Instance Settings section) on the first one. `--reset` first removes the notes, files, moves and profiles (e2e).
  */
 #[AsCommand(name: 'app:demo:seed', description: 'Create the demo buckets and the instance storage profile')]
 final class DemoSeedCommand extends Command
@@ -36,7 +39,7 @@ final class DemoSeedCommand extends Command
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly StorageProfileRepository $profiles,
+        private readonly InstanceSettingsInterface $settings,
         #[Autowire('%env(DEMO_S3_ENDPOINT)%')]
         private readonly string $endpoint,
         #[Autowire('%env(DEMO_S3_ACCESS_KEY)%')]
@@ -76,12 +79,21 @@ final class DemoSeedCommand extends Command
             foreach ([StoredFileReference::class, Note::class, StorageSync::class, StoredFile::class, StorageProfile::class] as $class) {
                 $this->entityManager->createQuery('DELETE FROM ' . $class . ' e')->execute();
             }
+            $this->entityManager->createQuery('DELETE FROM ' . SettingValue::class . " e WHERE e.section = 'storage'")->execute();
+            $this->entityManager->clear();
         }
-        if ($this->profiles->activeOf(null) === null) {
-            $profile = new StorageProfile();
-            $profile->configure(true, $this->endpoint, null, 'us-east-1', self::BUCKETS[0], 'demo', $this->accessKey, $this->secretKey, true);
-            $this->entityManager->persist($profile);
-            $this->entityManager->flush();
+        if ($this->settings->getString('storage.provider') === null) {
+            // The instance bucket is the "storage" Instance Settings section (secret encrypted by Instance Settings).
+            $this->settings->save('storage', [
+                'provider'   => StorageProvider::S3_COMPATIBLE,
+                'endpoint'   => $this->endpoint,
+                'region'     => 'us-east-1',
+                'bucket'     => self::BUCKETS[0],
+                'prefix'     => 'demo',
+                'access_key' => $this->accessKey,
+                'secret'     => $this->secretKey,
+                'path_style' => true,
+            ], SettingsChangedEvent::ORIGIN_SEED);
         }
         $io->success('Demo buckets and instance storage profile ready.');
 
