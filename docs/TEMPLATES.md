@@ -1,23 +1,24 @@
 # Templates
 
-Pages of StorageKitBundle on the UiKit page contract (REQ-UI-003, UiKit 2.17+). The admin UI (`web_ui.path_prefix`,
-default `/admin/mail`, enabled with `web_ui.enabled: true`) has two page templates, the sent-mail log list and detail.
-`Nowo\StorageKitBundle\Ui\AdminPages` builds the UiKit view models (`Nowo\UiKitBundle\View\*`) for the controller;
-`Nowo\StorageKitBundle\Ui\StorageKitPages` resolves the layout (`web_ui.layout_template`, null = `nowo_ui_kit.layouts.admin`)
-and the per-page overrides (`web_ui.templates.<page>`). Contract test: `tests/Integration/Contract/PageContractTest.php`
-(UiKit `PageContractTestCase`, strict missing-translation rule). Twig namespace: `@NowoStorageKitBundle` (views in
-`src/Resources/views/`).
+Pages of StorageKitBundle on the UiKit page contract (REQ-UI-003, UiKit 2.23+). With `web_ui.enabled: true` the bundle
+has two page templates, the **Storage** page and the **Move** page, used for the instance (`web_ui.path_prefix`,
+default `/admin/storage`) and for scopes (`scopes.path_prefix`, default `/storage/scopes/{scope}`).
+`Nowo\StorageKitBundle\Ui\AdminPages` builds the UiKit view models (`Nowo\UiKitBundle\View\*`);
+`Nowo\StorageKitBundle\Ui\StorageKitPages` resolves the layout (`web_ui.layout_template`, null =
+`nowo_ui_kit.layouts.admin`) and the per-page overrides (`web_ui.templates.<page>`). Contract test:
+`tests/Integration/Contract/PageContractTest.php` (UiKit `PageContractTestCase`, strict missing-translation rule).
+Twig namespace: `@NowoStorageKitBundle` (views in `src/Resources/views/`).
 
-The mailer / Resend **settings** pages are Instance Settings pages (`@NowoInstanceSettingsBundle/settings/section.html.twig`):
-StorageKit contributes the sections (fields, labels in the `NowoStorageKitBundle` domain) and their extra actions
-(`Nowo\UiKitBundle\View\Action` with a FormKit CSRF-only `FormView`, rendered by UiKit's `_action_post` partial after
-the Save button).
+The instance connection itself is edited on an Instance Settings page (the `storage` section,
+`@NowoInstanceSettingsBundle/settings/section.html.twig`): StorageKit contributes the fields (labels in the
+`NowoStorageKitBundle` domain, `visible-when` rows), the notices and two actions.
 
 ## Table of contents
 
 - [Pages](#pages)
-- [Settings actions](#settings-actions)
-- [Personal data in the pages](#personal-data-in-the-pages)
+- [Actions](#actions)
+- [Section actions](#section-actions)
+- [Secrets in the pages](#secrets-in-the-pages)
 - [Unique pages](#unique-pages)
 - [Per-page overrides](#per-page-overrides)
 - [Overriding templates (REQ-TWIG-001)](#overriding-templates-req-twig-001)
@@ -32,61 +33,83 @@ and `layout: StorageKitPages::layout()`. Labels are `NowoStorageKitBundle` trans
 
 | Page (`web_ui.templates` id) | Template | Scaffold | View model | Data blocks filled |
 | --- | --- | --- | --- | --- |
-| Log list (`log_index`) | `log/index.html.twig` | `page/list` | `ListPage` from `AdminPages::listPage()`: header `log.index.title` + `log.index.intro_ready` / `intro_not_ready` (`%count%`, redacted `%transport%`, `%source%`); columns queued at, status, subject, to (priority 2), tag, transport (priority 3); GET filters (`SentMailFilterType`: `q`, `status`, `period`; FilterFields with widths; submit `log.action.filter`; clear link when filtered); row action "View" (`Action::view`); `Pagination` (`web_ui.page_size`); `EmptyState` `log.index.empty` / `empty_filtered`; root `data-testid="storage-kit-log"` | `nowo_ui_list_row` — status badge (`badge_success` / `badge_danger` / `badge_info` slots, `data-testid="storage-kit-status"`), subject linked to the detail, recipients joined, tag and transport in the `code` slot |
-| Log entry (`log_show`) | `log/show.html.twig` | `page/show` | `ShowPage` from `AdminPages::showPage()`: header `log.show.title`, actions "Back to the list" and — with a stored HTML body — "Open the HTML body" (sandboxed response, new tab); breadcrumbs; sections `envelope` (subject, from, to, cc, bcc, tag) and `delivery` (status, transport, provider id, size, attempts, queued / sent / failed at, error); root `data-testid="storage-kit-log-show"` | `nowo_ui_show_after` → block `nowo_storage_kit_text_body` (stored text body in the `code_block` slot, escaped) |
+| Storage (`settings`) | `settings/edit.html.twig` | `page/form` | `FormPage` from `AdminPages::settingsPage()`: header `settings.title` / `settings.scope_title` with the on / off status; the FormKit `StorageProfileType` form (scope pages only) or a notice for a managed instance bucket; actions *Test connection*, *Edit connection* (settings-backed instance), *Move to another bucket*; aside from `AdminPages::settingsAside()` (usage, last test, configuration profile) | `nowo_ui_form_body` → block `nowo_storage_kit_settings_notice` (`managed`: `config` → `settings.env_managed`, `settings` → `settings.settings_managed`); `nowo_ui_form_aside` → `settings/_aside.html.twig` |
+| Move (`move`) | `move/edit.html.twig` | `page/form` | `FormPage` from `AdminPages::movePage()`: header `move.title` with *Back to Storage* and the running status; the target form (read-only while a copy runs), *Save the new bucket*; actions Test, Start / Resume / Copy new files, Stop, Switch (confirm), Forget (confirm, danger); aside from `AdminPages::moveAside()` (current bucket, new bucket, copy, previous buckets) | `nowo_ui_form_aside` → block `nowo_storage_kit_move_progress` (UiKit `progress` partial while a copy runs) + `settings/_aside.html.twig` with the `move.notice` warning |
 
-Other variables passed by the controller: `filters` (`Log\SentMailFilters`, list), `entry` (`Entity\SentMail`) and
-`body` (`Entity\SentMailBody` or null, detail).
+Other variables passed by the controllers: `scope` (null = the instance), `managed` (null, `config` or `settings`) and
+`env_managed` (Storage page); `sync` (`Entity\StorageSync` or null) and `running` (Move page).
 
-## Settings actions
+## Actions
+
+POST actions carry a FormKit CSRF-only `FormView` and are rendered by UiKit's `_action_post` partial.
+
+| Page | Action (`data-testid`) | Route | CSRF token id |
+| --- | --- | --- | --- |
+| Storage | *Test connection* (`storage-kit-test`) | `POST nowo_storage_kit_settings_test` / `nowo_storage_kit_scope_settings_test` | `nowo_storage_kit/test/instance` / `nowo_storage_kit/test/scope/<key>` |
+| Storage | *Edit connection* (`storage-kit-edit-link`) | `GET nowo_instance_settings_section` (`section: storage`) | — |
+| Storage | *Move to another bucket* (`storage-kit-move-link`) | `GET nowo_storage_kit_move` / `nowo_storage_kit_scope_move` | — |
+| Storage | bucket form (scope) | `POST` same page | `nowo_storage_kit/settings/<owner>` |
+| Move | target form | `POST` same page | `nowo_storage_kit/move/target/<owner>` |
+| Move | `storage-kit-move-{test,sync,cancel,switch,discard}` | `POST nowo_storage_kit_move_action` / `nowo_storage_kit_scope_move_action` | `nowo_storage_kit/move/<action>/<owner>` |
+
+`<owner>` is `instance` or `scope/<key>`. Handlers flash a translated outcome (UiKit `_flashes`) and redirect to the
+page (path only).
+
+## Section actions
 
 | Section | Action (`data-testid`) | Route | CSRF token id |
 | --- | --- | --- | --- |
-| `mailer` | "Send a test e-mail" (`nowo_storage_kit_test`) | `POST nowo_storage_kit_test` | `nowo_storage_kit_test` (field `csrf_only[_token]`) |
-| `resend` | "Check the API key" (`nowo_storage_kit_resend_check`) | `POST nowo_storage_kit_resend_check` | `nowo_storage_kit_resend_check` |
-| `resend` | "Send a test e-mail with Resend" (`nowo_storage_kit_resend_test`) | `POST nowo_storage_kit_resend_test` | `nowo_storage_kit_resend_test` |
+| `storage` | *Test connection* (`storage-kit-section-test`) | `POST nowo_storage_kit_settings_test?from=settings` (redirects back to the section) | `nowo_storage_kit/test/instance` |
+| `storage` | *Usage and move* (`storage-kit-section-overview`) | `GET nowo_storage_kit_settings` | — |
 
-The handlers redirect back to the section page with a flash (UiKit `_flashes`).
+Only with `web_ui.enabled`. Notices: `section.notice.off`, `section.notice.incomplete`, `section.notice.test_failed`.
 
-## Personal data in the pages
+## Secrets in the pages
 
-- The log pages show envelope data (subject, addresses) to users who pass the access checker; the responses are
-  `private, no-store`.
-- Bodies appear only with `log.store_bodies: true`: the text body escaped in the detail page, the HTML body only in
-  its own response with a sandboxing CSP (`default-src 'none'; … sandbox`), never inline in the admin page.
-- No DSN, password or API key is ever passed to a template (transport labels are `scheme://host[:port]`).
+- The secret field is write-only (`always_empty`, `autocomplete="new-password"`); help says whether one is saved.
+- View models and flashes never contain a secret, an access key value from the section, a signed URL or a provider
+  message; test results are a step, a generic reason and an HTTP status class.
+- Responses are `private, no-store`.
 
 ## Unique pages
 
-- (none) — both pages extend UiKit scaffolds. The HTML body endpoint is a raw response, not a page.
+- (none) — both pages extend the UiKit form scaffold. The upload and download endpoints are JSON / file responses, not
+  pages.
 
 ## Per-page overrides
 
-`web_ui.templates.log_index` / `web_ui.templates.log_show` point at a host template that extends the bundle page and
+`web_ui.templates.settings` / `web_ui.templates.move` point at a host template that extends the bundle page and
 overrides one block:
 
 ```twig
-{# templates/admin/storage_kit/log_show.html.twig — web_ui.templates.log_show #}
-{% extends '@!NowoStorageKitBundle/log/show.html.twig' %}
+{# templates/admin/storage/settings.html.twig — web_ui.templates.settings #}
+{% extends '@!NowoStorageKitBundle/settings/edit.html.twig' %}
 
-{% block nowo_storage_kit_text_body %}{% endblock %}   {# never show bodies, even when stored #}
+{% block nowo_storage_kit_settings_notice %}
+    {{ parent() }}
+    <p>Ask the platform team before changing the bucket.</p>
+{% endblock %}
 ```
 
 ## Overriding templates (REQ-TWIG-001)
 
 See [USAGE.md — Overriding templates](USAGE.md#overriding-templates-req-twig-001) for the freeze rule, the recovery
-procedure and the `<subpath>` table (`log/index.html.twig`, `log/show.html.twig`). Prefer `nowo_ui_kit.layouts.admin`,
-the UiKit theme and `web_ui.templates.<page>` over full-file forks.
+procedure and the `<subpath>` table (`settings/edit.html.twig`, `move/edit.html.twig`, `settings/_aside.html.twig`).
+Prefer `nowo_ui_kit.layouts.admin`, the UiKit theme and `web_ui.templates.<page>` over full-file forks.
 
 ## Bundle partials and assets
 
-None: the pages use UiKit partials only (list / show scaffolds, filters, pagination, flashes) and add no CSS / JS (no
-`nowo_ui_styles` / `nowo_ui_scripts` override, no asset package).
+- `settings/_aside.html.twig`: the aside cards of both pages (UiKit `section` / `card*` slots, `detail_list` partial,
+  optional notice in a `flash_<tone>` slot).
+- No CSS / JS of its own (no `nowo_ui_styles` / `nowo_ui_scripts` override, no asset package). The provider-dependent
+  rows rely on the UiKit `visible-when` Stimulus peer, registered by the host
+  ([INSTALLATION](INSTALLATION.md#visible-when-stimulus-peer)).
 
 ## Translations
 
-`NowoStorageKitBundle` (`settings.*`, `dsn.*`, `sender.*`, `test_email.*`, `resend.*`, `log.*`) in `en`, `es`, `fr`, `de`,
-`it`, `pt`, `nl`. The contract test loads the bundle catalogues with the strict missing-translation rule.
+`NowoStorageKitBundle` (`settings.*`, `status.*`, `delivery.*`, `usage.*`, `test.*`, `probe.*`, `profile.*`, `move.*`,
+`upload.*`, `provider.*`, `section.*`) in `en`, `es`, `fr`, `de`, `it`, `pt`, `nl`. The contract test loads the bundle
+catalogues with the strict missing-translation rule.
 
 ## Allowed exceptions
 

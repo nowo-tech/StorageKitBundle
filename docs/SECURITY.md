@@ -5,14 +5,24 @@ Bundle-specific security analysis. The short GitHub reporting policy lives in [`
 ## Table of contents
 
 - [Scope](#scope)
-- [Attack surface](#attack-surface)
-- [Threat model and mitigations](#threat-model-and-mitigations)
-- [Admin UI exposure and allow_unauthenticated](#admin-ui-exposure-and-allow_unauthenticated)
-- [Secrets and cryptography](#secrets-and-cryptography)
+- [Threat model](#threat-model)
+  - [Assets](#assets)
+  - [Actors](#actors)
+  - [Trust boundaries](#trust-boundaries)
+- [Controls](#controls)
+  - [Object keys and path traversal](#object-keys-and-path-traversal)
+  - [Content type and extension allow-lists](#content-type-and-extension-allow-lists)
+  - [Size, pixel and memory limits](#size-pixel-and-memory-limits)
+  - [Downloads and pre-signed URLs](#downloads-and-pre-signed-urls)
+  - [Authorisation hooks](#authorisation-hooks)
+  - [CSRF and rate limits](#csrf-and-rate-limits)
+  - [SSRF in endpoint configuration](#ssrf-in-endpoint-configuration)
+  - [Credentials](#credentials)
+  - [References and the purge](#references-and-the-purge)
+  - [Worker-mode state](#worker-mode-state)
+- [Admin UI exposure and debug-only switches](#admin-ui-exposure-and-debug-only-switches)
 - [Personal data (GDPR)](#personal-data-gdpr)
-- [Logging](#logging)
-- [Resource limits and timeouts](#resource-limits-and-timeouts)
-- [CSRF](#csrf)
+- [Logging and audit](#logging-and-audit)
 - [Dependencies and updates](#dependencies-and-updates)
 - [Release security checklist (12.4.1)](#release-security-checklist-1241)
 - [AI security audit (REQ-SEC-004)](#ai-security-audit-req-sec-004)
@@ -21,121 +31,199 @@ Bundle-specific security analysis. The short GitHub reporting policy lives in [`
 
 ## Scope
 
-Covers the `mailer` / `resend` settings sections, DSN and sender validation (`MailerDsnValidator`, `DsnHostGuard`,
-constraints), the runtime transport and mailer decorators, the test e-mail and Resend key check, the sent-mail log
-(recorder, repository, entities, purge / forget commands), the admin UI (controller, filter form, access listener /
-checker, route loader), readiness (Twig, AuthKit adapter) and the configuration tree. It does **not** cover the host
-firewall, Instance Settings' own storage, encryption and settings UI (see its SECURITY.md), the Symfony mailer
-transports and provider bridges, or the content of the messages your application sends.
+Covers the upload and download endpoints, image processing, bucket connections (S3 settings, connection factory,
+pre-signer, probe), the SSRF guard, profiles and their resolution, the `storage` Instance Settings section, scope
+buckets, references and the purge, bucket moves (page, CLI, Messenger handler), the admin pages and their access
+checks, the personal-data hooks, audit events and the configuration tree. It does **not** cover the host firewall,
+your file contexts' and scope checkers' own decisions, Instance Settings' storage / encryption / settings UI (see its
+SECURITY.md), DoctrineEncrypt's key management, the bucket provider, or the Markdown renderer that displays the images
+(escape HTML, drop unsafe links).
 
-## Attack surface
+## Threat model
 
-| Input | Where | Notes |
-| --- | --- | --- |
-| DSN, sender, API key fields | Instance Settings section form / import (session, admin) | Validated by the field constraints on save **and** import; secrets encrypted at rest by Instance Settings. |
-| Admin HTTP `GET` (session) | `…/log`, `…/log/{id}`, `…/log/{id}/body` | Access checker on every request under the prefix; UUID route requirement; `no-store`; `sort` / `dir` checked against a whitelist (never interpolated into DQL). |
-| Admin HTTP `GET` (session) | `…/log/export` | Same access as the list plus optional `web_ui.export.access_roles`; formula-injection guard on every cell (`CsvSafeWriter`, best effort for common spreadsheets); `no-store`; capped at `web_ui.export.max_rows`; bodies only with `log.store_bodies` + `web_ui.export.include_bodies` + `?bodies=1`. |
-| Admin HTTP `POST` (session) | `…/actions/test`, `…/actions/resend/check`, `…/actions/resend/test` | CSRF-only Form, StorageKit access **and** Instance Settings section access, per-user rate limit for test e-mails. |
-| Outbound SMTP / provider API | `RuntimeTransport` | Only to validated DSNs (scheme allow-list, host guard); framework `MAILER_DSN` fallback trusted. |
-| Outbound HTTPS | `ResendApiChecker` → `https://api.resend.com/domains` | Fixed URL, deadline, no redirects. |
-| DNS | `DsnHostGuard` | Bounded child-process lookup (`dns_timeout`). |
-| Message content | `SentMailRecorder` | Envelope always, bodies only with `log.store_bodies`; internal headers stripped before delivery. |
-| CLI | `nowo:storage-kit:log:purge`, `…:log:forget`, `…:send-test` | Operator input (no session). |
-| Configuration | `nowo_storage_kit.*` | Validated at compile time; switches must be literal booleans. |
+### Assets
 
-## Threat model and mitigations
+- **Uploaded files** (images in private buckets) and their metadata (`storage_kit_file`: original name, uploader,
+  context, owner).
+- **Bucket credentials**: access keys and secrets of the instance bucket (Instance Settings secret), scope / target /
+  retired buckets (`storage_kit_profile.secret`, DoctrineEncrypt) and configuration profiles (environment).
+- **The application's network position**: what the server can reach (private networks, cloud metadata).
+- **The CSP of the application** (`img-src`) and the integrity of the application origin.
+- **Availability**: PHP memory and request time (image decoding, storage requests), the database (purge, moves).
 
-| Threat | Mitigation |
+### Actors
+
+| Actor | Can |
 | --- | --- |
-| **SSRF through the DSN query options** (CA M1: `?region=x@10.0.0.5:8443/` moved the Mailgun / SendGrid / SES API host) | Every query option is checked for every scheme: `region` only from a per-bridge allow-list (Mailgun `us` / `eu`, SendGrid `global` / `eu`, Scaleway `fr-par` / `nl-ams` / `pl-waw`, SES AWS region syntax; refused on other bridges), any other option value containing `@ / ? # : \\`, whitespace or control characters refused (credential options such as `session_token` may contain `/ + =`). Second line of defence: after the transport is built, its real endpoint host is read and must be a provider host (`*.mailgun.net`, `*.sendgrid.com`, `*.amazonaws.com`, `*.resend.com`, …) or pass the host guard. Regression tests replay the audit PoCs. |
-| **SSRF through the DSN** (an admin points SMTP at an internal service or cloud metadata) | Host guard on every stored / provided DSN: cloud-metadata names and addresses always refused; `localhost`, `*.local`, `*.localhost`, `*.internal`, loopback, RFC 1918, CGNAT, link-local, unique-local, documentation and reserved ranges refused unless `allow_private_hosts` / `allowed_hosts`; host names resolved (A / AAAA) and refused when any answer is private or nothing resolves; IPv4 spellings normalised (OutboundUrlGuard `PrivateNetworkTarget`). Validation runs on save, on import, and before the transport is built at send time. |
-| **Host command execution** (`sendmail://…?command=`, `native://`) | `sendmail`, `sendmail+smtp` and `native` are never accepted (not in the default list, refused in `allowed_schemes` at compile time). |
-| **Silent mail loss** (`null://`) | `null` refused in the settings; a refused stored DSN fails the send (no silent fallback). |
-| **Credential disclosure** | Transport failures are rethrown as `DeliveryFailedException`: a short message with a reference; API bridges answer "The mail provider answered HTTP <code>" — provider response bodies are never stored, flashed, printed or kept in the Messenger failure transport (no `previous`); the scrubbed detail is logged under the reference only. The scrubber masks the credentials of the DSN in use (user, password; raw, URL-encoded, base64), `username "…"`, `user:pass@`, `re_…`, `SG.…`, `xkeysib-…`, `key-…`, `Bearer …` and UUID tokens. DSN and API key are Instance Settings secrets (encrypted, never rendered back, sealed in exports); StorageKit never logs or renders them: `MailerDsnAudit` labels (`scheme://host[:port]`), `[redacted]` invalid values in violations, `#[SensitiveParameter]` on DSN / key parameters, transport errors scrubbed (`user:pass@`, `re_…` keys, `Bearer …`) before they are stored, flashed or printed. |
-| **Unauthorized access** | UI private by default (`ROLE_ADMIN`); empty role lists refused at compile time (pattern P1); a listener guards every request under the prefix and every bundle controller wherever it is mounted; actions also require the Instance Settings access of their section (its public `AccessGuard`); the token is trusted only when a firewall matched the main request. |
-| **CSRF** | Every POST is a FormKit CSRF-only form (`csrf_only[_token]`, one token id per action); not submitted or invalid → 403. The container refuses to compile the UI without form CSRF or a token manager (pattern P2). |
-| **Mail bombing / quota burn through the test action** | Per-user sliding-window rate limit, shared with the Resend key check (each check is an outbound call) (`test_email.rate_limit` per `rate_interval`, client address for anonymous demo access); recipient is the configured test recipient or the user's own address (no free-form recipient in the UI). |
-| **Stored XSS through logged content** | Subjects, addresses, tags and errors are escaped by Twig; the text body is escaped in a `<pre>`; the HTML body is never inlined in the admin page — it is served alone with `Content-Security-Policy: default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `no-store`. |
-| **Injection** | ORM QueryBuilder / DBAL with bound parameters; LIKE patterns escaped (`!` escape); table names come from the configured prefix (validated `[A-Za-z0-9_]*`); the list / export sort is a key whitelist mapped to fixed DQL columns (`SentMailRepository::SORT_FIELDS`, unknown keys refused), never request text in `ORDER BY`. |
-| **CSV / formula injection** (a subject or tag such as `=HYPERLINK("https://attacker.example",…)` run by a spreadsheet when an admin opens the export) | Every exported cell goes through ControllerKit's `CsvSafeWriter` (≥ 2.3.1): text starting with `=`, `+`, `-`, `@`, tab or CR gets a leading `'`, and a trigger after an embedded `;`, `,`, tab, `|` or line break gets a space (Excel in `;` list-separator locales splits cells there and ignores the quoting); RFC 4180 quoting; regression tests with formula payloads in subject and tag, also read with `;`. This is a best-effort guard for the common spreadsheets (Excel, LibreOffice, Google Sheets), not a guarantee for every CSV consumer: treat the file as untrusted data when another tool processes it. |
-| **Bulk personal-data exfiltration through the export** | Same access as the log plus optional `web_ui.export.access_roles`; `max_rows` cap (10 000, at most 100 000); no bodies unless three explicit opt-ins; `no-store`; can be switched off (`web_ui.export.enabled: false`). |
-| **Log write breaking delivery / host transactions** | Writes go through DBAL (never the host unit of work) and are best effort (warning on failure). |
-| **Accidental route exposure** | The controller is not autoconfigured; routes come only from the `nowo_storage_kit` loader, groups switched off are not loaded (REQ-SF-004 rule 7, integration test). |
-| **Demo configuration in production** | `security.allow_unauthenticated: true` is refused unless `kernel.debug` is true. The demo publishes its ports on `127.0.0.1` only and sends to Mailpit. |
-| **Cross-request state leaks (FrankenPHP worker)** | Only the transport for the last DSN is kept, reset on `kernel.reset` and on settings changes; see [FRANKENPHP-WORKER-AUDIT.md](FRANKENPHP-WORKER-AUDIT.md). |
+| Anonymous visitor | request download URLs (answered 404 unless a context lets anonymous viewers read) |
+| Signed-in user | upload into contexts the host lets them write; read files of contexts they may read |
+| Scope manager | edit a scope's bucket (endpoint, credentials), test it, move its files (only scopes their checker grants) |
+| Instance admin | edit the `storage` section, test the instance bucket, move its files |
+| Operations | `profiles` / `instance_profile` configuration, environment variables, CLI commands |
+| Bucket provider / network attacker | answer storage requests (hostile responses, rebinding DNS) |
 
-## Admin UI exposure and allow_unauthenticated
+### Trust boundaries
 
-The log shows who received what: keep `web_ui.path_prefix` behind the firewall (`access_control`) **and** the bundle
-checker. `security.allow_unauthenticated: true` is a demo / local switch only; the container refuses it without
-`kernel.debug`, but never set it in a shared or staging environment either. Restrict the mail sections in Instance
-Settings (`nowo_instance_settings.security.area_roles: { mailer: [ROLE_SUPER_ADMIN], resend: [ROLE_SUPER_ADMIN] }`)
-when not every admin may change the transport.
+1. **Browser → upload / download endpoints**: every byte, name and id is untrusted; access is decided per request by
+   the host's file contexts.
+2. **Page-edited bucket configuration → server-side requests**: a scope manager (or instance admin) chooses where the
+   server connects — the SSRF boundary. Configuration `profiles` are trusted (ops).
+3. **Server → bucket**: responses are untrusted (error bodies never reach pages; copies are verified).
+4. **Bucket content → browsers**: a stored object must not run script on the application origin.
+5. **Database at rest**: secrets are encrypted; logs, flashes, audit events and exceptions are outside the secret
+   boundary.
 
-## Secrets and cryptography
+## Controls
 
-- `mailer.dsn` and `resend.api_key` are Instance Settings secret fields: encrypted at rest with DoctrineEncryptBundle,
-  never sent back to the browser, exported only sealed. StorageKit adds no cryptography of its own.
-- The decrypted DSN lives in memory only while a transport is built and in the cached transport object.
-- Fixtures and the demo use obvious placeholders (`REDACTED-TEST`, `REDACTED-DEMO`); the demo key is generated at
-  start and ignored by git.
+### Object keys and path traversal
+
+- Object keys are generated by the server: `yyyy/mm/<uuid v4>` plus `-preview` / `-thumb`; no user input reaches a key.
+- The prefix is validated (`[A-Za-z0-9!_.*'()-/]`, ≤ 191 characters, no `.` / `..` / empty segment); bucket names
+  follow the S3 rules (no `..`); the region is a `[a-z0-9-]` token (it builds `s3.<region>.amazonaws.com`).
+- The original file name is only kept as alt text (`basename`, control characters removed, ≤ 120 characters) and as an
+  ASCII-sanitised download name.
+- Context types / ids and scope keys are short tokens without `/` (route requirements and entity checks).
+
+### Content type and extension allow-lists
+
+- Uploads are accepted **by content only**: PNG, JPEG, GIF, WebP magic bytes must match what `getimagesizefromstring()`
+  reads; the file name and the declared type are ignored. SVG, HTML and anything else are refused (`422 type`).
+- JPEG, PNG and still WebP are decoded and re-encoded (drops EXIF / GPS / XMP and trailing payloads).
+- Downloads are sent with the stored (sniffed) type only if it is one of the four, else `application/octet-stream`;
+  streamed responses carry `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
+  `Cross-Origin-Resource-Policy: same-origin` and `Content-Disposition: attachment` by default (`download.disposition`).
+- Upload JSON answers are `private, no-store`, `nosniff`.
+
+### Size, pixel and memory limits
+
+- `upload.max_bytes` (default 10 MiB) before and after PHP's own limits.
+- `upload.max_pixels` (default 40 MP) read from the header **before** decoding: no decompression bomb.
+- Before decoding, the image must fit twice (4 bytes per pixel × 2) in what is left of `memory_limit`, or it is refused
+  like an oversized image instead of a fatal out-of-memory; variants are made one from the other (at most two decoded
+  images alive).
+- Per-user upload rate limit (`upload.rate_limit` per `upload.rate_interval`, sliding window); optional owner quota
+  (`UploadLimitInterface`) checked before anything is written.
+- Storage requests: idle timeout `endpoints.request_timeout`, total 4×; DNS lookups `endpoints.dns_timeout`.
+- Purge and moves work in bounded keyset batches; `--check` listings are capped (100 keys, 100 000 objects scanned).
+
+### Downloads and pre-signed URLs
+
+- Every download asks the file's context whether the viewer may read it; **404** for a missing and a forbidden file
+  alike (no existence oracle).
+- Buckets typed into a page are always **streamed** by the application (`proxy`): browsers never talk to them and no
+  page user can widen the CSP. Only configuration profiles with `delivery: redirect` answer `302` to a pre-signed URL.
+- Pre-signed URLs: lifetime `download.url_ttl`, bounded 60–3600 s (default 300); signed GET of one object with response
+  overrides (stored type, configured disposition, private cache bounded by the lifetime); the origin comes only from
+  the configured profile (validated `scheme://host[:port]`), never from the request — no open redirect.
+- *Test connection* from the `storage` section redirects back to the section only when the query value `from` is the
+  literal `settings`, and then to a fixed route; every other redirect of the pages is a bundle route (path only).
+- Responses are `private` (`max-age = url_ttl − 60`), `X-Robots-Tag: noindex`, `Referrer-Policy: no-referrer`.
+
+### Authorisation hooks
+
+- `FileContextInterface::writableTarget()` decides uploads (null → 404); `readable()` decides downloads and which
+  images a text renders (`StoredImageResolver`), batched per context type. An unknown context type reads and writes
+  nothing.
+- `upload.access_roles` (default `ROLE_USER`, never empty) gates uploads at all; the token is trusted only when a
+  firewall matched the main request.
+- Instance pages: `security.access_roles` (default `ROLE_ADMIN`, never empty) or `security.access_checker`, enforced by
+  `StorageKitAccessListener` (every request under `web_ui.path_prefix` and instance-page sub-requests) and again by the
+  controllers.
+- Scope pages: `ScopeAccessCheckerInterface::canManage()`; denied users get 404 (scope existence not disclosed).
+  Without a configured checker nobody manages a scope (`DenyAllScopeAccessChecker`); `scopes.enabled` without
+  `access_checker` does not compile.
+- A scope bucket that is turned off or incomplete turns that scope's uploads off — never a silent fallback to another
+  owner's bucket.
+- The `storage` section follows Instance Settings' own access rules.
+
+### CSRF and rate limits
+
+- Upload: token in the `X-CSRF-Token` header, id `nowo_storage_kit/upload/<type>/<id>` (bound to the target context).
+- Pages: FormKit forms with token ids bound to the owner (`nowo_storage_kit/settings/<owner>`,
+  `nowo_storage_kit/move/target/<owner>`), CSRF-only action forms bound to action and owner
+  (`nowo_storage_kit/test/<owner>`, `nowo_storage_kit/move/<action>/<owner>`); all mutations are POST.
+- `CsrfProtectionPass` refuses to compile the pages or the upload endpoint without CSRF.
+
+### SSRF in endpoint configuration
+
+`Security\EndpointGuard` (SEC-STORAGE-SSRF) protects every bucket typed into a page (scope, Move target, the `storage`
+section unless `endpoints.guard_instance_profile: false`):
+
+1. **Structural validation** (`S3Settings::endpoint()`): `http(s)://host[:port]` only — no user info, path, query,
+   fragment, whitespace or quotes; a valid host name or IP literal.
+2. **Endpoint check** before saving, testing and connecting: the host is IDNA-mapped and every IP spelling (decimal,
+   octal, hex, short, IPv4-mapped / NAT64 / 6to4 IPv6) canonicalised by outbound-url-guard. Cloud-metadata hosts and
+   addresses are always refused; unless allow-listed, `localhost`, `*.local` / `*.internal`, single-label names and
+   private / loopback / link-local / reserved addresses are refused; with `resolve_dns`, every A / AAAA answer is
+   checked (bounded lookup) and an unresolvable name is refused.
+3. **Connect-time filter**: every request of a guarded bucket goes through Symfony's `NoPrivateNetworkHttpClient`
+   (checks the address actually connected to: DNS rebinding) with redirects off. For an allow-listed host or
+   `allow_private`, only the metadata ranges stay blocked (`169.254.0.0/16`, `fe80::/10`, `100.100.100.200/32`,
+   `fd00:ec2::254/128`, `::ffff:169.254.0.0/112`).
+4. Guarded buckets with a custom endpoint always use path-style addressing, so the host connected to is exactly the
+   checked endpoint host (no `<bucket>.` sub-domain).
+5. The public endpoint is only signed for, never fetched by the server.
+6. *Test connection* reports a generic reason and the HTTP status **class** only — no provider message or XML body
+   (no response oracle for port scanning).
+
+`endpoints.allow_private` compiles only with `kernel.debug`; `endpoints.allowed_hosts` is an exact list.
+
+### Credentials
+
+- Instance bucket in the `storage` section: Instance Settings secret — encrypted at rest, never rendered back, blank
+  keeps the saved value.
+- Scope, target and retired buckets: `storage_kit_profile.secret` encrypted by DoctrineEncrypt (`#[Encrypted]`; the
+  container refuses to compile without DoctrineEncrypt); the form field is write-only (`always_empty`). After a switch of
+  the settings-backed instance bucket, the retired row keeps the old connection encrypted the same way.
+- Configuration profiles: environment variables / Symfony secrets; a malformed entry is logged by name only.
+- Credentials come only from the settings — no instance-metadata or environment fallback in the S3 client.
+- Secrets never appear in logs, exceptions, audit events, flashes, view models or `var_dump()` output:
+  `#[SensitiveParameter]`, `S3Settings::__debugInfo()` masks key and secret, the connection fingerprint hashes the
+  secret, `ErrorScrubber` masks the key, the secret and `X-Amz-Signature` / `X-Amz-Credential` / `X-Amz-Security-Token`
+  values in logged messages (cut to 500 characters), `StorageSync::error` and probe results hold generic reasons only,
+  audit events carry field **names** only.
+
+### References and the purge
+
+- A text references only files of its **own** context (SEC-FILE-REF-PIN): a uuid learned elsewhere cannot keep someone
+  else's orphan from the purge or claim it.
+- The purge deletes objects from each file's own bucket, re-checks for a new reference before deleting, and keeps the
+  row when the bucket refuses.
+
+### Worker-mode state
+
+Request-scoped memos (connections, resolved profiles, per-viewer read decisions, pending references) are cleared on
+`kernel.reset`; profiles and connections also on a `storage` section change. Read decisions are keyed by viewer, so
+one user's decision is never reused for another within a request. See
+[FRANKENPHP-WORKER-AUDIT.md](FRANKENPHP-WORKER-AUDIT.md).
+
+## Admin UI exposure and debug-only switches
+
+- Routes exist only when the host imports the `nowo_storage_kit` loader; pages only with `web_ui.enabled`, endpoints
+  only with `upload.enabled`.
+- `security.allow_unauthenticated` and `endpoints.allow_private` refuse to compile outside `kernel.debug`; security
+  switches must be literal booleans; empty role lists are refused.
+- Page responses are `private, no-store`.
 
 ## Personal data (GDPR)
 
-- The sent-mail log stores recipients' addresses and subjects (needed to answer "was it sent?"). Bodies are **off by
-  default** (`log.store_bodies: false`); when on, use `MailHeaders::redact()` for one-time links and codes.
-- Retention: `nowo:storage-kit:log:purge` (default `log.retention_days: 30`) — schedule it.
-- Erasure: `nowo:storage-kit:log:forget <email>` / `SentMailRecorder::forgetAddress()` deletes every row (and body) the
-  person sent or received (to, cc, bcc, sender — matched on a normalised `recipient_index` column, so it works the same
-  on SQLite, MySQL / MariaDB and PostgreSQL, also for addresses with `/` or non-ASCII characters) and masks the address
-  in the subjects and stored bodies of the other rows (also URL-encoded). Internationalised addresses are accepted.
-  Call it from your account-deletion flow. Not covered: copies outside the log (provider dashboards, mailboxes).
-- `log.enabled: false` disables the log entirely.
-- **CSV export** (`web_ui.export`, on by default for whoever opens the log): a downloaded file is a copy outside the
-  retention purge and the erasure command. Limit it with `web_ui.export.access_roles`, keep `include_bodies` off, and
-  record in your processing register who may export and how long files are kept. Bodies need three explicit opt-ins
-  (`log.store_bodies`, `web_ui.export.include_bodies`, `?bodies=1`). Errors are scrubbed again on export.
+`storage_kit_file` keeps the uploader's user identifier (≤ 180 characters), the original name and the context; the
+images themselves may be personal data. `StoredFilesPersonalData::export()` lists a user's uploads with a link to the
+original; `erase()` removes name and uploader from files still shown by a text and hands the others to the next purge.
+Orphans are deleted after `purge.retention_days`. GIF and animated WebP keep their embedded metadata (see residual
+risks).
 
-## Logging
+## Logging and audit
 
-- `notice` "Mail settings changed." — section, field names, origin, redacted new transport, readiness.
-- `warning` "Mail delivery failed." — redacted transport label and exception class (the message goes to the log row,
-  scrubbed).
-- `info` / `warning` test e-mail, Resend check (domain count / HTTP status), purge (days, count), erasure (count only).
-- `warning` "Sent-mail log insert / update failed." — exception class only.
-- Never logged: DSNs, passwords, API keys, message bodies, recipient addresses.
-- `warning` "Mail delivery failed." carries a `reference` and a `detail`: the scrubbed transport message, which **may
-  contain a provider response body** (with the known credential formats masked). Treat the application log as
-  confidential; the body never reaches the sent-mail log, the flash, the CLI or the Messenger failure transport.
-
-## Resource limits and timeouts
-
-- DNS lookup per DSN host: `dsn.dns_timeout` (2 s), on save / import and when the transport for a DSN is built
-  (once per DSN per worker until `kernel.reset` / a settings change). The readiness check (`isOutboundMailReady()`,
-  AuthKit login page) never resolves DNS: syntax and configuration only.
-- Resend key check: `resend.api_timeout` (10 s connect + total), `max_redirects: 0`.
-- SMTP / provider sends: Symfony transport timeouts (DSN `timeout` option); keep them below PHP `max_execution_time`
-  ([CONFIGURATION — Timeouts](CONFIGURATION.md#timeouts-req-runtime-001)).
-- Stored bodies capped at 1 MiB each, errors at 2 000 characters, search at 120 characters, list pages at
-  `web_ui.page_size` (≤ 200); purge in keyset batches; CSV export streamed (one row hydrated at a time; bodies loaded
-  in chunks of about `web_ui.export.body_batch_bytes`, 8 MiB, instead of 100 rows of up to 2 MiB each) and capped at
-  `web_ui.export.max_rows` (10 000, at most 100 000). On MySQL / MariaDB `pdo_mysql` buffers the whole row result in
-  the client before the first line is written (a few KiB per row), so the peak memory of an export grows with
-  `max_rows`; the connection is not switched to unbuffered mode because the body queries run while the rows are read.
-  A fatal error in the middle of the stream leaves a partial file with status 200 (headers already sent).
-
-## CSRF
-
-Applies (session-authenticated admin mutations): FormKit CSRF-only forms on every POST action, fail-closed container
-check, no `csrf_protection: false` on mutation forms (only the idempotent GET filter form has none). The CLI has no
-session and no CSRF. The CSV export is a GET read with no side effect (same as the filters): no CSRF token; a forged
-cross-site link can only make the admin's own browser download what it may already read, never cached (`no-store`).
+- `warning` on a failed upload or test (scrubbed message), `info` audit lines (`StorageAuditEvent`: action, scope,
+  actor, ids, counters, field names), `error` when an orphan object could not be removed.
+- Never logged: secrets, access keys, signed URLs, file contents.
 
 ## Dependencies and updates
 
-- Runtime dependencies: Symfony components (mailer, form, validator, security-csrf, rate-limiter, http-client…),
-  Doctrine, Instance Settings, UiKit, FormKit, OutboundUrlGuard, Twig Extra. CI runs `composer audit --locked` on every
-  matrix cell; Dependabot groups Composer, npm (demo e2e) and GitHub Actions updates.
+- Runtime: Symfony components, Doctrine, async-aws S3, Flysystem, Instance Settings, DoctrineEncrypt, UiKit, FormKit,
+  OutboundUrlGuard, Twig Extra. CI runs `composer audit --locked`; Dependabot groups Composer, npm (demo e2e) and
+  GitHub Actions updates.
 - Security fixes are released as patch versions and noted in the changelog.
 
 ## Release security checklist (12.4.1)
@@ -144,55 +232,47 @@ cross-site link can only make the admin's own browser download what it may alrea
 | --- | --- |
 | SECURITY.md | This document + `.github/SECURITY.md`. |
 | `.env` in `.gitignore` | Root and demo `.gitignore` exclude `.env`, `.env.local`, `.env.dev`, key files. |
-| No secrets | Placeholders only in fixtures and demo; test DSNs built from `REDACTED-TEST`. |
-| Safe config / recipe | Recipe ships `ROLE_ADMIN`, `allow_unauthenticated: false`, no bodies, the `access_control` reminder. |
-| Input / output | DSN / sender constraints, UUID requirements, Twig escaping, sandboxed HTML body. |
+| No secrets | Fake development credentials only in the demo (`demo-access-key` / `demo-secret-key-not-real`, loopback-bound); fixtures use placeholders. |
+| Safe config / recipe | Defaults: `ROLE_ADMIN` pages, `ROLE_USER` uploads, private endpoints refused, `attachment` downloads, `allow_unauthenticated: false`. |
+| Input / output | Content sniffing, key generation, setting validation, UUID route requirements, Twig escaping, sandboxed downloads. |
 | Dependencies | `composer audit --locked` in CI. |
-| No-secret logs | See [Logging](#logging). |
-| Outbound I/O | SSRF host guard, scheme allow-list, fixed Resend URL, deadlines. |
-| Permissions / exposure | Opt-in routes, roles, section access for actions, firewall-only token trust, fail-closed compile checks. |
-| Limits / DoS | Rate limit, pagination, capped bodies and errors. |
-| AI security audit (REQ-SEC-004) | Appendix CA: Pass (good) / Low after re-verification on `de7dbbd` — see below. |
+| No-secret logs | See [Credentials](#credentials) and [Logging and audit](#logging-and-audit). |
+| Outbound I/O | SSRF guard (check + connect-time filter), timeouts, no redirects. |
+| Permissions / exposure | Opt-in routes, roles, file contexts, scope checker (404), firewall-only token trust, fail-closed compile checks. |
+| Limits / DoS | Size, pixel and memory caps, rate limit, quotas, bounded batches and listings. |
+| AI security audit (REQ-SEC-004) | Pending before the 1.0.0 tag — see below. |
 
 ## AI security audit (REQ-SEC-004)
 
-| Date | Revision | Auditor | Grade | Findings |
-| --- | --- | --- | --- | --- |
-| 2026-10-31 | `e30bcb9` (PR #1) | Independent AI audit, Appendix CA | **Pass (conditional) / Medium** | M1 SSRF through provider `region` options; L1 DNS on every readiness check; L2 erasure / search missed rows (JSON escaping, PostgreSQL, IDN); L3 credentials echoed in errors, provider bodies kept; Info I1–I10 |
-| 2026-10-31 | `de7dbbd` (PR #3) | Independent re-verification, Appendix CA | **Pass (good) / Low** | M1 held against 46 bypass cases; follow-ups N1 (unreachable API → raw HttpClient exception), N2 (SES / Scaleway DSNs refused), R1–R3 (erasure index separator, IDN forms, collations), info (insecure TLS option, SES regex anchor) |
-| 2026-10-31 | branch `fix/ca-followup` | Fixes of N1, N2, R1, R2, the info items; R3 documented | — | — |
-
-Recorded in the monorepo `BUNDLES_SECURITY_ANALYSIS.md` (Appendix CA). Current grade: **Pass (good) / Low**.
+Not audited yet: the independent audit is due before the first tag and will be recorded in the monorepo
+`BUNDLES_SECURITY_ANALYSIS.md` and here. The code carries the fixes of the symfony-beacon audit findings it was
+extracted with (SEC-STORAGE-SSRF, SEC-STORAGE-CSP-GLOBAL, SEC-FILE-REF-PIN; PERF-FILE-ORPHAN-UPDATE: keyset batches).
 
 ## Residual risks and host guidance
 
-- **I9 — DNS rebinding / TOCTOU.** The host is resolved when the DSN is validated; the transport resolves it again when it
-  connects. A host that changes its answer after validation could still reach a private address. Use IP-literal or
-  provider DSNs for strict environments, or an egress firewall.
-- **`allowed_hosts` / `allow_private_hosts`** turn the guard off for those hosts: list only relays you operate.
-  Single-label names (`mailpit`, `redis`) are refused unless allow-listed, with or without `resolve_dns` (CA I2);
-  `allow_private_hosts: true` accepts them.
-- **I5 — HTML body viewer.** The stored HTML body is served alone with a sandboxing CSP (no script, no forms, no remote
-  loads); a click on a link inside it still navigates the tab (normal for an e-mail viewer).
-- **I6 — test e-mail content.** The test e-mail names the redacted transport (`smtp://host:port`) and goes to the
-  configured test recipient, which any admin of the section may set to an external address (rate-limited, fixed
-  content).
-- **I8 — demo tooling.** The Playwright screenshot converter (`sharp`, dev only, not shipped) may carry upstream
-  image-library advisories; it never processes untrusted images.
-- **R3 — case and accent folding.** Subject / body erasure matches with SQL `LOWER()`: on SQLite it folds ASCII only (an
-  upper-case non-ASCII address in a subject may survive the masking — the rows addressed to the person are still deleted
-  through the normalised index), and MySQL / MariaDB accent-insensitive collations (`*_ai_ci`) may match more rows than
-  the exact address (`jose@` also matches `josé@`): erasure then deletes / masks more, never less.
-- **TLS checks.** `verify_peer=0` / `verify_peer_name=0` in a stored DSN are refused unless `dsn.allow_insecure_tls: true`
-  (development only).
-- **I10 — log visibility.** Every user who passes the StorageKit access checker sees every log row (an admin log, no
-  per-row ownership); Instance Settings `area_roles` for `mailer` restrict the settings, not the log — use
-  `security.access_roles` / `access_checker` for that.
-- **Admins choose the transport.** A user who may edit the `mailer` section can route all mail (including password
-  resets) through a server they control. Restrict the section with Instance Settings `area_roles` and audit the
-  `Mail settings changed.` notices.
-- **Framework fallback.** `MAILER_DSN` is not validated (ops configuration).
-- **Recipients in the log** are personal data even without bodies: protect the UI, purge, honour erasure requests.
+- **GIF / animated WebP metadata (SEC-INFO-GIF-METADATA).** They are stored as uploaded (re-encoding would lose the
+  animation): comments, XMP and other extension blocks survive. Privacy only; stripping them is on the
+  [ROADMAP](ROADMAP.md).
+- **GD peak memory (PERF-IMAGE-GD-PEAK-MEMORY).** A 40 MP image needs about 160 MB decoded (320 MB at the peak with a
+  variant). The memory check refuses what does not fit, but in worker mode every thread keeps its peak RSS. Lower
+  `upload.max_pixels` (16–24 MP) for small hosts and set FrankenPHP `max_requests`.
+- **CSP origins of redirect profiles.** Origins of `delivery: redirect` profiles are added to `img-src` for every page
+  (ops-chosen buckets only, never page-edited ones). Use `delivery: proxy` if that is too wide.
+- **One request per image (PERF-FILE-DOWNLOAD-REQUEST).** Proxy downloads go through PHP and pre-signed URLs change on
+  every request, so browsers cache only for `url_ttl − 60` seconds.
+- **Allow-listed and unguarded endpoints.** `endpoints.allowed_hosts`, `allow_private` (debug only) and
+  `guard_instance_profile: false` let a page-edited bucket reach private hosts (metadata stays blocked): list only
+  services you operate. Configuration profiles are never guarded.
+- **Who edits the bucket controls the data.** An instance admin (or a scope manager) can point new uploads at a bucket
+  they control, and *Switch* re-points every existing file after copying it there. Restrict the `storage` section with
+  Instance Settings area roles and watch `profile_saved` / `move_switched` audit events.
+- **Old buckets keep their objects.** A switch never deletes objects from the old bucket, and the retired profile keeps
+  its (encrypted) credentials so stray files still download. Delete the objects and rotate the old keys when you no
+  longer need them.
+- **`download.disposition: inline`** is safe for streamed files (sandbox CSP, `nosniff`), but makes redirect-delivered
+  files render on the bucket's origin.
+- **Your hooks are the policy.** A `readable()` that returns too much exposes files; a `writableTarget()` that returns
+  the wrong scope stores files in another owner's bucket. Test them like any access rule.
 
 ## Reporting a vulnerability
 

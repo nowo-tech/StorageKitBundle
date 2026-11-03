@@ -2,338 +2,481 @@
 
 ## Table of contents
 
-- [How a message is sent](#how-a-message-is-sent)
-- [The mailer settings section](#the-mailer-settings-section)
-  - [Fields](#fields)
-  - [DSN validation](#dsn-validation)
-  - [Sender rules](#sender-rules)
-- [Runtime DSN and fallback](#runtime-dsn-and-fallback)
-  - [Your own DSN provider](#your-own-dsn-provider)
-  - [Named transports](#named-transports)
-  - [Messenger (async mail)](#messenger-async-mail)
-- [Sender and Reply-To](#sender-and-reply-to)
-- [Tags and redaction](#tags-and-redaction)
-- [Test e-mail](#test-e-mail)
-- [Resend](#resend)
-- [Readiness and AuthKit](#readiness-and-authkit)
-- [Sent-mail log](#sent-mail-log)
-  - [Admin pages](#admin-pages)
-  - [Sorting](#sorting)
-  - [CSV export](#csv-export)
-  - [Retention and erasure](#retention-and-erasure)
-- [Reacting to changes and auditing](#reacting-to-changes-and-auditing)
+- [How it fits together](#how-it-fits-together)
+- [The instance bucket](#the-instance-bucket)
+  - [The `storage` settings section](#the-storage-settings-section)
+  - [A bucket from the configuration](#a-bucket-from-the-configuration)
+  - [Providers](#providers)
+  - [Test connection](#test-connection)
+- [File contexts (who may write and read)](#file-contexts-who-may-write-and-read)
+- [Uploading from an editor](#uploading-from-an-editor)
+  - [MilkdownEditor](#milkdowneditor)
+  - [Any other editor](#any-other-editor)
+  - [Upload checks and answers](#upload-checks-and-answers)
+- [Rendering texts with images](#rendering-texts-with-images)
+- [Downloads](#downloads)
+  - [CSP for redirect-delivered profiles](#csp-for-redirect-delivered-profiles)
+- [References and the purge](#references-and-the-purge)
+- [Scope buckets](#scope-buckets)
+- [Upload limits](#upload-limits)
+- [Moving to another bucket](#moving-to-another-bucket)
+  - [Move page](#move-page)
+  - [nowo:storage-kit:sync](#nowostorage-kitsync)
+  - [Switching the settings-backed instance bucket](#switching-the-settings-backed-instance-bucket)
+- [Adopting an existing instance bucket](#adopting-an-existing-instance-bucket)
+- [Personal data](#personal-data)
+- [Audit events](#audit-events)
 - [Admin UI](#admin-ui)
   - [Forms (FormKit)](#forms-formkit)
   - [Overriding templates (REQ-TWIG-001)](#overriding-templates-req-twig-001)
 - [Translations](#translations)
 - [Doctrine schema and migrations](#doctrine-schema-and-migrations)
 
-## How a message is sent
+## How it fits together
 
-```text
-MailerInterface::send()                         (your code, AuthKit, Notifier…)
-  └─ StorageKitMailer                              decorates mailer.mailer
-       • From / Reply-To from the settings when missing
-       • "queued" log row (only when the mailer has a message bus)
-       └─ framework Mailer ──(Messenger, optional)──┐
-                                                    ▼
-       RuntimeTransport                         decorates mailer.transports (also used by the Messenger handler)
-       • DSN = MailerDsnProviderInterface::getDsn() on every send (settings by default)
-       • none stored → framework transport (MAILER_DSN)
-       • stored DSN validated, transport built once per DSN, reset on kernel.reset / SettingsChangedEvent
-       • internal headers removed, outcome logged (sent / failed)
-```
+- **Texts** (comments, descriptions, wiki pages…) are your entities. They point at uploaded images with a URI
+  `storage-file:<uuid>` (`uri_scheme`) or with the download path `/storage/files/<uuid>/<variant>`, never with a
+  bucket URL.
+- **File contexts** (`FileContextInterface`, your code) say who may upload into a text's context and who may read it.
+- **Profiles** (`StorageProfile` rows) are the buckets. An owner — the instance, or a scope such as an organisation —
+  has one *active* profile (where uploads go), at most one *target* (a move in progress) and any number of *retired*
+  ones (buckets moved away from). Every stored file remembers its profile, so downloads, purges and moves always use
+  the right bucket.
+- **Stored files** (`StoredFile` rows) are the uploaded images: original plus `preview` / `thumb` variants, in a private
+  bucket under a random key `yyyy/mm/<uuid>`.
+- **References** (`StoredFileReference` rows) record which text points at which file; a file no text points at is an
+  orphan, deleted by `nowo:storage-kit:purge` after `purge.retention_days`.
 
-Nothing changes in your code: keep injecting `Symfony\Component\Mailer\MailerInterface`.
+## The instance bucket
 
-## The mailer settings section
+### The `storage` settings section
 
-StorageKit contributes the section **`mailer`** to [Instance Settings](https://github.com/nowo-tech/InstanceSettingsBundle) (`/admin/settings/sections/mailer` by default) and, with `resend.enabled: true`, the section **`resend`**.
+With the default `instance_profile: null`, the instance bucket is the `storage` section of
+[Instance Settings](https://github.com/nowo-tech/InstanceSettingsBundle) (**Settings → Storage**,
+`/admin/settings/sections/storage` with its defaults):
 
-### Fields
+1. Choose a **provider** (empty = uploads off). Only the provider's fields are shown and saved; the other provider's
+   values are kept but unused ([CONFIGURATION](CONFIGURATION.md#the-storage-instance-settings-section)).
+2. Fill in region, bucket, prefix, access key and secret (and, for an S3-compatible service, the endpoint, the
+   optional public endpoint and path style). The secret is an Instance Settings secret: encrypted at rest, never
+   rendered back; leave it blank to keep the saved one.
+3. Press **Test connection** (posts to the kit and comes back to the section with the result).
 
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `mailer.dsn` | secret (encrypted) | — | Validated ([DSN validation](#dsn-validation)); blank keeps the stored value, "Remove the saved value" clears it (back to `MAILER_DSN`). |
-| `mailer.from` | e-mail | `sender.default_from` | Default From; must be on a public domain unless `sender.require_public_domain: false`. |
-| `mailer.from_name` | string (≤ 120) | `sender.default_from_name` | Display name of the From. |
-| `mailer.reply_to` | e-mail | — | Default Reply-To. |
-| `mailer.test_recipient` | e-mail | — | Recipient of the test e-mails (else the signed-in user's address). |
-| `resend.enabled` | bool | `false` | Send through Resend while a key is stored. |
-| `resend.api_key` | secret (encrypted) | — | Resend API key (`re_…`). |
-| `resend.from` | e-mail | — | Sender while Resend is active (else `mailer.from`). |
+The section shows notices when uploads are off, when the connection is incomplete and when the last test failed.
+**Usage and move** opens the instance Storage page (`/admin/storage`): status, usage (files and bytes), last test,
+**Test connection**, **Edit connection** (back to the section) and **Move to another bucket**.
 
-The section actions receive Instance Settings' `SectionActionContext` (section, request, user).
+Saving the section dispatches Instance Settings' `SettingsChangedEvent`; `InstanceSettingsListener` drops the memoised
+profiles and connections (the next request uses the new values in every worker), forgets the last test result (it
+tested the old connection) and records a `profile_saved` audit event with the changed field names.
 
-Read them like any setting (`InstanceSettingsInterface::getString('mailer.from')`), or through the typed `Nowo\StorageKitBundle\Settings\MailSettings` service (`from()`, `replyTo()`, `dsn()`, `resendActive()`…). The section names and keys are a public contract: they are never renamed.
+The first time a provider is selected, the kit creates the instance's active `StorageProfile` row (`source =
+settings`): it holds no connection data, it only gives files a profile to point at.
 
-### DSN validation
+### A bucket from the configuration
 
-`Nowo\StorageKitBundle\Dsn\MailerDsnValidator` (also the `#[MailerDsn]` constraint of the field) accepts a DSN when:
-
-1. the scheme is in `dsn.allowed_schemes` (SMTP and the API / SMTP bridges of Mailgun, Postmark, SendGrid, SES, Brevo, Resend, Mailjet, MailPace, Scaleway by default) — `sendmail`, `native` (they run host processes) and `null` (drops every message) are refused even if listed;
-2. it parses (`Symfony\Component\Mailer\Transport\Dsn`);
-3. its **host** passes the SSRF guard ([`DsnHostGuard`](../src/Dsn/DsnHostGuard.php), the rules of nowo-tech/outbound-url-guard-bundle): hosts in `dsn.allowed_hosts` pass; cloud-metadata names and addresses never pass; with `dsn.allow_private_hosts: false` (default) `localhost`, `*.local`, `*.localhost`, `*.internal`, loopback / private / link-local / CGNAT / reserved IPs are refused; with `dsn.resolve_dns: true` (default) a host name must resolve (bounded lookup, `dsn.dns_timeout`) and every address must be public. Provider DSNs whose host is `default` (`resend+api://KEY@default`) target the provider endpoint and are not resolved;
-4. its query options are safe: `region` only from the bridge allow-list (Mailgun `us` / `eu`, SendGrid `global` / `eu`, Scaleway `fr-par` / `nl-ams` / `pl-waw`, SES AWS region syntax; refused elsewhere), no other option value with `@ / ? # : \`, whitespace or control characters (credential options such as `session_token` excepted) — otherwise `dsn.option_not_allowed`;
-5. a transport factory supports it (otherwise `dsn.unsupported`: install the bridge, e.g. `composer require symfony/resend-mailer`), and the **endpoint the built transport targets** is a provider host or passes the host guard. Building the transport does not connect.
-
-Error keys (`NowoStorageKitBundle` domain): `dsn.invalid`, `dsn.null_transport`, `dsn.scheme_not_allowed`, `dsn.option_not_allowed`, `dsn.insecure_tls` (`verify_peer=0` without `dsn.allow_insecure_tls`), `dsn.host_not_allowed`, `dsn.host_unresolvable`, `dsn.unsupported`. Single-label host names (`mailpit`) are refused unless listed in `dsn.allowed_hosts`. The DSN is never part of a message.
-
-```php
-$error = $validator->validate('smtp://user:pass@10.0.0.5:25');   // 'dsn.host_not_allowed'
-$validator->isDeliverable('smtp://user:pass@smtp.example.com');  // true
-```
-
-An internal relay or a demo catcher:
+Operations can pin the instance bucket in the configuration instead (credentials from the environment):
 
 ```yaml
 nowo_storage_kit:
-    dsn:
-        allowed_hosts: [mailpit, relay.corp.example]
+    profiles:
+        main:
+            dsn: '%env(STORAGE_KIT_DSN)%'   # s3://KEY:SECRET@s3.eu-central-003.backblazeb2.com/my-bucket?region=eu-central-003
+            delivery: redirect              # or proxy
+    instance_profile: main
 ```
 
-### Sender rules
+The `storage` section is then not registered, the instance Storage page is read-only (Test and Move work, *Switch*
+does not: change the configuration instead) and the instance does not need Instance Settings. Config profiles are
+trusted: the SSRF guard does not apply to them, and only they can use `delivery: redirect`.
 
-`Nowo\StorageKitBundle\Sender\SenderAddress::isDeliverable()` (and the `#[DeliverableSender]` constraint): a valid address (optionally `Name <address>`) whose domain has a dot and does not end in `.local`, `.localhost`, `.internal` or `.`. Providers reject or spam-folder anything else.
+### Providers
 
-## Runtime DSN and fallback
+| Provider | Value | Fields |
+| --- | --- | --- |
+| Amazon S3 | `aws_s3` | region, bucket, prefix, access key, secret. The endpoint is derived from the region (`s3.<region>.amazonaws.com`, virtual-hosted style). |
+| S3-compatible service | `s3_compatible` | the same plus endpoint (`https://host[:port]`, SSRF-guarded), optional public endpoint (when browsers reach the bucket at another address than the server), path style (most self-hosted services: MinIO, RustFS). Cloudflare R2, Backblaze B2, Wasabi, Scaleway, RustFS, MinIO… |
 
-The DSN of every send is, in order:
+Objects are always written private (canned ACL `bucket-owner-full-control`, accepted by buckets with ACLs disabled).
+There is no local-disk provider in 1.0.
 
-1. the Resend key (`resend+api://<key>@default`) when the `resend` section exists, is switched on and holds a key;
-2. the `mailer.dsn` secret;
-3. nothing → the **framework transport** (`framework.mailer.dsn`, usually `MAILER_DSN`) — keep it as the bootstrap value (`null://null` is fine until a DSN is stored).
+### Test connection
 
-A stored DSN that no longer passes validation (for example after tightening `allowed_schemes`) makes the send **fail** with a `TransportException` naming the error key — StorageKit never falls back silently to another transport.
+*Test connection* (instance Storage page, the `storage` section, a scope page, the Move page for the target) checks the
+endpoint with the SSRF guard, writes a small object under `<prefix>/.storage-kit-probe/`, reads it back, pre-signs it,
+tries an anonymous read and deletes it. The flash names the failed step and a generic reason (*the storage answered
+with an error (4xx)*, *could not be reached*, *the endpoint is not allowed*…); the provider's own message only goes to
+the log, scrubbed of credentials and signatures. If the anonymous read succeeds the test passes with a warning: *anyone
+can read this bucket. Make it private before storing files.* The result is stored on the profile (aside "Connection
+test") and audited (`profile_tested`).
 
-### Your own DSN provider
+## File contexts (who may write and read)
 
-Implement `Nowo\StorageKitBundle\Dsn\MailerDsnProviderInterface` (a vault, `nowo-tech/runtime-env-bundle`, a per-tenant table…) and point the config at it:
+Uploads are refused until you register at least one context. A context is a kind of text files are uploaded into;
+implement `Nowo\StorageKitBundle\Context\FileContextInterface` (autoconfigured, tag `nowo_storage_kit.file_context`):
 
 ```php
-final readonly class VaultDsnProvider implements MailerDsnProviderInterface
+use Nowo\StorageKitBundle\Context\FileContextInterface;
+use Nowo\StorageKitBundle\Context\FileContextTarget;
+
+final class IssueCommentContext implements FileContextInterface
 {
-    public function __construct(private VaultClient $vault) {}
+    public function __construct(private IssueAccess $access, private IssueRepository $issues) {}
 
-    public function getDsn(): ?RuntimeDsn
+    public function type(): string { return 'issue'; }        // 1–16 chars [a-z0-9_], stored on the file
+
+    /** Context ids the viewer may read: ONE query for all ids (a page renders many images). */
+    public function readable(?object $viewer, array $ids): array
     {
-        $dsn = $this->vault->read('mail/dsn');              // read per call: no constructor caching (worker mode)
+        return $this->access->readableIssueIds($viewer, $ids);
+    }
 
-        return $dsn === null ? null : new RuntimeDsn($dsn); // null = framework transport
+    /** Which contexts still exist (files of a deleted one become orphans). */
+    public function existing(array $ids): array
+    {
+        return $this->issues->existingIds($ids);
+    }
+
+    /** Null = unknown or not writable (answered 404); else the scope bucket and the usage owner. */
+    public function writableTarget(object $user, string $id): ?FileContextTarget
+    {
+        $issue = $this->issues->find($id);
+
+        return $issue !== null && $this->access->canComment($user, $issue)
+            ? new FileContextTarget(scope: $issue->getOrganisationKey(), owner: $issue->getProjectKey())
+            : null;
     }
 }
 ```
 
-```yaml
-nowo_storage_kit:
-    mailer:
-        dsn_provider: App\Mail\VaultDsnProvider
-```
+- Context ids: 1–64 characters `[A-Za-z0-9_.:-]` (they appear in URLs and CSRF token ids).
+- `FileContextTarget::$scope` picks the scope bucket (only with `scopes.enabled`; null = the instance);
+  `$owner` (≤ 64 characters) is the key usage and limits are counted on.
+- Read decisions are memoised per viewer and context for the request (reset between worker requests).
+- An unknown context type reads nothing and writes nothing.
 
-Its DSNs are validated like stored ones.
+## Uploading from an editor
 
-### Named transports
+### MilkdownEditor
 
-A message with an `X-Transport` header (Symfony named transports, `framework.mailer.transports`) keeps its framework transport; the runtime DSN is not used for it.
-
-### Messenger (async mail)
-
-With `framework.messenger` routing `Symfony\Component\Mailer\Messenger\SendEmailMessage` to an async transport, the framework handler sends through `mailer.transports` — the decorated `RuntimeTransport` — so the **worker** resolves the DSN at delivery time. StorageKit records a `queued` row before dispatching and the worker resolves it (`sent` / `failed`, attempts incremented on retries). Retries and the failure transport are your Messenger configuration; StorageKit adds no handler of its own. Test e-mails are always sent synchronously.
-
-## Sender and Reply-To
-
-`StorageKitMailer` and `RuntimeTransport` add `From` (`mailer.from` with `mailer.from_name`, or `resend.from` while Resend is active) and `Reply-To` (`mailer.reply_to`) **only when the message has none**:
-
-```php
-$mailer->send((new Email())->to('alice@example.com')->subject('Hi')->text('…'));        // From from the settings
-$mailer->send((new Email())->from('billing@example.com')->to('…')->subject('Invoice')); // From kept
-```
-
-## Tags and redaction
-
-```php
-use Nowo\StorageKitBundle\Mailer\MailHeaders;
-
-$email = (new Email())->to($user->getEmail())->subject('Your sign-in link')->html($html);
-MailHeaders::tag($email, 'magic_link');      // category in the log (≤ 64 characters)
-MailHeaders::redact($email, $oneTimeUrl);    // masked as [redacted] in stored bodies
-$mailer->send($email);
-```
-
-Both headers (and the internal log id) are removed before the message leaves the application.
-
-## Test e-mail
-
-- **Admin UI:** "Send a test e-mail" next to Save on the mailer section. POST with a FormKit CSRF-only form; the user must pass the StorageKit access checker **and** the Instance Settings access of the section (Instance Settings `AccessGuard`); `test_email.rate_limit` per `test_email.rate_interval` per user (client address for anonymous demo access). The flash shows the transport's own error (credentials scrubbed).
-- **CLI:** `php bin/console nowo:storage-kit:send-test [to] [--resend]` (exit code 1 on failure).
-- **PHP:** `Nowo\StorageKitBundle\TestMail\TestMailSender::sendMailer(?string $to, ?object $user)` → `TestMailResult` (`outcome`, `recipient`, `error`).
-
-Recipient: the argument, else `mailer.test_recipient`, else the user's `getEmail()` (or an identifier that is an address). The message is sent synchronously through the current configuration, tagged `storage_kit_test`.
-
-## Resend
-
-```yaml
-nowo_storage_kit:
-    resend:
-        enabled: true      # adds the "resend" section; composer require symfony/resend-mailer
-        api_timeout: 10
-```
-
-The section shows "Check the API key" (`GET https://api.resend.com/domains`, bounded by `api_timeout`, no redirects; lists the domains and their status, recognises sending-only keys) and "Send a test e-mail with Resend" (uses the stored key even while the switch is off). Programmatic check: `Nowo\StorageKitBundle\Resend\ResendApiChecker::check($key)`.
-
-## Readiness and AuthKit
-
-```php
-$readiness->isOutboundMailReady();   // bool
-$status = $readiness->status();      // MailStatus: source (settings|resend|custom|fallback), label (scheme://host), ready, error
-```
+`nowo_storage_milkdown_upload(type, id)` returns MilkdownEditorBundle 1.1 upload options (`upload_url`,
+`upload_csrf_token`, `upload_max_size`, `upload_accept`), or `[]` when uploads are not on in that context:
 
 ```twig
-{% if nowo_storage_kit_outbound_mail_ready() %}…{% endif %}
-{{ nowo_storage_kit_status().label }}   {# smtp://smtp.example.com:587 — never credentials #}
+{{ form_row(form.body, nowo_storage_milkdown_upload('issue', issue.id)) }}
 ```
 
-Ready means a runtime DSN is stored and valid (checked without DNS: the readiness check runs on anonymous pages; the full check runs on save and before sending). With nothing stored, the framework transport counts only with `mailer.fallback_counts_as_ready: true` (the framework transports cannot be inspected).
+Or in PHP: `UploadEndpoint::milkdownOptions('issue', $id)` merged into the field options.
 
-**AuthKit:** when `nowo-tech/auth-kit-bundle` is installed, StorageKit registers `nowo_storage_kit.outbound_mail_ready_checker` (`StorageKitOutboundMailReadyChecker`, implements `Nowo\AuthKitBundle\Mailer\OutboundMailReadyCheckerInterface`) and prepends `nowo_auth_kit.outbound_mail_ready_checker` to it, so magic-login and password-reset links appear only when mail can be delivered. Set your own id in `nowo_auth_kit.outbound_mail_ready_checker` to override it.
+### Any other editor
 
-## Sent-mail log
+`nowo_storage_upload(type, id)` returns the upload state of a context for the current user:
 
-One row per message in `<prefix>storage_kit_sent_mail`: status (`queued`, `sent`, `failed`), tag, subject, first sender, recipients (to / cc / bcc, lowercase), transport scheme (`default` = framework transport), provider message id, size, attempts, error (credentials scrubbed), timestamps. Writes go through DBAL and never through your unit of work; a database error is logged as a warning and never breaks the delivery.
+- `{state: 'on', url, token, header: 'X-CSRF-Token', field: 'file', max_bytes, accept}`;
+- `{state: 'off', setup_url}` — the user may write there but no bucket is set up (`setup_url` points at the Storage
+  page the user may manage, or is null);
+- `{state: 'none'}` — not signed in, no upload role, or not writable.
 
-**Bodies** are stored in `<prefix>storage_kit_sent_mail_body` only with `log.store_bodies: true` (personal data: keep it off unless you need it), capped at 1 MiB each, with the `MailHeaders::redact()` values masked.
+```js
+const body = new FormData();
+body.append(config.field, file);
+const res = await fetch(config.url, { method: 'POST', headers: { [config.header]: config.token }, body });
+const json = await res.json();   // 201: insert json.markdown; else show json.message
+```
 
-Switch the log off with `log.enabled: false` (no table writes, no log pages, no purge commands).
+### Upload checks and answers
 
-### Admin pages
+`POST <upload.path_prefix>/upload/{type}/{id}` (multipart field `file`, token in `X-CSRF-Token`, token id
+`nowo_storage_kit/upload/<type>/<id>`) checks, in order: CSRF, signed-in user with `upload.access_roles`, per-user rate
+limit, the PHP upload, `max_bytes`; then the context (`writableTarget()`), a usable bucket, the image (content sniffing:
+PNG, JPEG, GIF, WebP only; SVG / HTML refused; pixels before decoding; memory), the owner's limit. JPEG, PNG and still
+WebP are re-encoded (EXIF / GPS / XMP dropped, JPEGs turned upright); GIF and animated WebP are kept as uploaded.
 
-- `GET /admin/mail/log` — UiKit list: search (subject or recipient, ≥ 3 characters), status, period (24 h / 7 d / 30 d / all), sortable columns, `web_ui.page_size` rows per page, the current transport and the "Export CSV" action in the header.
-- `GET /admin/mail/log/export` — CSV of the current filters and sort (see [CSV export](#csv-export)).
-- `GET /admin/mail/log/{id}` — envelope and delivery details; the stored text body (escaped).
-- `GET /admin/mail/log/{id}/body` — stored HTML body as its own response with `Content-Security-Policy: default-src 'none'; …; sandbox` (no script, no remote loads, no forms), `nosniff`, `no-store` (only with `log.store_bodies`).
+| Status | `error` | Meaning |
+| --- | --- | --- |
+| 201 | — | `{uuid, uri, url, original_url, name, alt, image: true, markdown}` — `markdown` is `![alt](storage-file:<uuid>)`, `url` the relative preview download path |
+| 403 | `csrf`, `access`, `limit` | bad token, no upload role, owner limit reached |
+| 404 | `context` | unknown or not writable context |
+| 409 | `off` | no usable bucket for the context |
+| 413 | `size` | above `max_bytes` (or PHP's own limits) |
+| 422 | `type`, `pixels`, `empty` | not an accepted image, too many pixels / too large to decode, no file |
+| 429 | `rate` | rate limited |
+| 503 | `storage` | the bucket failed (objects already written are removed) |
 
-### Sorting
+`message` is the translated `upload.error.<reason>`. Answers are `private, no-store`, `nosniff`. A refused upload
+stores nothing. The PHP API behind it is `Upload\ImageUploader::upload($user, $type, $id, $bytes, $name)`.
 
-The date, status, subject, tag and transport headers sort the list on the server (UiKit `Listing\SortRequest`,
-`?sort=<key>&dir=asc|desc`). The keys are a whitelist — `queuedAt`, `status`, `subject`, `tag`, `transport`
-(`SentMailRepository::SORT_FIELDS`, the same keys as the column `sortKey`s); an unknown key falls back to the default
-(newest first) and an unknown direction to the column's first-click direction (`desc` for the date), never an error.
-Ties are broken by the date and then the row id in the same direction, so pages never overlap. The pagination links,
-the filter form (hidden `sort` / `dir` fields) and the export link keep the sort; a click on a header goes back to page
-1 and keeps the filters. Recipients are a list and do not sort.
+A new file is an orphan until a text that points at it is saved ([References](#references-and-the-purge)).
+
+## Rendering texts with images
+
+`nowo_storage_images(text)` (or `StoredImageResolver::resolveText($text, $viewer)`) returns the stored images of a text
+the current viewer may read, `uuid => StoredImage{src, original, width, height, alt}` — one query for the files and one
+batched read check per context type. Images the viewer may not read are left out: render a neutral placeholder.
+
+```twig
+{% set images = nowo_storage_images(comment.body) %}
+{# in your Markdown renderer: replace storage-file:<uuid> with images[uuid].src, link to images[uuid].original,
+   set width / height to avoid layout shift #}
+```
+
+`FileUris::storedId($url)` turns `storage-file:<uuid>` or a download path into the uuid; `FileUris::plainText($text)`
+replaces inline images with `[image]` for texts sent outside the application (e-mails, push notifications).
+`nowo_storage_file_url(uuid, variant = 'preview')` gives a download path (the endpoint still checks access).
+
+## Downloads
+
+`GET <upload.path_prefix>/files/{uuid}/{original|preview|thumb}` answers **404** unless the viewer may read the file's
+context — the same answer for a missing and a forbidden file; anonymous viewers are asked to the context too. A missing
+variant falls back to the original. Then:
+
+- **proxy** (every database / settings bucket, and config profiles with `delivery: proxy`): the application streams the
+  bytes with the stored type, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
+  `Cross-Origin-Resource-Policy: same-origin` and `Content-Disposition` (`download.disposition`, default `attachment`,
+  which `<img>` still renders);
+- **redirect** (config profiles with `delivery: redirect`): `302` to a pre-signed URL of the private bucket, valid
+  `download.url_ttl` seconds; the bucket answers with the stored type, the configured disposition and a private cache.
+
+Both are `Cache-Control: private, max-age=<url_ttl − 60>`, `X-Robots-Tag: noindex`, `Referrer-Policy: no-referrer`.
+
+### CSP for redirect-delivered profiles
+
+`Http\StorageCspSources::imgSrc()` lists the browser origins of the config profiles with `delivery: redirect` (never a
+bucket typed into a page). With `nowo-tech/http-hardening-bundle` installed, `StorageCspSourceProvider` adds them to the
+CSP `img-src` automatically; otherwise add them to your own policy. With no redirect profile, nothing is added.
+
+## References and the purge
+
+For each kind of text that can point at files, implement `Reference\FileReferenceSourceInterface` (autoconfigured, tag
+`nowo_storage_kit.reference_source`):
 
 ```php
-// Your own listing of the log, same rules:
-$sort = \Nowo\StorageKitBundle\Ui\AdminPages::sort($request);  // SortRequest over the sortable columns
-$rows = $repository->findFiltered($filters, 25, 0, $sort->field, $sort->direction); // unknown key => InvalidArgumentException
+use Nowo\StorageKitBundle\Reference\ExistingIds;
+use Nowo\StorageKitBundle\Reference\FileReferenceSourceInterface;
+
+final class CommentReferenceSource implements FileReferenceSourceInterface
+{
+    public function __construct(private EntityManagerInterface $em) {}
+
+    public function type(): string { return 'comment'; }                 // 1–16 chars [a-z0-9_]
+    public function entityClass(): string { return Comment::class; }
+    public function field(): string { return 'body'; }                   // a flush that does not change it is free
+    public function id(object $entity): string { return $entity->getUuid(); }   // known before the insert
+    public function text(object $entity): string { return $entity->getBody(); }
+    public function context(object $entity): ?array { return ['issue', $entity->getIssue()->getId()]; }
+    public function existing(array $ids): array { return ExistingIds::of($this->em, Comment::class, 'uuid', $ids); }
+}
 ```
 
-### CSV export
+On every Doctrine flush, `FileReferenceListener` collects the texts written, changed or removed whose old or new value
+mentions a stored file, and updates their references after the flush (texts without files cost no query). Only files
+of the text's **own context** are referenced: a uuid copied from elsewhere cannot keep someone else's orphan alive.
+At most 200 file ids are taken from one text.
 
-"Export CSV" on the log list downloads `sent-mail-<YYYYmmdd-His>.csv` with the **current filters and sort**:
-
-```text
-Date,Status,Tag,From,To,Cc,Bcc,Subject,Error,Reference
-2026-10-31T09:12:44+00:00,sent,invoice,app@example.com,alice@example.com,,,Invoice 42,,0102abc@provider
-```
-
-- Columns: date (ISO 8601), status (`queued` / `sent` / `failed`), tag, from, to / cc / bcc (comma-separated), subject,
-  error (credentials scrubbed again with `ErrorScrubber`), reference (provider message id). The header row is
-  translated (`log.export.column.*`), UTF-8 with a BOM (Excel).
-- Written through ControllerKit's `Http\CsvStreamedResponse` / `CsvSafeWriter`: a cell starting with `=`, `+`, `-`,
-  `@`, a tab or a carriage return is prefixed with `'`, and a trigger after an embedded `;`, `,`, tab, `|` or line
-  break gets a space (CSV / formula injection, also when Excel reads the file with `;`), so a subject such as
-  `=HYPERLINK(…)` or `Hi;=cmd|…` is shown as text by the common spreadsheets. Streamed row by row (rows detached after use), `Cache-Control:
-  no-store, private`, `Content-Disposition: attachment`, `X-Robots-Tag: noindex`.
-- At most `web_ui.export.max_rows` (10 000, configurable up to 100 000) rows; a longer result ends with a notice row, `X-Mail-Kit-Export-Truncated:
-  1` and the action label "Export CSV (first N rows)" — narrow the filters to export the rest.
-- **Bodies are never exported** unless `log.store_bodies: true` **and** `web_ui.export.include_bodies: true` **and**
-  the request asks for them (`?bodies=1`, the "Export CSV with bodies" action): two more columns, text and HTML body,
-  loaded in chunks of about `web_ui.export.body_batch_bytes` (8 MiB) so the memory stays bounded.
-- Access: the same checker as the list (`security.*`) plus, when set, `web_ui.export.access_roles`. Disable it with
-  `web_ui.export.enabled: false`.
-- GET, not a POST form: the export is a read with no side effect, like the list filters (REQ-TWIG-005 asks for a
-  FormKit CSRF form only when a page submits data; a link carries none). A cross-site link can at most make an admin's
-  own browser download a file it could already open; the response is never cached.
-
-**GDPR.** A CSV leaves the application's retention and erasure: rows purged by `nowo:storage-kit:log:purge` or erased by
-`nowo:storage-kit:log:forget` stay in files already downloaded. Restrict the export to the roles that need it
-(`web_ui.export.access_roles`), keep bodies out of it, and treat the files as personal data (storage, retention,
-deletion on request) — see [SECURITY](SECURITY.md#personal-data-gdpr).
-
-### Retention and erasure
+Schedule the purge daily:
 
 ```bash
-php bin/console nowo:storage-kit:log:purge                       # rows older than log.retention_days (keyset batches)
-php bin/console nowo:storage-kit:log:purge --older-than-days=7
-php bin/console nowo:storage-kit:log:forget alice@example.com     # rows she sent or received deleted, address masked elsewhere (GDPR art. 17)
+php bin/console nowo:storage-kit:purge            # retention: purge.retention_days (7)
+php bin/console nowo:storage-kit:purge --days=30
 ```
 
-Schedule the purge (cron or Symfony Scheduler). `SentMailRecorder::forgetAddress()` (`['deleted' => n, 'redacted' => n]`) is the same erasure for an account-deletion flow; search and erasure use the normalised `recipient_index` column (each address NFC-normalised, lower-case, in its Unicode and punycode forms, separated by a control character) and work on SQLite, MySQL / MariaDB and PostgreSQL.
+It runs four bounded steps in keyset batches (`purge.batch_size`, at most `purge.max_batches` per step and run): drop
+references of texts that no longer exist (SQL cascades), drop references of files whose context is gone, mark
+unreferenced files as orphans, delete orphans older than the retention (objects from their own bucket, then the row; a
+bucket that refuses keeps the row for the next run; a file that got a reference in between is never deleted). Output:
+`References of deleted texts: …; files of deleted contexts: …; new orphans: …; purged: …; failed: ….` — exit 1 when a
+deletion failed. Audited as `files_purged`.
 
-**Failures.** A failed send throws `Nowo\StorageKitBundle\Mailer\DeliveryFailedException` (a `TransportException`): a short message with a reference (`The mail provider answered HTTP 403 (reference 1a2b3c4d).` for API bridges, the scrubbed SMTP answer otherwise). Provider response bodies and credentials never reach the log row, the flash or the Messenger failure transport; the scrubbed detail is logged (`Mail delivery failed.`, `reference`, `detail`).
+## Scope buckets
 
-## Reacting to changes and auditing
+Let organisations (tenants, workspaces…) bring their own bucket:
 
-A save of the `mailer` / `resend` section dispatches Instance Settings' `SettingsChangedEvent`; StorageKit's listener resets the runtime transport and logs `Mail settings changed.` (notice) with the section, field names, origin and the redacted new transport — never a value. `Nowo\StorageKitBundle\Dsn\MailerDsnAudit::redact($dsn)` / `label($dsn)` give you the same redacted view for your own audit trail.
+```yaml
+nowo_storage_kit:
+    scopes:
+        enabled: true
+        access_checker: App\Storage\OrganisationStorageAccess   # ScopeAccessCheckerInterface
+        resolver: null                                          # default: FileContextTarget::$scope
+        path_prefix: /storage/scopes
+```
+
+- `ScopeAccessCheckerInterface::canManage(?object $user, string $scope): bool` decides who opens
+  `/storage/scopes/{scope}` and `/storage/scopes/{scope}/move`; everyone else gets **404**.
+- `ScopeResolverInterface::scopeOf(FileContextTarget $target): ?string` maps a context target to a scope key
+  (`[A-Za-z0-9_.:-]{1,64}`); the default returns `$target->scope`.
+- Resolution: the scope's active profile; a scope profile that exists but is turned off or incomplete turns that
+  scope's uploads **off** (no silent fallback to another owner's bucket); a scope without a profile uses the instance
+  bucket.
+
+The scope Storage page has the bucket form (`StorageProfileType`): provider, *Store uploads in this bucket* switch,
+the provider's fields (endpoint rows only for an S3-compatible provider, through `visible-when`), secret write-only
+(blank keeps it, encrypted by DoctrineEncrypt). Turning uploads on needs a bucket, an access key, a secret and, for an
+S3-compatible provider, an endpoint. Scope endpoints always go through the SSRF guard. Saving records `profile_saved`
+with the changed field names.
+
+## Upload limits
+
+```yaml
+nowo_storage_kit:
+    limits:
+        upload_limit: App\Storage\PlanQuota   # UploadLimitInterface
+```
+
+`UploadLimitInterface::allows(FileContextTarget $target, int $bytes): bool` is asked after the image checks and before
+anything is written (`$bytes` = original + variants). `StoredFileRepository::bytesFor(array $owners)` gives the current
+usage of owners.
+
+## Moving to another bucket
+
+### Move page
+
+*Move to another bucket* (`/admin/storage/move`, or `/storage/scopes/{scope}/move`) moves every file of an owner:
+
+1. **Save the new bucket** (same form as a scope bucket; it is the owner's *target* profile) and **Test** it.
+2. **Start copying**: with a Messenger bus the copy runs in the background (`RunStorageSyncMessage`, slices of
+   `sync.slice_seconds`); without one the page shows the command to run. Every object (original and variants) is read
+   back and compared by SHA-256 (the original also against the checksum stored at upload); an object already in the
+   target with the same checksum is not written again. The state is saved after every file: a stopped copy
+   **resumes** after the last verified file. The first failure stops it with the file and a generic reason.
+3. **Stop copying** cancels; **Resume copying** continues; **Copy new files** catches up files uploaded meanwhile.
+4. **Switch to the new bucket** is enabled only after a complete, verified copy with no file uploaded since: in one
+   transaction every file is re-pointed to the target, the target becomes active and the old profile is **retired**
+   (kept, so a file written there during the switch still downloads). Objects are never deleted from the old bucket.
+5. **Forget the new bucket** discards the target and its sync (objects already copied stay in it).
+
+Every action is a POST with a CSRF token bound to the action and the owner, and is audited (`move_target_saved`,
+`move_sync_started`, `move_sync_cancelled`, `move_switched`, `move_target_discarded`). A configuration-managed instance
+bucket (`instance_profile`) can be copied but not switched here.
+
+### nowo:storage-kit:sync
+
+```bash
+php bin/console nowo:storage-kit:sync <from-uuid> <to-uuid>          # copy, verified, resumable (progress bar)
+php bin/console nowo:storage-kit:sync <from-uuid> <to-uuid> --check  # compare only
+php bin/console nowo:storage-kit:sync <uuid> <uuid> --check          # one bucket against its rows
+```
+
+The UUIDs are shown on the Move page. The command resumes the same sync as the page; it refuses to run a sync another
+runner holds. `--check` lists objects of the source's files missing from the target and objects under the target's
+prefix no file knows (first 100 of each; the scan stops after 100 000 objects) and exits 1 when something is missing.
+*Switch* stays on the Move page.
+
+### Switching the settings-backed instance bucket
+
+When the instance bucket is the `storage` section, *Switch* writes the target's connection into the section (validated
+by Instance Settings, the secret encrypted by it) and the target row reads from the section from then on. The retired
+row keeps an encrypted copy (DoctrineEncrypt) of the old connection, so files still pointing at it keep downloading.
+
+## Adopting an existing instance bucket
+
+`nowo:storage-kit:adopt-instance-bucket` migrates an instance bucket kept as a database row (`source = database`,
+state `active`, scope null — typically rows imported from an application's own storage tables, such as Beacon's) into
+the `storage` Instance Settings section: the row's connection is written into the section and the row becomes the
+settings-backed active profile, so the files keep pointing at it. Use it once after importing the rows (see
+[UPGRADING](UPGRADING.md#migrating-from-an-applications-own-storage-code)). Until then, such a row stays the instance's
+active profile and the values saved in the section are not used.
+
+## Personal data
+
+`PersonalData\StoredFilesPersonalData` is the hook for your GDPR export / erasure (UserKit's eraser / export provider,
+or your own), keyed by the user identifier stored at upload:
+
+- `export(string $userIdentifier): list<array>` — uuid, name, type, size, dimensions, sha256, context, whether a text
+  still shows it, created at and an absolute link to the original (it answers while the user may still read the
+  context);
+- `erase(string $userIdentifier): int` — files a kept text still shows lose their name and uploader; files no text
+  shows are expired for the next purge. No bucket call (erasers usually run in one transaction). Audited as
+  `files_erased`.
+
+## Audit events
+
+`Audit\StorageAuditEvent` is dispatched after every mutation (`action`, `scope`, `actor` user identifier, `details`) and
+logged at `info`. It never carries a secret, an access key, a signed URL or a provider message.
+
+| Action | Details |
+| --- | --- |
+| `profile_saved` | profile, fields (names only), origin (section saves) |
+| `profile_tested` | profile, ok, step, reason |
+| `move_target_saved` / `move_target_discarded` | profile (and fields) |
+| `move_sync_started` | sync, from, to |
+| `move_sync_cancelled` | sync |
+| `move_switched` | from, to, files |
+| `file_uploaded` | file, context, bytes |
+| `files_purged` | counters |
+| `files_erased` | files |
+
+```php
+#[AsEventListener]
+public function __invoke(StorageAuditEvent $event): void
+{
+    $this->auditLog->add('storage.' . $event->action, $event->actor, $event->details);
+}
+```
 
 ## Admin UI
 
-The routes come only from the `nowo_storage_kit` loader (REQ-SF-004 rule 7):
-
-| Route | Method | Path (default prefix) |
+| Page | Path (defaults) | Access |
 | --- | --- | --- |
-| `nowo_storage_kit_log` | GET | `/admin/mail/log` |
-| `nowo_storage_kit_log_show` | GET | `/admin/mail/log/{id}` |
-| `nowo_storage_kit_log_body` | GET | `/admin/mail/log/{id}/body` (with `log.store_bodies`) |
-| `nowo_storage_kit_log_export` | GET | `/admin/mail/log/export` (with `web_ui.export.enabled`) |
-| `nowo_storage_kit_test` | POST | `/admin/mail/actions/test` |
-| `nowo_storage_kit_resend_check` | POST | `/admin/mail/actions/resend/check` (with `resend.enabled`) |
-| `nowo_storage_kit_resend_test` | POST | `/admin/mail/actions/resend/test` (with `resend.enabled`) |
+| Instance Storage | `/admin/storage` | `security.access_roles` / `access_checker` (listener before the controller + controller) |
+| Instance Move | `/admin/storage/move` | same |
+| Scope Storage | `/storage/scopes/{scope}` | `scopes.access_checker` (404 otherwise) |
+| Scope Move | `/storage/scopes/{scope}/move` | same |
+| `storage` section | Instance Settings section page | Instance Settings access rules |
 
-Every request under the prefix passes `StorageKitAccessCheckerInterface` (`security.access_roles`, or your `security.access_checker`); the actions also need the Instance Settings access of their section and a valid CSRF token; the export also needs `web_ui.export.access_roles` when set. Add a link to the log in your admin menu (`path('nowo_storage_kit_log')`).
+Pages are UiKit form scaffolds ([TEMPLATES](TEMPLATES.md)); every response is `private, no-store`; secrets are never
+part of a view model.
 
 ### Forms (FormKit)
 
-The filter form (`SentMailFilterType`, GET, no CSRF) and the CSRF-only action forms are FormKit types rendered with `form_start` / `form_end` (REQ-TWIG-005) — no raw `<form>` / `<input>` in the bundle templates; keep it that way in overrides. The profile is `nowo_form_kit.profiles.storage_kit` ([CONFIGURATION](CONFIGURATION.md#formkit-profile)).
+`StorageProfileType` and the CSRF-only action forms are FormKit types rendered with `form_start` / `form_end`
+(REQ-TWIG-005) — no raw `<form>` / `<input>` in the bundle templates; keep it that way in overrides. Profile:
+`nowo_form_kit.profiles.storage_kit` ([CONFIGURATION](CONFIGURATION.md#formkit-profile)).
 
 ### Overriding templates (REQ-TWIG-001)
 
-Restyle through `nowo_ui_kit.theme` (slots, tokens, scaffolds) first — that covers every bundle at once ([TEMPLATES](TEMPLATES.md)). When a page needs bundle-specific markup, **do not copy** the template: point `web_ui.templates.<page>` at a thin template that extends the original and overrides one block, so bundle upgrades still reach you:
+Restyle through `nowo_ui_kit.theme` first. When a page needs bundle-specific markup, **do not copy** the template:
+point `web_ui.templates.<page>` at a thin template that extends the original and overrides one block:
 
 ```yaml
 nowo_storage_kit:
     web_ui:
         templates:
-            log_index: 'admin/storage_kit/log_index.html.twig'
+            move: 'admin/storage/move.html.twig'
 ```
 
 ```twig
-{# templates/admin/storage_kit/log_index.html.twig #}
-{% extends '@!NowoStorageKitBundle/log/index.html.twig' %}
-{% block nowo_ui_list_row %}{{ parent() }}{% endblock %}
+{# templates/admin/storage/move.html.twig #}
+{% extends '@!NowoStorageKitBundle/move/edit.html.twig' %}
+{% block nowo_storage_kit_move_progress %}{{ parent() }}<p>Copies run every night.</p>{% endblock %}
 ```
 
-`templates/bundles/NowoStorageKitBundle/<path>` overrides still work (Symfony convention) but freeze the file: you must re-apply every upstream change by hand. If you already have one, diff it against the new version on each upgrade, or replace it with a `web_ui.templates` override. Recovery: delete the copy, clear the cache, re-apply only the block you needed.
+`templates/bundles/NowoStorageKitBundle/<path>` overrides still work (Symfony convention) but freeze the file: re-apply
+upstream changes by hand, or replace them with a `web_ui.templates` override. Recovery: delete the copy, clear the
+cache, re-apply only the block you needed.
 
-| Template (subpath) | Page id | Scaffold | Data blocks |
+| Template (subpath) | Page id | Scaffold | Blocks |
 | --- | --- | --- | --- |
-| `log/index.html.twig` | `log_index` | `@NowoUiKit/page/list.html.twig` | `nowo_ui_list_row` (and every list block) |
-| `log/show.html.twig` | `log_show` | `@NowoUiKit/page/show.html.twig` | `nowo_ui_show_sections`, `nowo_ui_show_after`, `nowo_storage_kit_text_body` |
+| `settings/edit.html.twig` | `settings` | `@NowoUiKit/page/form.html.twig` | `nowo_ui_form_body`, `nowo_storage_kit_settings_notice`, `nowo_ui_form_aside` |
+| `move/edit.html.twig` | `move` | `@NowoUiKit/page/form.html.twig` | `nowo_ui_form_aside`, `nowo_storage_kit_move_progress` |
+| `settings/_aside.html.twig` | — | partial | aside cards of both pages |
 
-The settings pages themselves belong to Instance Settings (`@NowoInstanceSettingsBundle/settings/section.html.twig`).
+The `storage` section page itself belongs to Instance Settings.
 
 ## Translations
 
-Domain **`NowoStorageKitBundle`** (en, es, fr, de, it, pt, nl): section labels and help, DSN / sender errors, test e-mail outcomes and body, Resend messages, log pages. Override any key in `translations/NowoStorageKitBundle.<locale>.yaml` of your app.
+Domain **`NowoStorageKitBundle`** in `en`, `es`, `fr`, `de`, `it`, `pt`, `nl`: page labels, field labels and help,
+validation messages, test outcomes (`test.*`, `probe.*`), move statuses (`move.*`), upload errors (`upload.error.*`),
+providers (`provider.*`) and the section (`section.*`). Override any key in
+`translations/NowoStorageKitBundle.<locale>.yaml`.
 
 ## Doctrine schema and migrations
 
-The entities `Nowo\StorageKitBundle\Entity\SentMail` and `SentMailBody` are mapped automatically (attribute mapping, `NowoStorageKit` alias). Generate a migration in your app:
+Entities `StorageProfile`, `StoredFile`, `StoredFileReference` and `StorageSync` are mapped automatically. Generate a
+migration in your app:
 
 ```bash
 php bin/console doctrine:migrations:diff
 php bin/console doctrine:migrations:migrate
 ```
 
-Tables: `<prefix>storage_kit_sent_mail` (indexes `<prefix>idx_storage_kit_sent_mail_queued`, `<prefix>idx_storage_kit_sent_mail_status`) and `<prefix>storage_kit_sent_mail_body`. The Instance Settings table holds the settings themselves.
+Tables and indexes: [ARCHITECTURE](ARCHITECTURE.md#entities-and-tables).

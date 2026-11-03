@@ -12,6 +12,7 @@ use Nowo\InstanceSettingsBundle\NowoInstanceSettingsBundle;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\OutboundUrlGuardBundle\Dns\HostnameDnsLookup;
 use Nowo\StorageKitBundle\Audit\AuditRecorder;
+use Nowo\StorageKitBundle\Command\AdoptInstanceBucketCommand;
 use Nowo\StorageKitBundle\Command\PurgeFilesCommand;
 use Nowo\StorageKitBundle\Command\StorageSyncCommand;
 use Nowo\StorageKitBundle\Context\FileContextInterface;
@@ -386,6 +387,15 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             ->addTag('console.command', ['command' => PurgeFilesCommand::NAME]));
         $container->setDefinition(StorageSyncCommand::class, (new Definition(StorageSyncCommand::class, [new Reference(StorageProfileRepository::class), new Reference(StorageSyncer::class)]))
             ->addTag('console.command', ['command' => StorageSyncCommand::NAME]));
+        if ($config['instance_profile'] === null) {
+            $container->setDefinition(AdoptInstanceBucketCommand::class, (new Definition(AdoptInstanceBucketCommand::class, [
+                new Reference(StorageProfileRepository::class),
+                new Reference(InstanceStorageSettings::class),
+                new Reference(StorageProfiles::class),
+                new Reference(StorageEntityManager::class),
+                new Reference(AuditRecorder::class),
+            ]))->addTag('console.command', ['command' => AdoptInstanceBucketCommand::NAME]));
+        }
     }
 
     /**

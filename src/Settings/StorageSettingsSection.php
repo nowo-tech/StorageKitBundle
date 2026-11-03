@@ -27,7 +27,7 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
  * shown and saved (InstanceSettings 1.3 `visible_when`): nothing but the provider while it is empty (uploads off),
  * region / bucket / prefix / access key / secret for both providers, endpoint / public endpoint / path style only for
  * an S3-compatible one. The secret is an Instance Settings secret (encrypted at rest, never rendered back, blank
- * keeps). The endpoint goes through the same SSRF guard as the scope buckets (unless `endpoints.guard_instance` is
+ * keeps). The endpoint goes through the same SSRF guard as the scope buckets (unless `endpoints.guard_instance_profile` is
  * false). With the admin pages on, the section page also shows *Test connection* (POST + CSRF) and a link to the
  * storage overview (usage, test result, move).
  *

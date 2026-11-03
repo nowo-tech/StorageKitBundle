@@ -4,41 +4,78 @@
 
 > ⭐ **Found this useful?** [Install from Packagist](https://packagist.org/packages/nowo-tech/storage-kit-bundle) · Give it a **star** on [GitHub](https://github.com/nowo-tech/StorageKitBundle) so more developers can find it.
 
-**Storage Kit Bundle** — the mailer DSN, sender and test e-mail an operator edits without a deploy. It contributes a **`mailer`** (and optional **`resend`**) section to [Instance Settings](https://github.com/nowo-tech/InstanceSettingsBundle) — DSN encrypted at rest, sender address and name, Reply-To, test recipient — and decorates the Symfony mailer so **every send resolves the DSN at runtime** (framework `MAILER_DSN` as fallback), also for messages queued to Messenger. DSNs are validated (no `sendmail` / `native` / `null`, SSRF-safe hosts through [OutboundUrlGuard](https://github.com/nowo-tech/OutboundUrlGuard) rules), senders must be on a public domain, a "send a test e-mail" action and CLI answer with the transport's own error, a Resend key check calls the API with a deadline, and a **sent-mail log** (envelope only by default, retention purge, right-to-erasure command) has a UiKit admin page. `isOutboundMailReady()` gates AuthKit magic-login / password-reset. Tested on Symfony **7.4**, **8.0** and **8.1** · PHP 8.2+ (Symfony 8.x requires PHP 8.4+).
+**Storage Kit Bundle** — S3-compatible object storage for the images users paste into Markdown texts. The instance
+bucket is a **`storage`** section of [Instance Settings](https://github.com/nowo-tech/InstanceSettingsBundle) (Amazon
+S3 or any S3-compatible service — R2, B2, Wasabi, Scaleway, RustFS, MinIO —, secret encrypted at rest, **Test
+connection**) or an ops-managed configuration profile; organisations or tenants can bring **their own bucket**.
+Uploads are content-sniffed, size- and pixel-capped, re-encoded and stored under random keys in **private** buckets;
+**your file contexts decide who writes and who reads**, downloads are streamed with a sandbox CSP (or redirected to a
+short-lived pre-signed URL for configuration profiles), texts keep `storage-file:<uuid>` URIs, orphans are **purged**
+after a retention, and a whole owner can be **moved to another bucket** with a SHA-256-verified, resumable copy and a
+switch. Every bucket typed into a page goes through an **SSRF guard**. Tested on Symfony **7.4** and **8.1** · PHP 8.2+
+(Symfony 8.x requires PHP 8.4+).
 
 ![FrankenPHP Friendly Worker Mode](docs/images/frankenphp-friendly.png)
 
 This bundle is **FrankenPHP worker mode friendly**.
 
-The transport built from the stored DSN is cached per DSN and dropped on `kernel.reset` and on `SettingsChangedEvent`; the DSN itself is read on every send, so a change saved in one worker is used by every worker on its next message. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md).
+Bucket connections, resolved profiles and per-viewer read decisions are request-scoped memos reset on `kernel.reset`
+(and on a `storage` section change), so a bucket saved or switched in one request is used by the next one in every
+worker. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md).
 
 ## Screenshots
 
 <table>
   <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/demo/mailer-settings.webp" alt="Mailer settings section: encrypted DSN shown only as saved, sender fields and the Send a test e-mail action with its success message" />
-      <br /><sub>Mailer section in Instance Settings: encrypted DSN, sender and a test e-mail that reports the transport answer</sub>
+    <td align="center" width="33%">
+      <img src="docs/images/demo/notes.webp" alt="Demo notes page: a note with an image uploaded into it and served by the application" />
+      <br /><sub>An image uploaded into a note, stored in a private bucket and served through the application</sub>
     </td>
-    <td align="center" width="50%">
-      <img src="docs/images/demo/sent-mail-log.webp" alt="Sent-mail log: filters, status badges, subjects, recipients, tags and transports of the last messages" />
-      <br /><sub>Sent-mail log: status, recipients, tag and transport per message (no bodies by default)</sub>
+    <td align="center" width="33%">
+      <img src="docs/images/demo/storage-settings.webp" alt="Instance Storage page: uploads on, usage, last connection test and the Test connection result" />
+      <br /><sub>Storage page: status, usage and a passed connection test</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/images/demo/storage-move.webp" alt="Move page: the new bucket form and a completed, verified copy ready to switch" />
+      <br /><sub>Move to another bucket: a completed and verified copy, ready to switch</sub>
     </td>
   </tr>
 </table>
 
 ## Features
 
-- **Runtime DSN** — `RuntimeTransport` decorates `mailer.transports` (used by the framework mailer **and** the Messenger `SendEmailMessage` handler): the DSN comes from the `mailer.dsn` setting (or the Resend key) on every send, the framework transport (`MAILER_DSN`) is the fallback, a message with an `X-Transport` header keeps its named transport. The built transport is cached per DSN and reset on `kernel.reset` / `SettingsChangedEvent` (worker safe). Replace the source with your own `MailerDsnProviderInterface`.
-- **`MailerInterface` decorator** — fills the runtime **From** (`mailer.from` / `mailer.from_name`) and **Reply-To** when a message has none, before the framework mailer builds the envelope or queues it.
-- **Settings sections** — `mailer`: DSN (encrypted secret), sender address and name, Reply-To, test recipient; optional `resend`: switch, API key (encrypted), sender. Validated on save and import; never rendered back.
-- **DSN validation** — allow-listed schemes (SMTP + common provider bridges; `sendmail`, `native` and `null` always refused), parse and build check (missing bridge detected), host SSRF guard: private / loopback / link-local / reserved / cloud-metadata addresses and `localhost` / `*.local` / `*.internal` names refused, host names resolved with a bounded lookup; `allowed_hosts` for an internal relay. A refused DSN fails the send (no silent fallback).
-- **Redacted audit** — `MailerDsnAudit` (`scheme://host[:port]`, never credentials) in logs, the admin header and `SettingsChangedEvent` audit lines; transport errors are scrubbed of credentials before they are stored or shown.
-- **Test e-mail** — "Send a test e-mail" next to the Save button (and `nowo:storage-kit:send-test`): synchronous, through the current configuration, CSRF + StorageKit access + Instance Settings section access, per-user rate limit, the transport's answer in the flash.
-- **Resend** — "Check the API key" (`GET /domains`, timeout, no redirects; sending-only keys recognised) and a Resend test e-mail.
-- **Sent-mail log** — one row per message (queued → sent / failed, attempts, provider id, size, tag); bodies only with `log.store_bodies` (values passed through `MailHeaders::redact()` masked); UiKit list (filters, server-side sortable columns, pagination) and detail pages; streamed **CSV export** of the filtered, sorted log (formula-injection safe, capped, bodies only on triple opt-in); `nowo:storage-kit:log:purge` (retention, keyset batches) and `nowo:storage-kit:log:forget <email>` (right to erasure).
-- **Readiness** — `OutboundMailReadiness::isOutboundMailReady()`, Twig `nowo_storage_kit_outbound_mail_ready()` / `nowo_storage_kit_status()`, and an **AuthKit** `OutboundMailReadyCheckerInterface` adapter wired automatically when AuthKit is installed.
-- **Fail-closed wiring** — the container refuses to compile without Instance Settings or the framework mailer, with the UI on but no form CSRF, with an empty role list, or with `allow_unauthenticated` outside `kernel.debug`.
+- **S3-compatible buckets** over Flysystem + async-aws — providers `aws_s3` (endpoint derived from the region) and
+  `s3_compatible` (endpoint, public endpoint, path style); objects always private; no local-disk provider.
+- **Instance bucket in Instance Settings** — the `storage` section (provider, endpoint, public endpoint, region, bucket,
+  prefix, access key, encrypted write-only secret, path style), provider-dependent fields with `visible-when`, empty
+  provider = uploads off, notices, **Test connection** (write, read, sign, public-read warning, delete) and **Usage and
+  move**. Or pin it in the configuration (`profiles` + `instance_profile`, e.g. a DSN from an env var).
+- **Scope buckets** — `scopes.enabled` with your `ScopeResolverInterface` and `ScopeAccessCheckerInterface`: each
+  organisation / tenant manages its own bucket on its Storage page (404 for everyone else); a turned-off scope bucket
+  turns its uploads off, never falls back to someone else's.
+- **Image uploads for Markdown editors** — `POST /storage/upload/{type}/{id}`: CSRF header, upload roles, per-user rate
+  limit, PNG / JPEG / GIF / WebP by content (SVG and HTML refused), `max_bytes`, `max_pixels` before decoding, memory
+  check, re-encoding (EXIF / GPS stripped), preview and thumbnail variants, random server-side keys, optional plan quota
+  (`UploadLimitInterface`); answers the Markdown snippet `![alt](storage-file:<uuid>)`. Twig helpers for
+  MilkdownEditor and any other editor.
+- **Host-decided access** — `FileContextInterface` says who may write in a context (and which scope / owner pays) and
+  who may read it, batched per context type.
+- **Downloads** — 404 for missing and forbidden alike; streamed with `nosniff`, a sandbox CSP and `attachment`, or `302`
+  to a short-lived pre-signed URL (configuration profiles with `delivery: redirect`, origin added to the CSP through
+  HttpHardening); `nowo_storage_images()` resolves a text's images for your renderer.
+- **References and purge** — `FileReferenceSourceInterface` + a Doctrine flush listener track which text points at
+  which file (same context only); `nowo:storage-kit:purge` deletes orphans after `purge.retention_days` in keyset
+  batches.
+- **Verified bucket moves** — Move page (or `nowo:storage-kit:sync`): SHA-256-verified, idempotent, resumable copy in
+  Messenger slices; switch only after a complete copy with no upload since; the old bucket is retired, never emptied.
+- **SSRF guard** — private / loopback / link-local / metadata / IPv4-mapped endpoints refused, DNS resolved with a
+  deadline, connect-time filter without redirects, `endpoints.allowed_hosts` for internal services, `allow_private` in
+  debug only.
+- **No secret leaks** — credentials encrypted at rest (Instance Settings secret, DoctrineEncrypt), write-only fields,
+  provider messages scrubbed and kept out of pages, audit events (`StorageAuditEvent`) with field names only; GDPR export
+  / erasure hooks.
+- **Admin UI** on the UiKit page contract (FormKit profile `storage_kit`, opt-in route loader, 7 locales) and
+  **fail-closed wiring** (no DoctrineEncrypt, Instance Settings, CSRF or SecurityBundle when needed → no compile).
 
 ## Installation
 
@@ -46,73 +83,108 @@ The transport built from the stored DSN is cached per DSN and dropped on `kernel
 composer require nowo-tech/storage-kit-bundle
 ```
 
-With Symfony Flex the recipe adds `config/packages/nowo_storage_kit.yaml` and the route import. Without Flex, register `NowoInstanceSettingsBundle` (and its dependencies) and `NowoStorageKitBundle`, then import the routes — see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+With Symfony Flex the recipe adds `config/packages/nowo_storage_kit.yaml` and `config/routes/nowo_storage_kit.yaml`.
+Without Flex, register `NowoDoctrineEncryptBundle`, `NowoUiKitBundle`, `NowoFormKitBundle`,
+`NowoInstanceSettingsBundle` and `NowoStorageKitBundle` — see [docs/INSTALLATION.md](docs/INSTALLATION.md). Then:
 
 ```yaml
-# config/routes/nowo_storage_kit.yaml
+# config/routes/nowo_storage_kit.yaml (opt-in routes)
 nowo_storage_kit:
     resource: .
     type: nowo_storage_kit
+
+# config/routes/nowo_instance_settings.yaml (the "storage" section page)
+nowo_instance_settings:
+    resource: .
+    type: nowo_instance_settings
 ```
 
-Create the log tables with a migration (`php bin/console doctrine:migrations:diff`) and protect the prefix:
+Register the UiKit `visible-when` Stimulus peer (provider-dependent fields):
+
+```js
+import VisibleWhenController from '…/ui-kit-bundle/src/Resources/assets/stimulus-peers/visible_when_controller';
+app.register('visible-when', VisibleWhenController);
+```
+
+Create the tables with a migration (`php bin/console doctrine:migrations:diff`) and protect the prefixes:
 
 ```yaml
 # config/packages/security.yaml
 security:
     access_control:
-        - { path: ^/admin/mail, roles: ROLE_ADMIN }
+        - { path: ^/admin/storage, roles: ROLE_ADMIN }
+        - { path: ^/admin/settings, roles: ROLE_ADMIN }
 ```
 
 ## Quick start
 
-```yaml
-# config/packages/nowo_storage_kit.yaml
-nowo_storage_kit:
-    sender:
-        default_from: 'noreply@example.com'   # default of the mailer.from setting
-    log:
-        retention_days: 30
-```
-
-Keep `MAILER_DSN` as the bootstrap fallback (`null://null` is fine), open **Settings → Mailer** (`/admin/settings/sections/mailer`), store a DSN such as `smtp://user:password@smtp.example.com:587`, click **Send a test e-mail**. Every `MailerInterface::send()` now goes through it:
+1. Open **Settings → Storage** (`/admin/settings/sections/storage`), choose a provider, fill in the bucket and press
+   **Test connection**.
+2. Tell the kit who may write and read, per kind of text:
 
 ```php
-public function __construct(private MailerInterface $mailer) {}
+use Nowo\StorageKitBundle\Context\FileContextInterface;
+use Nowo\StorageKitBundle\Context\FileContextTarget;
 
-$this->mailer->send((new Email())->to($user->getEmail())->subject('Welcome')->text('…')); // From filled from the settings
+final class IssueContext implements FileContextInterface   // autoconfigured
+{
+    public function type(): string { return 'issue'; }
+    public function readable(?object $viewer, array $ids): array { /* ids the viewer may read, one query */ }
+    public function existing(array $ids): array { /* ids that still exist */ }
+    public function writableTarget(object $user, string $id): ?FileContextTarget
+    {
+        return $this->canComment($user, $id) ? new FileContextTarget() : null;   // null scope = instance bucket
+    }
+}
 ```
+
+3. Give the editor the upload endpoint and render the images:
 
 ```twig
-{% if nowo_storage_kit_outbound_mail_ready() %}<a href="{{ path('app_reset_password') }}">Forgot your password?</a>{% endif %}
+{{ form_row(form.body, nowo_storage_milkdown_upload('issue', issue.id)) }}
+
+{% set images = nowo_storage_images(comment.body) %}   {# uuid => {src, original, width, height, alt} #}
 ```
 
-Schedule `php bin/console nowo:storage-kit:log:purge` daily.
+4. Implement a `FileReferenceSourceInterface` for the texts and schedule `php bin/console nowo:storage-kit:purge`
+   daily.
 
 ## Requirements
 
-- PHP **8.2+** (`>=8.2 <8.6`; Symfony 8.x requires PHP 8.4+)
-- Symfony **7.4**, **8.0** or **8.1** (FrameworkBundle with the mailer, Form, Validator, Security CSRF, RateLimiter, HttpClient, TwigBundle; SecurityBundle for the admin UI)
-- `nowo-tech/instance-settings-bundle` **^1.0** (settings store, encrypted secrets, settings UI), Doctrine ORM **3.3+**, `nowo-tech/ui-kit-bundle` **^2.17.3**, `nowo-tech/form-kit-bundle` **^2.17**, `nowo-tech/outbound-url-guard-bundle` **^1.3**, `twig/extra-bundle`
-- Optional: `symfony/resend-mailer` (Resend), `nowo-tech/auth-kit-bundle` (readiness adapter)
+- PHP **8.2+** (`>=8.2 <8.6`, `ext-gd`; Symfony 8.x requires PHP 8.4+)
+- Symfony **7.4**, **8.0** or **8.1** (FrameworkBundle with CSRF, Form, Validator, RateLimiter, HttpClient, Lock,
+  TwigBundle; SecurityBundle for the admin pages)
+- Doctrine ORM **3.3+**; `nowo-tech/doctrine-encrypt-bundle` **^2.10** (registered); `nowo-tech/instance-settings-bundle`
+  **^1.3.1**; `nowo-tech/ui-kit-bundle` **^2.23**; `nowo-tech/form-kit-bundle` **^2.17**;
+  `nowo-tech/outbound-url-guard-bundle` **^1.3**; `async-aws/s3` **^2.8 || ^3.0**; `league/flysystem` **^3.29**;
+  `twig/extra-bundle`
+- Optional: `symfony/messenger` (background moves), `nowo-tech/http-hardening-bundle` (CSP adapter),
+  `nowo-tech/milkdown-editor-bundle` (Markdown editor)
 
 ## Configuration
 
-Every key, its default and its validation are documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Safe defaults: decorated mailer, SMTP + provider schemes only, private hosts refused, public-domain senders, 5 test e-mails per 10 minutes, log on without bodies, 30-day retention, UI under `/admin/mail` for `ROLE_ADMIN` only.
+Every key, its default and its validation are documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md), including
+the `storage` section fields per provider. Safe defaults: instance bucket in Instance Settings, private endpoints
+refused, 10 MiB / 40 MP uploads, 30 uploads per user and minute, `attachment` downloads, 7-day orphan retention, pages
+under `/admin/storage` for `ROLE_ADMIN`, uploads for `ROLE_USER`.
 
 ## Usage
 
-Runtime DSN and fallback, sender, tags and redaction, readiness and AuthKit, the test e-mail, Resend, the sent-mail log and its retention: [docs/USAGE.md](docs/USAGE.md).
+The instance bucket and providers, file contexts, uploading from an editor, rendering, downloads and CSP, references and
+the purge, scope buckets, quotas, moving to another bucket, adopting an existing instance bucket
+(`nowo:storage-kit:adopt-instance-bucket`), personal data and audit events: [docs/USAGE.md](docs/USAGE.md).
 
 ## Demo
 
-- `demo/symfony8` — Symfony **8.1** (FrankenPHP PHP **8.5**, worker mode) with MySQL and **Mailpit**; app on host port **8085**, Mailpit UI on **8087**. The mailer section points at Mailpit; the home page sends a few messages and the log lists them.
+- `demo/symfony8` — Symfony **8.1** (FrankenPHP PHP **8.5**, worker mode) with MySQL and **RustFS** (two private
+  buckets); app on `http://localhost:8213` (users `admin` / `demo`, `alice` / `demo`). Notes with image uploads, the
+  Storage and Move pages, a verified move to the archive bucket.
 
 Runtime mode is **`FRANKENPHP_MODE`** (`worker` default, or `classic`) — see [docs/DEMO-FRANKENPHP.md](docs/DEMO-FRANKENPHP.md).
 
 ```bash
-make -C demo up-symfony8          # http://localhost:8085 (Mailpit: http://localhost:8087)
-make -C demo/symfony8 setup       # encryption key, schema, demo settings and messages
+make -C demo up-symfony8          # http://localhost:8213
+make -C demo/symfony8 setup       # encryption key, schema, buckets, demo bucket profile
 make test-e2e                     # Playwright e2e against the running demo
 make demo-screenshots             # refresh docs/images/demo/*.webp
 make demo-smoke                   # boot, HTTP 200, down (REQ-TEST-011)
@@ -158,8 +230,11 @@ make release-check
 
 ## Tests and coverage
 
-- Tests: PHPUnit (PHP) — unit tests plus kernel integration tests (decorated mailer end to end with Messenger, settings-stored DSN, fallback, refused DSNs, sent-mail log on SQLite and, with `make test-with-db`, on the root-compose MySQL 8.4, admin UI with SecurityBundle and CSRF, Resend check with a mocked API, rate limit, CLI, opt-in routes, invalid configuration) and the UiKit page contract test; Playwright e2e on the demo
-- PHP: 100% (1724/1724 statements, 1973/1973 elements, 224 tests; gate enforced in CI by `composer test-coverage-100`, no exclusions)
+- Tests: PHPUnit (PHP) — unit tests (S3 settings and DSN parsing, SSRF guard, image processing, contexts, references,
+  profiles, configuration) plus kernel integration tests (upload / download end to end on an in-memory bucket, the
+  `storage` Instance Settings section, Storage and Move pages with SecurityBundle and CSRF, references and purge, sync
+  and switch, opt-in routes, invalid configuration) and the UiKit page contract test; Playwright e2e on the demo
+- PHP: 100% (2938/2938 statements, 3382/3382 elements, 286 tests; gate enforced in CI by `composer test-coverage-100`, no exclusions)
 - TS/JS: N/A
 - Python: N/A
 

@@ -4,9 +4,9 @@
 |-------|-------|
 | Package | `nowo-tech/storage-kit-bundle` (`symfony-bundle`) |
 | Audited revision | `1.0.0` (unreleased, branch `feat/1.0.0`) |
-| Audit date | 2026-10-31 |
-| Method | Manual review of every file under `src/`; PHPStan `ruleset-classic` + `ruleset-worker-strict` + `ruleset-hardening`; Igor (`composer igor`); unit tests of the transport cache and reset; demo run in worker mode |
-| **Verdict** | ✅ **Viable** — the only mutable state is the transport built from the last DSN (keyed by the DSN, so a changed DSN is picked up on the next send even without a reset) and the route loader's load-once flag; no request, user or message data survives a request |
+| Audit date | 2026-11-03 |
+| Method | Manual review of every file under `src/`; PHPStan `ruleset-classic` + `ruleset-worker-strict` + `ruleset-hardening`; Igor (`composer igor`); unit tests of the memos and their reset; demo run in worker mode |
+| **Verdict** | ✅ **Viable** with the standard Symfony runtime (`kernel.reset` between requests, scenario A). Four services keep request-scoped memos, all `ResetInterface` + `kernel.reset`. Under scenario B (no reset at all) they would survive into the next request — see [Findings](#findings) |
 
 ## Table of contents
 
@@ -22,49 +22,51 @@
 FrankenPHP worker mode boots the kernel once per worker and serves many requests with the same container. Two
 scenarios are evaluated:
 
-- **A — kernel not rebooted, `services_resetter` still runs.**
+- **A — kernel not rebooted, `services_resetter` still runs** (Symfony Runtime / FrankenPHP integration default).
 - **B — no reset at all:** any state kept in a service survives into the next request.
-
-A bundle safe under **B** is safe under **A**, classic mode and PHP-FPM.
 
 ## Summary
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Mutable state in shared services | ✅ | `RuntimeTransport`: transport + DSN it was built from, last validated DSN + result; route loader load-once flag (cache warm-up) |
+| Mutable state in shared services | ⚠️ A ✅ | `FileStorage` (connections per settings fingerprint), `StorageProfiles` (resolved profiles), `FileContexts` (read decisions per viewer), `FileReferenceListener` (texts pending until `postFlush`); route loader load-once flag (cache warm-up) |
 | Static properties / `static` locals | ✅ | None |
-| `ResetInterface` / `kernel.reset` | ✅ | `RuntimeTransport::reset()` (tag `kernel.reset`, also called on `SettingsChangedEvent` for the mail sections) — correct without it too (scenario B: the cache is keyed by the DSN read on every send) |
-| Request / user captured in services | ✅ | `AccessGuard` reads `RequestStack::getMainRequest()` and the token per call; the rate-limit key is computed per request |
-| Superglobals, `putenv`, `ini_set`, `setlocale`, timezone | ✅ | None |
-| Doctrine | ✅ | Entity manager / connection resolved per call from the registry; log writes through DBAL (no identity map growth), reads through read-only entities |
-| Resources held open | ✅ | An SMTP transport may keep its connection between sends (Symfony behaviour, ping threshold); dropped on reset |
-| Memory growth across requests | ✅ | One cached transport at most; nothing appended per request |
+| `ResetInterface` / `kernel.reset` | ✅ | The four services above; `StorageProfiles` and `FileStorage` also reset on a `storage` section change (`InstanceSettingsListener`) and after a save / switch |
+| Request / user captured in services | ✅ | `AccessGuard` reads the token and the main request per call; rate-limit key computed per request |
+| Superglobals, `putenv`, `ini_set`, `setlocale`, timezone | ✅ | None (`ImageProcessor` only reads `memory_limit`) |
+| Doctrine | ✅ | `StorageEntityManager` fetches the entity manager per call (a closed / reset manager is replaced); bulk statements through DBAL |
+| Resources held open | ✅ | async-aws clients inside memoised connections, dropped on reset; GD images freed within the call |
+| Memory growth across requests | ✅ (A) | Memos are cleared per request; GD peak RSS stays with the thread (see recommendations) |
 | Output, headers, `exit` | ✅ | Responses / console output only |
-| PHPStan FrankenPHP rulesets / Igor | ✅ | 0 errors / 0 KO (annotated: bundle extension cache, compile-time DI calls, route loader flag) |
+| PHPStan FrankenPHP rulesets / Igor | ✅ | 0 errors / 0 KO (annotated: request-scoped memos, compile-time DI calls, route loader flag) |
 
 ## Services reviewed
 
 | Service | Mutable state | Scenario A | Scenario B |
 |---------|---------------|------------|------------|
-| `RuntimeTransport` | transport + its DSN, last checked DSN + error; reset by `kernel.reset` and `SettingsChangedEvent` | ✅ | ✅ (DSN compared on every send) |
+| `FileStorage` | connections keyed by settings fingerprint | ✅ | ⚠️ connections kept (keyed by settings, so a changed bucket gets a new one; old ones accumulate) |
+| `StorageProfiles` | resolved profile rows per owner / config name | ✅ | ⚠️ a switch or scope change made by another worker is not seen until reset |
+| `FileContexts` | read decisions per viewer / context | ✅ | ⚠️ a revoked read permission could be reused for the same viewer |
+| `FileReferenceListener` | texts collected in `onFlush`, emptied in `postFlush` | ✅ | ✅ (emptied per flush; reset only drops a failed flush's leftovers) |
 | `StorageKitRouteLoader` | `loaded` flag (cache warm-up only) | ✅ | ✅ |
-| `StorageKitMailer`, `SenderPolicy`, `MailSettings`, `SettingsMailerDsnProvider`, `MailerDsnValidator`, `DsnHostGuard`, `OutboundMailReadiness` | none (`readonly`; settings read per call) | ✅ | ✅ |
-| `SentMailRecorder`, `SentMailRepository`, `TablePrefixListener` | none (`readonly`) | ✅ | ✅ |
-| `TestMailSender`, `TestMailGuard` (limiter state lives in `cache.app`), `ResendApiChecker` | none | ✅ | ✅ |
-| `StorageKitController`, `AdminPages`, `StorageKitPages`, `SettingsActions`, form types, sections | none (forms and view models built per call) | ✅ | ✅ |
-| `AccessGuard`, `StorageKitAccessListener`, access checkers, `SettingsChangedListener`, Twig extension, commands | none | ✅ | ✅ |
+| `ImageProcessor`, `ImageUploader`, `UploadEndpoint`, `FileDelivery`, `FileUrls`, `StoredImageResolver`, `FileUris`, `FileReferences`, `FilePurger`, `StorageSyncer`, `StorageMove`, `StorageProbe`, `EndpointGuard`, `ConfigProfiles`, `InstanceStorageSettings`, `AuditRecorder`, repositories | none (`readonly`) | ✅ | ✅ |
+| Controllers, `AdminPages`, `StorageKitPages`, `ProfileTester`, form types, `StorageSettingsSection` | none (forms and view models built per call) | ✅ | ✅ |
+| `AccessGuard`, `StorageKitAccessListener`, access checkers, `InstanceSettingsListener`, Twig extension, commands, Messenger handler | none | ✅ | ✅ |
 
 ## Findings
 
-No worker-mode findings under scenario **B**. The DSN is read from Instance Settings on every send (memoized per main
-request by Instance Settings itself), so a change saved in one worker is used by every other worker on its next message;
-the cached transport is rebuilt because its DSN no longer matches.
+No finding under scenario **A**, which is what FrankenPHP's Symfony integration and Messenger workers
+(`reset_on_message`) provide. Under scenario **B** the three request-scoped memos above would outlive the request; the
+bundle relies on `kernel.reset` for them, and saving the `storage` section resets the profile and connection memos in
+the worker that saved it.
 
 ## Usage recommendations in worker mode
 
-- Do not cache `MailSettings` / DSN values in your own services' constructors; read them where you send.
-- Messenger workers: `kernel.reset` runs between messages (`RuntimeTransport` is reset), and the worker resolves the DSN
-  at delivery time.
+- Keep `kernel.reset` running between requests (do not disable the services resetter) and Messenger's
+  `reset_on_message` (default) for the move worker.
+- Do not cache `StorageProfiles::forTarget()` results or `FileContexts::readable()` decisions in your own services.
+- GD keeps the peak RSS of an upload in the worker thread: lower `upload.max_pixels` on small hosts and set FrankenPHP
+  `max_requests` (PERF-IMAGE-GD-PEAK-MEMORY).
 
 ## Re-audit triggers
 

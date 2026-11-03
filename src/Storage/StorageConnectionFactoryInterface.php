@@ -6,7 +6,7 @@ namespace Nowo\StorageKitBundle\Storage;
 
 /**
  * Opens a connection to one bucket. Production uses {@see S3StorageConnectionFactory} (S3 API only: there is no local
- * disk adapter); tests swap in an in-memory one (`storage.connection_factory`).
+ * disk adapter); tests swap in an in-memory one (`nowo_storage_kit.connection_factory`).
  */
 interface StorageConnectionFactoryInterface
 {

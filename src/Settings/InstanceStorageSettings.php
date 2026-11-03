@@ -25,7 +25,7 @@ final readonly class InstanceStorageSettings
 {
     /**
      * @param InstanceSettingsInterface $settings Instance Settings store
-     * @param bool $restricted whether the instance endpoint goes through the SSRF guard (`endpoints.guard_instance`)
+     * @param bool $restricted whether the instance endpoint goes through the SSRF guard (`endpoints.guard_instance_profile`)
      */
     public function __construct(
         private InstanceSettingsInterface $settings,

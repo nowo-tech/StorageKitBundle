@@ -37,7 +37,7 @@ This project follows the [Contributor Covenant Code of Conduct](../CODE_OF_CONDU
 ## Demo, e2e and screenshots
 
 ```bash
-make -C demo up-symfony8   # FrankenPHP + MySQL + Mailpit on http://localhost:8085 (Mailpit UI :8087)
+make -C demo up-symfony8   # FrankenPHP + MySQL + RustFS on http://localhost:8213
 make test-e2e              # Playwright (demo/symfony8/e2e, official Playwright image, 1 worker)
 make demo-screenshots      # refresh docs/images/demo/*.webp (PNG → WebP with sharp, PNGs deleted)
 make demo-smoke            # boot, HTTP 200, down

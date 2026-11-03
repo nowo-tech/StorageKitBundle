@@ -87,9 +87,9 @@ jobs:
         run: composer test
 
 
-  # CA L2: erasure and recipient search must work on every supported database, not only SQLite.
+  # Keyset purges, moves and the switch use DBAL statements: run them on every supported database, not only SQLite.
   database-platforms:
-    name: Log on ${{ matrix.db.name }}
+    name: Lifecycle on ${{ matrix.db.name }}
     runs-on: ubuntu-latest
     env:
       # Throw-away CI service credential (not a secret); the URL is assembled in the step.
@@ -134,10 +134,10 @@ jobs:
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
-      - name: Sent-mail log tests (recorder, erasure, search)
+      - name: Lifecycle tests (purge, references, moves, adoption)
         run: |
           export STORAGE_KIT_TEST_DATABASE_URL="${{ matrix.db.scheme }}://${{ matrix.db.user }}:${DB_CI_PASSWORD}@127.0.0.1:${{ matrix.db.port }}/storagekit?${{ matrix.db.query }}"
-          vendor/bin/phpunit --no-coverage tests/Integration/Log
+          vendor/bin/phpunit --no-coverage tests/Integration/Lifecycle
 
   code-style:
     name: Code Style
