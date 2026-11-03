@@ -70,6 +70,7 @@ profile:
         secret: 'Clé secrète'
         path_style: 'Adressage par chemin (path-style)'
         provider: 'Fournisseur'
+        access_key_csv: 'Importer depuis le CSV AWS'
     help:
         enabled: 'Nécessite un bucket, une clé d’accès, une clé secrète et, pour un service compatible S3, un endpoint.'
         endpoint: 'https://hôte[:port] du service (sans chemin).'
@@ -80,6 +81,7 @@ profile:
         secret_kept: 'Une clé secrète est enregistrée. Laissez vide pour la conserver.'
         path_style: 'Requis par la plupart des services auto-hébergés (MinIO, RustFS).'
         provider: 'Seuls les champs du fournisseur choisi sont affichés et enregistrés.'
+        access_key_csv: 'Facultatif, Amazon S3 uniquement : le fichier <utilisateur>_accessKeys.csv proposé par AWS à la création d''une clé d''accès. Il remplit la clé d''accès et la clé secrète ; le fichier est lu une fois et jamais conservé.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
@@ -94,6 +96,15 @@ profile:
         endpoint_not_allowed: 'Cette adresse n''est pas autorisée : les hôtes privés, locaux et de métadonnées cloud sont refusés.'
         endpoint_unresolvable: 'Ce nom d''hôte ne se résout pas.'
         provider: 'Choisissez un fournisseur.'
+        csv_unreadable: 'Le fichier CSV n''a pas pu être envoyé. Réessayez.'
+        csv_size: 'Le fichier CSV est vide ou trop volumineux (4 Ko au maximum). Envoyez le fichier de clé d''accès fourni par AWS.'
+        csv_type: 'Le fichier n''est pas un fichier CSV texte.'
+        csv_header: 'Le fichier n''est pas un CSV de clé d''accès AWS : il doit contenir les colonnes « Access key ID » et « Secret access key ».'
+        csv_rows: 'Le fichier CSV doit contenir exactement une clé d''accès.'
+        csv_key_id: 'Le fichier CSV ne contient pas d''ID de clé d''accès AWS valide (AKIA suivi de 16 lettres et chiffres).'
+        csv_temporary: 'Le fichier CSV contient une clé temporaire AWS STS (ASIA…). Elle exige un jeton de session que cette application ne conserve pas : créez plutôt une clé d''accès longue durée d''un utilisateur IAM (AKIA…).'
+        csv_secret: 'Le fichier CSV ne contient pas de clé d''accès secrète AWS valide (40 caractères).'
+        csv_conflict: 'La clé d''accès ou la clé secrète saisie diffère du fichier CSV. Effacez la valeur saisie ou envoyez le fichier correspondant.'
 move:
     title: 'Déplacer vers un autre bucket'
     intro: 'Copiez tous les fichiers vers un nouveau bucket, vérifiez chaque copie, puis basculez. Les envois continuent vers le bucket actuel jusqu''à la bascule.'

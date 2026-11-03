@@ -14,6 +14,7 @@ use Nowo\UiKitBundle\Form\VisibleWhen;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
+use Symfony\Component\Form\Extension\Core\Type\FileType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
@@ -36,7 +37,9 @@ use function trim;
  * shown ({@see StorageProvider}): the endpoint, public endpoint and path-style rows carry UiKit `visible-when`
  * attributes and are hidden for Amazon S3; on submit the submitted provider decides, and hidden rows keep their
  * stored values (never validated, never cleared). The secret is write-only (`always_empty`; blank keeps the saved
- * one). Turning uploads on needs a bucket, an access key, a secret (typed or saved: `has_secret`) and, for an
+ * one). For Amazon S3 the access key and secret can also come from the AWS console's access-key CSV (unmapped
+ * `access_key_csv` file row, {@see AwsCsvImport}: parsed on submit, never stored; a typed value that differs is a
+ * conflict). Turning uploads on needs a bucket, an access key, a secret (typed or saved: `has_secret`) and, for an
  * S3-compatible provider, an endpoint. `read_only` greys everything out (environment-managed instance profile). SEC-STORAGE-SSRF: every
  * URL-building field is validated with the same rules as {@see S3Settings} (endpoints are bare http(s) origins, the
  * region a plain token), and `restricted` profiles also refuse server-side endpoints the {@see EndpointGuard}
@@ -140,6 +143,10 @@ final class StorageProfileType extends AbstractType
             'constraints' => ProfileConstraints::prefix(),
             'attr'        => ['autocomplete' => 'off', 'spellcheck' => 'false'],
         ]);
+        // Optional AWS console CSV (Amazon S3 only): fills the access key and the secret on submit.
+        AwsCsvImport::add($builder, ['secret'], $readOnly, function (string $name, array $fieldOptions) use ($builder): void {
+            $this->addWithDefaults($builder, $name, FileType::class, $fieldOptions);
+        });
         $this->addWithDefaults($builder, 'access_key', TextType::class, [
             'label'       => 'profile.field.access_key',
             'required'    => false,

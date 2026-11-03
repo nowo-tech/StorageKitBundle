@@ -188,6 +188,11 @@ section unless `endpoints.guard_instance_profile: false`):
   container refuses to compile without DoctrineEncrypt); the form field is write-only (`always_empty`). After a switch of
   the settings-backed instance bucket, the retired row keeps the old connection encrypted the same way.
 - Configuration profiles: environment variables / Symfony secrets; a malformed entry is logged by name only.
+- *Import from AWS CSV* (1.1.0): the access-key CSV is read once from PHP's temporary upload (at most 4 KB + 1 byte
+  read), never moved, stored, logged or audited; content-sniffed as UTF-8 text (the declared MIME type is ignored);
+  strict header / single row / long-term key id `^AKIA[A-Z0-9]{16}$` (temporary STS `ASIA…` keys refused: no session token is stored) / 40-character secret checks; refusals are reason
+  codes that never carry the content; `AwsAccessKeyCsv` hides the secret from debug output; a typed value that differs
+  from the file is refused, never silently overridden.
 - Credentials come only from the settings — no instance-metadata or environment fallback in the S3 client.
 - Secrets never appear in logs, exceptions, audit events, flashes, view models or `var_dump()` output:
   `#[SensitiveParameter]`, `S3Settings::__debugInfo()` / `jsonSerialize()` mask key and secret, the secret is a private

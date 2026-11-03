@@ -57,6 +57,27 @@ test.describe('Storage Kit demo', () => {
       await page.getByRole('button', { name: 'Save' }).click();
       await expect(page.getByText('This address is not allowed')).toBeVisible();
     });
+
+    test('offers the AWS access-key CSV for Amazon S3 only and refuses a wrong file on its row', async ({ page }) => {
+      await page.goto('/admin/settings/sections/storage');
+      const provider = page.locator('#settings_section_provider');
+      const csv = page.getByTestId('storage-kit-access-key-csv');
+      await expect(csv).toBeHidden();
+      await provider.selectOption('aws_s3');
+      await expect(csv).toBeVisible();
+      await expect(csv).toHaveAttribute('type', 'file');
+      await expect(page.getByText('Import from AWS CSV')).toBeVisible();
+
+      // Wrong header: a form error on the row, nothing saved, the content never echoed.
+      await csv.setInputFiles({ name: 'bob_accessKeys.csv', mimeType: 'text/csv', buffer: Buffer.from('Key,Secret\r\nAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\r\n') });
+      await page.getByRole('button', { name: 'Save' }).click();
+      await expect(page.getByText('The file is not an AWS access key CSV')).toBeVisible();
+      expect(await page.content()).not.toContain('wJalrXUtnFEMI');
+
+      // Still the demo's RustFS connection.
+      await page.goto('/admin/settings/sections/storage');
+      await expect(provider).toHaveValue('s3_compatible');
+    });
   });
 
   test.describe('as a member', () => {

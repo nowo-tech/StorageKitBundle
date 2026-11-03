@@ -18,6 +18,7 @@
   - [CSP for redirect-delivered profiles](#csp-for-redirect-delivered-profiles)
 - [References and the purge](#references-and-the-purge)
 - [Scope buckets](#scope-buckets)
+  - [Import from AWS CSV](#import-from-aws-csv)
 - [Upload limits](#upload-limits)
 - [Moving to another bucket](#moving-to-another-bucket)
   - [Move page](#move-page)
@@ -59,7 +60,8 @@ With the default `instance_profile: null`, the instance bucket is the `storage` 
    values are kept but unused ([CONFIGURATION](CONFIGURATION.md#the-storage-instance-settings-section)).
 2. Fill in region, bucket, prefix, access key and secret (and, for an S3-compatible service, the endpoint, the
    optional public endpoint and path style). The secret is an Instance Settings secret: encrypted at rest, never
-   rendered back; leave it blank to keep the saved one.
+   rendered back; leave it blank to keep the saved one. For Amazon S3 you can instead upload the access-key CSV of the
+   AWS console ([Import from AWS CSV](#import-from-aws-csv)).
 3. Press **Test connection** (posts to the kit and comes back to the section with the result).
 
 The section shows notices when uploads are off, when the connection is incomplete and when the last test failed.
@@ -73,9 +75,12 @@ tested the old connection) and records a `profile_saved` audit event with the ch
 The first time a provider is selected, the kit creates the instance's active `StorageProfile` row (`source =
 settings`): it holds no connection data, it only gives files a profile to point at.
 
-### A bucket from the configuration
+### A bucket from the configuration (ops-only)
 
-Operations can pin the instance bucket in the configuration instead (credentials from the environment):
+The `storage` section (credentials encrypted in the database) is the primary path. For an **infrastructure bucket
+managed outside the application** — provisioned and rotated by operations, credentials in the deployment's secret
+store — operations can pin the instance bucket in the configuration instead (credentials from the environment). This
+is supported, not deprecated, but ops-only:
 
 ```yaml
 nowo_storage_kit:
@@ -315,6 +320,37 @@ the provider's fields (endpoint rows only for an S3-compatible provider, through
 (blank keeps it, encrypted by DoctrineEncrypt). Turning uploads on needs a bucket, an access key, a secret and, for an
 S3-compatible provider, an endpoint. Scope endpoints always go through the SSRF guard. Saving records `profile_saved`
 with the changed field names.
+
+### Import from AWS CSV
+
+For **Amazon S3**, every bucket form (scope Storage page, Move target, the `storage` section) also accepts the
+access-key CSV the AWS console offers when you create an access key (*IAM → Users → Security credentials → Create
+access key → Download .csv file*, named `<user>_accessKeys.csv`) instead of typing the access key and the secret:
+
+```csv
+Access key ID,Secret access key
+AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+```
+
+- Pick the file in **Import from AWS CSV** and save. The access key and the secret are taken from the file; the other
+  fields (region, bucket, prefix…) are typed as usual. The older 5-column export
+  (`User name,Password,Access key ID,Secret access key,Console login link`), a UTF-8 BOM and Windows line ends are
+  accepted.
+- **Either the file or the fields.** Leave the access key and secret fields as they are (the access key row shows the
+  saved key, which the file replaces: key rotation). If you type a secret, or change the access key, to a value that
+  differs from the file, the form refuses it (*differs from the CSV file*) rather than guessing which one you meant;
+  the same value typed and in the file is fine.
+- The file is checked on the server: at most 4 KB, UTF-8 text (the browser's declared type is ignored — Windows sends
+  `application/vnd.ms-excel` for `.csv`), an `Access key ID` and a `Secret access key` column (any case, any order,
+  other columns allowed), exactly one data row, a long-term IAM user key id `AKIA…` of 20 characters and a 40-character secret. Temporary
+  STS keys (`ASIA…`) are refused with their own message: they need a session token the kit does not store, so create
+  a long-term access key for an IAM user instead.
+  Each refusal is a translated error under the row that never repeats the file's content.
+- The file is read once from PHP's temporary upload and discarded with the request: it is never moved, stored, logged
+  or audited, and the secret is never rendered back (the audit event lists `access_key` / `secret` as changed field
+  names only). If another field is invalid, pick the file again: like a typed secret, it is not kept between attempts.
+- The row is shown only for the `aws_s3` provider (`visible-when`); a file sent with `s3_compatible` is ignored, like
+  every hidden row. It needs no JavaScript.
 
 ## Upload limits
 

@@ -87,6 +87,13 @@ an `%env(bool:…)%` placeholder is refused (it would read as true at compile ti
 
 ## profiles and instance_profile
 
+> **Ops-only.** The primary place for bucket credentials is the database, encrypted: the `storage` Instance Settings
+> section for the instance bucket and the `storage_kit_profile` rows for scope / move buckets, both edited in the admin
+> pages. `profiles` (a `dsn` from an environment variable such as `STORAGE_KIT_DSN`, or fields) is for **infrastructure
+> buckets managed outside the application** by operations — for example a bucket provisioned with the platform whose
+> credentials live in the deployment's secret store. It is supported and not deprecated, but an application should not
+> need it to store uploads.
+
 `profiles` holds buckets set by operations — trusted configuration, **not** checked by the SSRF guard. Names: 1–64
 characters `[a-z0-9_]`. Each entry needs either a `dsn` or `bucket` + `access_key` + `secret`:
 
@@ -261,6 +268,7 @@ Requires `nowo-tech/instance-settings-bundle` ^1.3.1; provider-dependent rows us
 | `access_key` | string | both | yes | — | printable, no spaces |
 | `secret` | secret | both | yes | — | Instance Settings secret: encrypted at rest, never rendered back, blank keeps the saved value |
 | `path_style` | bool | `s3_compatible` | no | `false` | — |
+| `access_key_csv` (1.1.0) | file, unmapped, not a setting | `aws_s3` | no | — | AWS access-key CSV that fills `access_key` and `secret` on submit; never stored ([USAGE](USAGE.md#import-from-aws-csv)) |
 
 Only the fields visible for the **submitted** provider are validated and saved; the other provider's values are kept
 (hidden, not cleared) but never used: with `aws_s3` the endpoint is derived from the region (virtual-hosted style) and
@@ -273,7 +281,8 @@ back to the section) and **Usage and move** (link to the instance Storage page).
 
 ## FormKit profile
 
-The bucket form (`Form\StorageProfileType`, scope Storage page and Move target) uses the FormKit profile
+The bucket form (`Form\StorageProfileType`, scope Storage page and Move target, with its unmapped `access_key_csv`
+file row) uses the FormKit profile
 `nowo_form_kit.profiles.storage_kit`, prepended by the bundle unless the host defines it (translation domain
 `NowoStorageKitBundle`, no auto help / placeholder, no framework classes). Override it in `nowo_form_kit.profiles` to
 restyle.

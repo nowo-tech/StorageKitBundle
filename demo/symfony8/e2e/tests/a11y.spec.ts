@@ -29,3 +29,22 @@ for (const { path, user } of pages) {
     await context.close();
   });
 }
+
+test('axe: storage section with the AWS CSV row and its error', async ({ browser }) => {
+  const context = await browser.newContext({ httpCredentials: ADMIN });
+  const page = await context.newPage();
+  await page.goto('/admin/settings/sections/storage');
+  await page.locator('#settings_section_provider').selectOption('aws_s3');
+  await page.locator('#settings_section_access_key_csv').setInputFiles({ name: 'keys.csv', mimeType: 'text/csv', buffer: Buffer.from('Access key ID,Secret access key\n') });
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('exactly one access key')).toBeVisible();
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .exclude('.sf-toolbar')
+    .exclude('.sf-minitoolbar')
+    // Same upstream UiKit exclusion as above (settings-card intro contrast).
+    .exclude('.nowo-ui-card__intro')
+    .analyze();
+  expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+  await context.close();
+});

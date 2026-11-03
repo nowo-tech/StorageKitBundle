@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-baseline`
 **Created**: 2026-11-03
-**Status**: Baseline (documents the whole product at 1.0.0)
+**Status**: Baseline (documents the whole product at 1.0.0; 1.1.0 adds FR-UI-007)
 **Input**: Extraction of symfony-beacon spec 183 (*images in Markdown fields and S3-compatible object storage*, KIT-47)
 into a reusable kit on top of InstanceSettingsBundle, with the fixes of the Beacon audit findings SEC-STORAGE-SSRF,
 SEC-STORAGE-CSP-GLOBAL, SEC-FILE-REF-PIN and PERF-FILE-ORPHAN-UPDATE.
@@ -36,6 +36,9 @@ is written, read, signed and deleted and the section shows *The connection works
   validated nor used.
 - **Given** a public bucket, **then** the test passes with a warning.
 - **Given** `instance_profile: main`, **then** the section is not registered and the Storage page is read-only.
+- **Given** `aws_s3` and the console's `<user>_accessKeys.csv` in *Import from AWS CSV* (1.1.0), **then** the access
+  key and the secret come from the file (nothing typed, or the same values typed); a different typed value, a wrong
+  header, several rows, an oversize or binary file or a malformed key are form errors on that row and nothing is saved.
 
 ### US-2 — Upload an image into a text (P1)
 
@@ -140,7 +143,8 @@ becomes the settings-backed active profile; existing files keep downloading.
   (`database`, `settings`, `config`), provider and fields, encrypted write-only secret, test result.
 - **FR-PROF-002** — `StorageProfiles`: target resolution (scope → instance, no fallback from a turned-off scope),
   settings and delivery per profile, settings / config rows created on first use, memo reset.
-- **FR-PROF-003** — `ConfigProfiles`: the `profiles` tree (DSN or fields), delivery, unusable entries logged by name.
+- **FR-PROF-003** — `ConfigProfiles` (ops-only: infrastructure buckets managed outside the application; the primary
+  path is the encrypted database settings): the `profiles` tree (DSN or fields), delivery, unusable entries logged by name.
 - **FR-PROF-004** — `StorageProfileRepository`: active / target / retired (bounded) profiles, config rows, by uuid.
 
 ### Instance Settings
@@ -220,6 +224,17 @@ becomes the settings-backed active profile; existing files keep downloading.
   redirect), save with changed-field audit.
 - **FR-UI-002** — `StorageMoveController`: Move pages and CSRF-bound actions.
 - **FR-UI-003** — `StorageProfileType`: provider-dependent rows, write-only secret, read-only and restricted modes.
+- **FR-UI-007** — *Import from AWS CSV* (1.1.0): `AwsAccessKeyCsv` / `AwsAccessKeyCsvException` parse the AWS IAM
+  access-key CSV (≤ 4 KB, UTF-8 text only, BOM / CRLF / CR accepted, header names case-insensitive, `Access key ID` and
+  `Secret access key` columns among any others, exactly one data row with the header's column count, key id
+  `^AKIA[A-Z0-9]{16}$` — temporary STS `ASIA…` keys refused as `temporary`, no session token is stored —, secret 40 × `[A-Za-z0-9/+=]`), refusing with a reason code and never echoing the content.
+  `AwsCsvImport` adds the optional unmapped `access_key_csv` `FileType` row (`data-testid` `storage-kit-access-key-csv`, `visible-when` `aws_s3`, `accept`
+  `.csv,text/csv,text/plain`, disabled on read-only forms) and a `PRE_SUBMIT` listener that, for the submitted provider
+  `aws_s3`, fills `access_key` and the secret before validation; a typed secret or a changed access key that differs
+  from the file is a `csv_conflict` form error; a file sent with another provider is ignored like every hidden row.
+  The file is read from PHP's temporary upload only: never moved, stored, logged, audited or rendered back.
+  `StorageSettingsSectionTypeExtension` adds the same row to the `storage` Instance Settings section form (secret path
+  `[secret][value]`).
 - **FR-UI-004** — `AdminPages`, `StorageKitPages`, `ProfileTester`, `Bytes`: view models, templates, test outcome.
 - **FR-UI-005** — Templates `settings/edit`, `settings/_aside`, `move/edit` on the UiKit form scaffold.
 - **FR-UI-006** — `StorageKitRouteLoader`: opt-in routes, groups switched by configuration.

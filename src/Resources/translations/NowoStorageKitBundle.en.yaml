@@ -70,6 +70,7 @@ profile:
         secret: 'Secret key'
         path_style: 'Path-style addressing'
         provider: 'Provider'
+        access_key_csv: 'Import from AWS CSV'
     help:
         enabled: 'Needs a bucket, an access key, a secret key and, for an S3-compatible service, an endpoint.'
         endpoint: 'https://host[:port] of the service (no path).'
@@ -80,6 +81,7 @@ profile:
         secret_kept: 'A secret key is saved. Leave empty to keep it.'
         path_style: 'Needed by most self-hosted services (MinIO, RustFS).'
         provider: 'Only the fields of the selected provider are shown and saved.'
+        access_key_csv: 'Optional, Amazon S3 only: the <user>_accessKeys.csv file AWS offers when you create an access key. It fills the access key and the secret key; the file is read once and never stored.'
     placeholder:
         endpoint: 'https://s3.example.com'
         region: 'us-east-1'
@@ -94,6 +96,15 @@ profile:
         endpoint_not_allowed: 'This address is not allowed: private, local and cloud-metadata hosts are refused.'
         endpoint_unresolvable: 'This host name does not resolve.'
         provider: 'Choose a provider.'
+        csv_unreadable: 'The CSV file could not be uploaded. Try again.'
+        csv_size: 'The CSV file is empty or too large (at most 4 KB). Upload the access key file AWS gives you.'
+        csv_type: 'The file is not a text CSV file.'
+        csv_header: 'The file is not an AWS access key CSV: it needs the columns "Access key ID" and "Secret access key".'
+        csv_rows: 'The CSV file must contain exactly one access key.'
+        csv_key_id: 'The CSV file does not contain a valid AWS access key ID (AKIA followed by 16 letters and digits).'
+        csv_temporary: 'The CSV file holds a temporary AWS STS key (ASIA…). It needs a session token this application does not store: create a long-term IAM user access key (AKIA…) instead.'
+        csv_secret: 'The CSV file does not contain a valid AWS secret access key (40 characters).'
+        csv_conflict: 'The access key or secret key you typed differs from the CSV file. Clear the typed value or upload the matching file.'
 move:
     title: 'Move to another bucket'
     intro: 'Copy every file to a new bucket, check each copy, then switch. Uploads keep going to the current bucket until you switch.'
