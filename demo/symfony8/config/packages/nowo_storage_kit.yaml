@@ -1,8 +1,9 @@
 # Storage Kit demo: the instance bucket is the "storage" Instance Settings section (/admin/settings/sections/storage:
 # provider choice, only the selected provider's fields, secret encrypted by Instance Settings); /admin/storage shows
 # usage, the connection test and the move to another bucket. The demo RustFS is on the Docker network, so its
-# single-label host is allow-listed for the SSRF guard. A production host may instead manage the instance bucket in
-# configuration (nowo_storage_kit.profiles + instance_profile, credentials from env) and add a scope resolver.
+# single-label host is allow-listed for the SSRF guard. Credentials live in the database, encrypted (the primary path);
+# only an ops-managed infrastructure bucket would be pinned in configuration instead (nowo_storage_kit.profiles +
+# instance_profile, credentials from env — ops-only).
 nowo_storage_kit:
     uri_scheme: storage-file
     endpoints:

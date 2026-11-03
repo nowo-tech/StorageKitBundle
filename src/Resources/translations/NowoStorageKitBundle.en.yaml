@@ -101,7 +101,8 @@ profile:
         csv_type: 'The file is not a text CSV file.'
         csv_header: 'The file is not an AWS access key CSV: it needs the columns "Access key ID" and "Secret access key".'
         csv_rows: 'The CSV file must contain exactly one access key.'
-        csv_key_id: 'The CSV file does not contain a valid AWS access key ID (AKIA or ASIA followed by 16 letters and digits).'
+        csv_key_id: 'The CSV file does not contain a valid AWS access key ID (AKIA followed by 16 letters and digits).'
+        csv_temporary: 'The CSV file holds a temporary AWS STS key (ASIA…). It needs a session token this application does not store: create a long-term IAM user access key (AKIA…) instead.'
         csv_secret: 'The CSV file does not contain a valid AWS secret access key (40 characters).'
         csv_conflict: 'The access key or secret key you typed differs from the CSV file. Clear the typed value or upload the matching file.'
 move:

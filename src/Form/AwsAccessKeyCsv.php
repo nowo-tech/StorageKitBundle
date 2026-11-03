@@ -32,7 +32,8 @@ use function trim;
  *
  * Strict by design: at most {@see MAX_BYTES} bytes, UTF-8 text only (no NUL or other control characters — the type is
  * judged by the content, not by the browser's declared type, which is `application/vnd.ms-excel` on many Windows
- * hosts), exactly one data row with the header's column count, key id `^(AKIA|ASIA)[A-Z0-9]{16}$`, secret 40 characters
+ * hosts), exactly one data row with the header's column count, a long-term key id `^AKIA[A-Z0-9]{16}$` (temporary STS
+ * `ASIA…` keys are refused: they need a session token the kit does not store), secret 40 characters
  * of `[A-Za-z0-9/+=]`. The file is only read: never moved, stored or logged, and a refusal
  * ({@see AwsAccessKeyCsvException}) never repeats its content. The secret is hidden from `var_dump()` / debug output.
  */
@@ -41,8 +42,11 @@ final class AwsAccessKeyCsv
     /** Largest accepted file (the console's file is about 100 bytes, the old 5-column one about 300). */
     public const MAX_BYTES = 4096;
 
-    /** AWS access key id: long-term (`AKIA`) or temporary (`ASIA`) key. */
-    public const KEY_ID_PATTERN = '/^(AKIA|ASIA)[A-Z0-9]{16}$/D';
+    /** AWS access key id: long-term IAM user key (`AKIA`). */
+    public const KEY_ID_PATTERN = '/^AKIA[A-Z0-9]{16}$/D';
+
+    /** Temporary STS key id (`ASIA`): refused, it needs a session token the kit does not store. */
+    public const TEMPORARY_KEY_ID_PATTERN = '/^ASIA[A-Z0-9]{16}$/D';
 
     /** AWS secret access key: 40 base64 characters. */
     public const SECRET_PATTERN = '/^[A-Za-z0-9\/+=]{40}$/D';
@@ -105,6 +109,9 @@ final class AwsAccessKeyCsv
         $secAt  = array_search(self::SECRET_COLUMN, $header, true);
         if ($keyAt === false || $secAt === false || count($row) !== count($header)) {
             throw new AwsAccessKeyCsvException(AwsAccessKeyCsvException::REASON_HEADER);
+        }
+        if (preg_match(self::TEMPORARY_KEY_ID_PATTERN, $row[$keyAt]) === 1) {
+            throw new AwsAccessKeyCsvException(AwsAccessKeyCsvException::REASON_TEMPORARY);
         }
         if (preg_match(self::KEY_ID_PATTERN, $row[$keyAt]) !== 1) {
             throw new AwsAccessKeyCsvException(AwsAccessKeyCsvException::REASON_KEY_ID);

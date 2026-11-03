@@ -75,9 +75,12 @@ tested the old connection) and records a `profile_saved` audit event with the ch
 The first time a provider is selected, the kit creates the instance's active `StorageProfile` row (`source =
 settings`): it holds no connection data, it only gives files a profile to point at.
 
-### A bucket from the configuration
+### A bucket from the configuration (ops-only)
 
-Operations can pin the instance bucket in the configuration instead (credentials from the environment):
+The `storage` section (credentials encrypted in the database) is the primary path. For an **infrastructure bucket
+managed outside the application** — provisioned and rotated by operations, credentials in the deployment's secret
+store — operations can pin the instance bucket in the configuration instead (credentials from the environment). This
+is supported, not deprecated, but ops-only:
 
 ```yaml
 nowo_storage_kit:
@@ -339,7 +342,9 @@ AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
   the same value typed and in the file is fine.
 - The file is checked on the server: at most 4 KB, UTF-8 text (the browser's declared type is ignored — Windows sends
   `application/vnd.ms-excel` for `.csv`), an `Access key ID` and a `Secret access key` column (any case, any order,
-  other columns allowed), exactly one data row, a key id `AKIA…` / `ASIA…` of 20 characters and a 40-character secret.
+  other columns allowed), exactly one data row, a long-term IAM user key id `AKIA…` of 20 characters and a 40-character secret. Temporary
+  STS keys (`ASIA…`) are refused with their own message: they need a session token the kit does not store, so create
+  a long-term access key for an IAM user instead.
   Each refusal is a translated error under the row that never repeats the file's content.
 - The file is read once from PHP's temporary upload and discarded with the request: it is never moved, stored, logged
   or audited, and the secret is never rendered back (the audit event lists `access_key` / `secret` as changed field

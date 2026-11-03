@@ -9,15 +9,22 @@ All notable changes to this project are documented here. The format follows
 
 - **Import from AWS CSV** (FR-UI-007): the Amazon S3 bucket forms — scope Storage page and Move target
   (`StorageProfileType`) and the `storage` Instance Settings section (`StorageSettingsSectionTypeExtension`) — have an
-  optional, unmapped file row `access_key_csv` for the `<user>_accessKeys.csv` file the AWS console offers when an
+  optional, unmapped file row `access_key_csv` (`data-testid="storage-kit-access-key-csv"`) for the `<user>_accessKeys.csv` file the AWS console offers when an
   access key is created. On submit it fills the access key and the (write-only) secret. Accepted: the console's
   2-column file and the older 5-column export, UTF-8 BOM, CRLF / CR line ends, header names in any case. Refused, as
   translated form errors on the row (7 locales): files above 4 KB, non-text content, a header without
   `Access key ID` / `Secret access key`, anything but exactly one data row, a key id not matching
-  `^(AKIA|ASIA)[A-Z0-9]{16}$`, a secret that is not 40 base64 characters, and typed values that differ from the file
+  `^AKIA[A-Z0-9]{16}$` (temporary STS `ASIA…` keys get their own `csv_temporary` error: they need a session token
+  the kit does not store), a secret that is not 40 base64 characters, and typed values that differ from the file
   (`csv_conflict`). The row is shown for `aws_s3` only (`visible-when`); a file sent with another provider is ignored.
   The file is only read from PHP's temporary upload: never moved, stored, logged, audited or rendered back. No
   JavaScript is needed (the browser's file input shows the chosen name), so the CSP is unchanged.
+
+### Changed
+
+- Docs: configuration `profiles` (e.g. `dsn: '%env(STORAGE_KIT_DSN)%'`) and `instance_profile` are documented as
+  **ops-only**, for infrastructure buckets managed outside the application; the primary path is the encrypted database
+  settings (`storage` section, `storage_kit_profile`). Supported, not deprecated.
 
 ### Fixed
 

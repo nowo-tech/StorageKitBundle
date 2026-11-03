@@ -32,7 +32,7 @@ final class AwsAccessKeyCsvTest extends TestCase
     public const SECRET = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
 
     /**
-     * @return iterable<string, array{0: string, 1?: string}>
+     * @return iterable<string, array{string}>
      */
     public static function validFiles(): iterable
     {
@@ -43,15 +43,14 @@ final class AwsAccessKeyCsvTest extends TestCase
         yield 'old 5-column export' => ["User name,Password,Access key ID,Secret access key,Console login link\r\nbob,," . self::KEY_ID . ',' . self::SECRET . ",https://123456789012.signin.aws.amazon.com/console\r\n\r\n"];
         yield 'quoted cells, other case, spaces' => ['"ACCESS KEY ID" , "secret ACCESS key"' . "\n" . '"' . self::KEY_ID . '", ' . self::SECRET . " \n"];
         yield 'secret column first' => ["Secret access key,Access key ID\n" . self::SECRET . ',' . self::KEY_ID . "\n"];
-        yield 'temporary key' => ["Access key ID,Secret access key\nASIAIOSFODNN7EXAMPLE," . self::SECRET . "\n", 'ASIAIOSFODNN7EXAMPLE'];
     }
 
     #[DataProvider('validFiles')]
-    public function testAValidFileGivesTheKey(string $contents, string $keyId = self::KEY_ID): void
+    public function testAValidFileGivesTheKey(string $contents): void
     {
         $csv = AwsAccessKeyCsv::parse($contents);
 
-        self::assertSame($keyId, $csv->keyId);
+        self::assertSame(self::KEY_ID, $csv->keyId);
         self::assertSame(self::SECRET, $csv->secret());
     }
 
@@ -75,6 +74,8 @@ final class AwsAccessKeyCsvTest extends TestCase
         yield 'no header' => [$row . "\n" . $row, AwsAccessKeyCsvException::REASON_HEADER];
         yield 'row with fewer columns' => ["User name,Access key ID,Secret access key\n" . $row, AwsAccessKeyCsvException::REASON_HEADER];
         yield 'lowercase key id' => ["Access key ID,Secret access key\nakiaiosfodnn7example," . self::SECRET, AwsAccessKeyCsvException::REASON_KEY_ID];
+        yield 'temporary STS key' => ["Access key ID,Secret access key\nASIAIOSFODNN7EXAMPLE," . self::SECRET, AwsAccessKeyCsvException::REASON_TEMPORARY];
+        yield 'temporary-looking but malformed' => ["Access key ID,Secret access key\nASIAIOSFODNN7EXAMPL," . self::SECRET, AwsAccessKeyCsvException::REASON_KEY_ID];
         yield 'other prefix' => ["Access key ID,Secret access key\nAIDAIOSFODNN7EXAMPLE," . self::SECRET, AwsAccessKeyCsvException::REASON_KEY_ID];
         yield 'short key id' => ["Access key ID,Secret access key\nAKIAIOSFODNN7EXAMPL," . self::SECRET, AwsAccessKeyCsvException::REASON_KEY_ID];
         yield 'empty key id' => ["Access key ID,Secret access key\n," . self::SECRET, AwsAccessKeyCsvException::REASON_KEY_ID];

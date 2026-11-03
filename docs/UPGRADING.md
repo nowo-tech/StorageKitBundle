@@ -25,6 +25,11 @@ No breaking change, no configuration or schema change.
   `form_row(form.access_key_csv)` or the row is left out (the form still works without it).
 - Hosts with a request size limit in front of PHP (reverse proxy, `post_max_size`, `upload_max_filesize`) need room
   for a few KB; the kit refuses files above 4 KB itself.
+- Amazon S3 keys from the CSV must be long-term IAM user keys (`AKIA…`); temporary STS keys (`ASIA…`) are refused
+  (`profile.error.csv_temporary`).
+- Docs: the configuration `profiles` / `STORAGE_KIT_DSN` path is now documented as **ops-only** (infrastructure buckets
+  managed outside the application). Behaviour is unchanged and nothing is deprecated; the primary path stays the
+  encrypted database settings.
 - New translation keys `profile.field.access_key_csv`, `profile.help.access_key_csv` and `profile.error.csv_*`;
   hosts that override the `NowoStorageKitBundle` catalogue should add them.
 

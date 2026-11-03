@@ -61,7 +61,7 @@ test.describe('Storage Kit demo', () => {
     test('offers the AWS access-key CSV for Amazon S3 only and refuses a wrong file on its row', async ({ page }) => {
       await page.goto('/admin/settings/sections/storage');
       const provider = page.locator('#settings_section_provider');
-      const csv = page.locator('#settings_section_access_key_csv');
+      const csv = page.getByTestId('storage-kit-access-key-csv');
       await expect(csv).toBeHidden();
       await provider.selectOption('aws_s3');
       await expect(csv).toBeVisible();

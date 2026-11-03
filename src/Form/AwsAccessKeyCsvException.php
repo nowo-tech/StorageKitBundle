@@ -27,8 +27,11 @@ final class AwsAccessKeyCsvException extends InvalidArgumentException
     /** Not exactly one data row. */
     public const REASON_ROWS = 'rows';
 
-    /** The access key id is not an AWS one (`AKIA` / `ASIA` + 16). */
+    /** The access key id is not a long-term AWS one (`AKIA` + 16). */
     public const REASON_KEY_ID = 'key_id';
+
+    /** A temporary STS key (`ASIA` + 16): it needs a session token the kit does not store. */
+    public const REASON_TEMPORARY = 'temporary';
 
     /** The secret access key is not 40 base64 characters. */
     public const REASON_SECRET = 'secret';

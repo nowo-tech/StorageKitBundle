@@ -122,7 +122,7 @@ final class AwsCsvImportTest extends KernelTestCase
 
         self::assertSame('multipart/form-data', $crawler->filter('form[name="storage_profile"]')->attr('enctype'));
         $input = $crawler->filter('input[name="storage_profile[access_key_csv]"]');
-        self::assertSame(['file', '.csv,text/csv,text/plain', null], [$input->attr('type'), $input->attr('accept'), $input->attr('required')]);
+        self::assertSame(['file', '.csv,text/csv,text/plain', null, 'storage-kit-access-key-csv'], [$input->attr('type'), $input->attr('accept'), $input->attr('required'), $input->attr('data-testid')]);
         $row = $input->closest('[data-nowo-ui-visible-when-field]');
         self::assertNotNull($row);
         self::assertSame('storage_profile[provider]', $row->attr('data-nowo-ui-visible-when-field'));
@@ -212,6 +212,7 @@ final class AwsCsvImportTest extends KernelTestCase
         yield 'two rows' => ["Access key ID,Secret access key\n" . self::KEY_ID . ',' . self::SECRET . "\n" . self::KEY_ID . ',' . self::SECRET, 'exactly one access key'];
         yield 'oversize' => [str_repeat('A', 5000), 'at most 4 KB'];
         yield 'binary' => ["\x89PNG\r\n\x1A\n\x00\x00\x00\rIHDR", 'not a text CSV file'];
+        yield 'temporary STS key' => ["Access key ID,Secret access key\nASIAIOSFODNN7EXAMPLE," . self::SECRET, 'temporary AWS STS key'];
         yield 'key id' => ["Access key ID,Secret access key\nnot-a-key," . self::SECRET, 'valid AWS access key ID'];
         yield 'secret' => ["Access key ID,Secret access key\n" . self::KEY_ID . ',short', 'valid AWS secret access key'];
     }
@@ -256,7 +257,7 @@ final class AwsCsvImportTest extends KernelTestCase
         $this->profile($kernel);
         $client  = $this->client($kernel);
         $crawler = $client->request('GET', '/admin/storage/move');
-        self::assertCount(1, $crawler->filter('input[type="file"][name="storage_target[access_key_csv]"]'));
+        self::assertCount(1, $crawler->filter('input[type="file"][name="storage_target[access_key_csv]"][data-testid="storage-kit-access-key-csv"]'));
         $this->submit($client, '/admin/storage/move', 'storage_target', 'Save the new bucket', [
             'provider' => StorageProvider::AWS_S3,
             'region'   => 'eu-west-1',
@@ -293,5 +294,6 @@ final class AwsCsvImportTest extends KernelTestCase
         $this->submit($client, '/admin/settings/sections/storage', 'settings_section', 'Save', ['secret][value' => 'typed-secret'], self::CONSOLE_CSV);
         self::assertSame(422, $client->getResponse()->getStatusCode());
         self::assertStringContainsString('differs from the CSV file', (string) $client->getResponse()->getContent());
+        self::assertCount(1, $client->getCrawler()->filter('form[name="settings_section"] input[data-testid="storage-kit-access-key-csv"]'));
     }
 }

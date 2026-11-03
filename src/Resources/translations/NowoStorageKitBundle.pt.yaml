@@ -101,7 +101,8 @@ profile:
         csv_type: 'O ficheiro não é um ficheiro CSV de texto.'
         csv_header: 'O ficheiro não é um CSV de chaves de acesso da AWS: precisa das colunas "Access key ID" e "Secret access key".'
         csv_rows: 'O ficheiro CSV deve conter exatamente uma chave de acesso.'
-        csv_key_id: 'O ficheiro CSV não contém um ID de chave de acesso da AWS válido (AKIA ou ASIA seguido de 16 letras e dígitos).'
+        csv_key_id: 'O ficheiro CSV não contém um ID de chave de acesso da AWS válido (AKIA seguido de 16 letras e dígitos).'
+        csv_temporary: 'O ficheiro CSV contém uma chave temporária do AWS STS (ASIA…). Precisa de um token de sessão que esta aplicação não guarda: crie antes uma chave de acesso permanente de um utilizador IAM (AKIA…).'
         csv_secret: 'O ficheiro CSV não contém uma chave de acesso secreta da AWS válida (40 caracteres).'
         csv_conflict: 'A chave de acesso ou a chave secreta escrita difere do ficheiro CSV. Apague o valor escrito ou carregue o ficheiro correspondente.'
 move:

@@ -101,7 +101,8 @@ profile:
         csv_type: 'Het bestand is geen tekst-CSV-bestand.'
         csv_header: 'Het bestand is geen AWS-toegangssleutel-CSV: het heeft de kolommen "Access key ID" en "Secret access key" nodig.'
         csv_rows: 'Het CSV-bestand moet precies één toegangssleutel bevatten.'
-        csv_key_id: 'Het CSV-bestand bevat geen geldige AWS-toegangssleutel-ID (AKIA of ASIA gevolgd door 16 letters en cijfers).'
+        csv_key_id: 'Het CSV-bestand bevat geen geldige AWS-toegangssleutel-ID (AKIA gevolgd door 16 letters en cijfers).'
+        csv_temporary: 'Het CSV-bestand bevat een tijdelijke AWS STS-sleutel (ASIA…). Die heeft een sessietoken nodig dat deze applicatie niet bewaart: maak in plaats daarvan een permanente toegangssleutel van een IAM-gebruiker aan (AKIA…).'
         csv_secret: 'Het CSV-bestand bevat geen geldige geheime AWS-toegangssleutel (40 tekens).'
         csv_conflict: 'De ingevoerde toegangssleutel of geheime sleutel wijkt af van het CSV-bestand. Wis de ingevoerde waarde of upload het bijbehorende bestand.'
 move:

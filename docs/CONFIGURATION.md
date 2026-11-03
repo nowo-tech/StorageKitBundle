@@ -87,6 +87,13 @@ an `%env(bool:…)%` placeholder is refused (it would read as true at compile ti
 
 ## profiles and instance_profile
 
+> **Ops-only.** The primary place for bucket credentials is the database, encrypted: the `storage` Instance Settings
+> section for the instance bucket and the `storage_kit_profile` rows for scope / move buckets, both edited in the admin
+> pages. `profiles` (a `dsn` from an environment variable such as `STORAGE_KIT_DSN`, or fields) is for **infrastructure
+> buckets managed outside the application** by operations — for example a bucket provisioned with the platform whose
+> credentials live in the deployment's secret store. It is supported and not deprecated, but an application should not
+> need it to store uploads.
+
 `profiles` holds buckets set by operations — trusted configuration, **not** checked by the SSRF guard. Names: 1–64
 characters `[a-z0-9_]`. Each entry needs either a `dsn` or `bucket` + `access_key` + `secret`:
 

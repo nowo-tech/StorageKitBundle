@@ -143,7 +143,8 @@ becomes the settings-backed active profile; existing files keep downloading.
   (`database`, `settings`, `config`), provider and fields, encrypted write-only secret, test result.
 - **FR-PROF-002** — `StorageProfiles`: target resolution (scope → instance, no fallback from a turned-off scope),
   settings and delivery per profile, settings / config rows created on first use, memo reset.
-- **FR-PROF-003** — `ConfigProfiles`: the `profiles` tree (DSN or fields), delivery, unusable entries logged by name.
+- **FR-PROF-003** — `ConfigProfiles` (ops-only: infrastructure buckets managed outside the application; the primary
+  path is the encrypted database settings): the `profiles` tree (DSN or fields), delivery, unusable entries logged by name.
 - **FR-PROF-004** — `StorageProfileRepository`: active / target / retired (bounded) profiles, config rows, by uuid.
 
 ### Instance Settings
@@ -226,8 +227,8 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-UI-007** — *Import from AWS CSV* (1.1.0): `AwsAccessKeyCsv` / `AwsAccessKeyCsvException` parse the AWS IAM
   access-key CSV (≤ 4 KB, UTF-8 text only, BOM / CRLF / CR accepted, header names case-insensitive, `Access key ID` and
   `Secret access key` columns among any others, exactly one data row with the header's column count, key id
-  `^(AKIA|ASIA)[A-Z0-9]{16}$`, secret 40 × `[A-Za-z0-9/+=]`), refusing with a reason code and never echoing the content.
-  `AwsCsvImport` adds the optional unmapped `access_key_csv` `FileType` row (`visible-when` `aws_s3`, `accept`
+  `^AKIA[A-Z0-9]{16}$` — temporary STS `ASIA…` keys refused as `temporary`, no session token is stored —, secret 40 × `[A-Za-z0-9/+=]`), refusing with a reason code and never echoing the content.
+  `AwsCsvImport` adds the optional unmapped `access_key_csv` `FileType` row (`data-testid` `storage-kit-access-key-csv`, `visible-when` `aws_s3`, `accept`
   `.csv,text/csv,text/plain`, disabled on read-only forms) and a `PRE_SUBMIT` listener that, for the submitted provider
   `aws_s3`, fills `access_key` and the secret before validation; a typed secret or a changed access key that differs
   from the file is a `csv_conflict` form error; a file sent with another provider is ignored like every hidden row.

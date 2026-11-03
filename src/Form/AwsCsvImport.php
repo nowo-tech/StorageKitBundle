@@ -45,6 +45,9 @@ final class AwsCsvImport
     /** Name of the access key field next to it. */
     public const ACCESS_KEY = 'access_key';
 
+    /** Stable `data-testid` of the file input (host e2e contract). */
+    public const TEST_ID = 'storage-kit-access-key-csv';
+
     /** `accept` attribute of the file input (a hint only: the server judges the content). */
     public const ACCEPT = '.csv,text/csv,text/plain';
 
@@ -71,7 +74,7 @@ final class AwsCsvImport
             'required'           => false,
             'multiple'           => false,
             'disabled'           => $disabled,
-            'attr'               => ['accept' => self::ACCEPT],
+            'attr'               => ['accept' => self::ACCEPT, 'data-testid' => self::TEST_ID],
             'row_attr'           => VisibleWhen::attributes($builder->getName() . '[provider]', [StorageProvider::AWS_S3]),
             'constraints'        => [new Callback(static function (mixed $file, ExecutionContextInterface $context) use ($state): void {
                 if (isset($state['reason'])) {

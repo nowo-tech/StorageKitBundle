@@ -190,7 +190,7 @@ section unless `endpoints.guard_instance_profile: false`):
 - Configuration profiles: environment variables / Symfony secrets; a malformed entry is logged by name only.
 - *Import from AWS CSV* (1.1.0): the access-key CSV is read once from PHP's temporary upload (at most 4 KB + 1 byte
   read), never moved, stored, logged or audited; content-sniffed as UTF-8 text (the declared MIME type is ignored);
-  strict header / single row / key id `^(AKIA|ASIA)[A-Z0-9]{16}$` / 40-character secret checks; refusals are reason
+  strict header / single row / long-term key id `^AKIA[A-Z0-9]{16}$` (temporary STS `ASIA…` keys refused: no session token is stored) / 40-character secret checks; refusals are reason
   codes that never carry the content; `AwsAccessKeyCsv` hides the secret from debug output; a typed value that differs
   from the file is refused, never silently overridden.
 - Credentials come only from the settings — no instance-metadata or environment fallback in the S3 client.

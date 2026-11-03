@@ -101,7 +101,8 @@ profile:
         csv_type: 'Die Datei ist keine CSV-Textdatei.'
         csv_header: 'Die Datei ist keine AWS-Zugriffsschlüssel-CSV: Sie braucht die Spalten „Access key ID“ und „Secret access key“.'
         csv_rows: 'Die CSV-Datei muss genau einen Zugriffsschlüssel enthalten.'
-        csv_key_id: 'Die CSV-Datei enthält keine gültige AWS-Zugriffsschlüssel-ID (AKIA oder ASIA gefolgt von 16 Buchstaben und Ziffern).'
+        csv_key_id: 'Die CSV-Datei enthält keine gültige AWS-Zugriffsschlüssel-ID (AKIA gefolgt von 16 Buchstaben und Ziffern).'
+        csv_temporary: 'Die CSV-Datei enthält einen temporären AWS-STS-Schlüssel (ASIA…). Er braucht ein Sitzungstoken, das diese Anwendung nicht speichert: Erstellen Sie stattdessen einen dauerhaften Zugriffsschlüssel eines IAM-Benutzers (AKIA…).'
         csv_secret: 'Die CSV-Datei enthält keinen gültigen geheimen AWS-Zugriffsschlüssel (40 Zeichen).'
         csv_conflict: 'Der eingegebene Zugriffsschlüssel oder geheime Schlüssel weicht von der CSV-Datei ab. Löschen Sie den eingegebenen Wert oder laden Sie die passende Datei hoch.'
 move:
