@@ -231,7 +231,8 @@ context — the same answer for a missing and a forbidden file; anonymous viewer
 variant falls back to the original. Then:
 
 - **proxy** (every database / settings bucket, and config profiles with `delivery: proxy`): the application streams the
-  object in 64 KiB chunks (`Content-Length` = the size stored at upload; an object that grew is cut there) with the
+  object as it arrives from a ranged `GetObject` (`Range: bytes=0-<stored size − 1>`; `Content-Length` = the size
+  stored at upload; a bucket that sends more is cut there) with the
   stored type, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
   `Cross-Origin-Resource-Policy: same-origin` and `Content-Disposition` (`download.disposition`, default `attachment`,
   which `<img>` still renders);
@@ -382,7 +383,9 @@ php bin/console nowo:storage-kit:forget-retired --scope=acme  # one scope
 php bin/console nowo:storage-kit:forget-retired --all         # every owner
 ```
 
-Objects in those buckets are never deleted; each run is audited as `profiles_forgotten`.
+Objects in those buckets are never deleted; each run is audited as `profiles_forgotten`. The file foreign key protects a
+profile a file was repointed at meanwhile (MySQL / MariaDB / PostgreSQL refuse the delete; on SQLite enable foreign
+keys) — see [SECURITY](SECURITY.md#residual-risks-and-host-guidance).
 
 ## Adopting an existing instance bucket
 

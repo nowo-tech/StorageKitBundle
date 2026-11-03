@@ -50,22 +50,21 @@ final class ImageProcessorTest extends TestCase
         self::assertFalse(ImageProcessor::fitsInMemory(24_000_000, '300M', 0, ImageProcessor::PROGRESSIVE_BYTES_PER_PIXEL));
     }
 
-    public function testProgressiveJpegsAreBudgetedForTheDecoderMemory(): void
+    public function testJpegsAreBudgetedForTheProgressiveDecoderMemory(): void
     {
-        $progressive = Images::jpeg(1000, 1000, true);
-        $baseline    = Images::jpeg(1000, 1000);
-        self::assertTrue(ImageProcessor::jpegIsProgressive($progressive));
-        self::assertFalse(ImageProcessor::jpegIsProgressive($baseline));
-        self::assertFalse(ImageProcessor::jpegIsProgressive("\xFF\xD8\xFF\xDA\x00\x01"));
-
-        // Room for the two decoded copies (8 MB) but not for the 6 MB coefficient buffer on top.
+        // Room for the two decoded copies (8 MB) but not for the 6 MB coefficient buffer budgeted for any JPEG — even a
+        // baseline one, or a progressive one a strict marker scan would miss (audit CJ N1).
+        $png   = Images::png(1000, 1000);
+        $jpegs = [Images::jpeg(1000, 1000), Images::jpeg(1000, 1000, true)];
         $limit = (string) (memory_get_usage(true) + 11 * 1024 ** 2);
-        self::assertSame(1000, (new ImageProcessor(memoryLimit: $limit))->process($baseline)->original['width']);
-        try {
-            (new ImageProcessor(memoryLimit: $limit))->process($progressive);
-            self::fail('accepted');
-        } catch (UploadRefused $e) {
-            self::assertSame(UploadRefused::PIXELS, $e->reason);
+        self::assertSame(1000, (new ImageProcessor(memoryLimit: $limit))->process($png)->original['width']);
+        foreach ($jpegs as $jpeg) {
+            try {
+                (new ImageProcessor(memoryLimit: $limit))->process($jpeg);
+                self::fail('accepted');
+            } catch (UploadRefused $e) {
+                self::assertSame(UploadRefused::PIXELS, $e->reason);
+            }
         }
     }
 

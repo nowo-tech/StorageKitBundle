@@ -55,7 +55,7 @@ use const IMG_FLIP_VERTICAL;
  * `max_pixels` instead of ending the request in a fatal out-of-memory. A progressive JPEG also makes libjpeg keep
  * every DCT coefficient while it decodes, about {@see self::PROGRESSIVE_BYTES_PER_PIXEL} more bytes per pixel that
  * `memory_limit` does not even see (a 40 MP progressive 4:4:4 JPEG peaked at 407 MB, audit CJ L1): that is budgeted
- * too. Each variant is made from the previous one, so at most two decoded images are alive at once.
+ * for every JPEG, since whether libjpeg decodes one progressively cannot be told reliably beforehand (CJ N1). Each variant is made from the previous one, so at most two decoded images are alive at once.
  */
 final readonly class ImageProcessor
 {
@@ -71,7 +71,7 @@ final readonly class ImageProcessor
     /** Decoded images alive at the peak. */
     public const DECODED_COPIES = 2;
 
-    /** Extra decoder memory per pixel of a progressive JPEG (libjpeg coefficient buffer, outside memory_limit). */
+    /** Extra decoder memory per pixel budgeted for every JPEG (libjpeg progressive coefficient buffer, outside memory_limit). */
     public const PROGRESSIVE_BYTES_PER_PIXEL = 6;
 
     /** Default `upload.variants` (name => longest side in pixels), largest first. */
@@ -146,7 +146,9 @@ final readonly class ImageProcessor
         if ($mime === 'image/gif' || ($mime === 'image/webp' && str_contains(substr($bytes, 0, 64), 'ANIM'))) {
             return new ProcessedImage(['bytes' => $bytes, 'mime' => $mime, 'width' => $width, 'height' => $height]);
         }
-        $extra = $mime === 'image/jpeg' && self::jpegIsProgressive($bytes) ? self::PROGRESSIVE_BYTES_PER_PIXEL : 0;
+        // Every JPEG: whether libjpeg decodes it progressively cannot be told reliably from the markers (it skips junk
+        // bytes a strict parser stops at, audit CJ N1), so the coefficient buffer is always budgeted.
+        $extra = $mime === 'image/jpeg' ? self::PROGRESSIVE_BYTES_PER_PIXEL : 0;
         if (!self::fitsInMemory($width * $height, $this->memoryLimit ?? ini_get('memory_limit'), memory_get_usage(true), $extra)) {
             throw new UploadRefused(UploadRefused::PIXELS);
         }
@@ -181,28 +183,6 @@ final readonly class ImageProcessor
         $limit = self::iniBytes($memoryLimit);
 
         return $limit <= 0 || $usage + $pixels * (self::BYTES_PER_PIXEL * self::DECODED_COPIES + $extraPerPixel) <= $limit;
-    }
-
-    /**
-     * Whether a JPEG is progressive (an SOF2 / SOF6 / SOF10 / SOF14 frame before the scan data).
-     */
-    public static function jpegIsProgressive(string $bytes): bool
-    {
-        $offset = 2;
-        $length = strlen($bytes);
-        while ($offset + 4 <= $length && $bytes[$offset] === "\xFF") {
-            $marker = ord($bytes[$offset + 1]);
-            if (in_array($marker, [0xC2, 0xC6, 0xCA, 0xCE], true)) {
-                return true;
-            }
-            $size = self::number('n', $bytes, $offset + 2);
-            if ($marker === 0xDA || $size < 2) {
-                break;
-            }
-            $offset += 2 + $size;
-        }
-
-        return false;
     }
 
     /**

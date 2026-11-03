@@ -43,6 +43,7 @@ final readonly class S3StorageConnectionFactory implements StorageConnectionFact
             new Filesystem(new AsyncAwsS3Adapter($client, $settings->bucket, $settings->prefix, new PrivateVisibilityConverter())),
             new AsyncAwsUrlPresigner($public, $settings->bucket),
             $settings,
+            $client,
         );
     }
 

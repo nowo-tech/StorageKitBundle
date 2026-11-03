@@ -100,11 +100,15 @@ SECURITY.md), DoctrineEncrypt's key management, the bucket provider, or the Mark
 - `upload.max_pixels` (default 24 MP) read from the header **before** decoding: no decompression bomb.
 - Before decoding, the image must fit twice (4 bytes per pixel × 2) in what is left of `memory_limit`, or it is refused
   like an oversized image instead of a fatal out-of-memory; variants are made one from the other (at most two decoded
-  images alive). A **progressive JPEG** is budgeted 6 more bytes per pixel: libjpeg keeps every DCT coefficient while
-  it decodes one, in memory `memory_limit` does not see (a 40 MP progressive 4:4:4 JPEG peaked at 407 MB RSS in the
-  audit, CJ L1). At the 24 MP default: about 192 MB for a baseline image, about 336 MB for a progressive JPEG.
-- Proxied downloads are **streamed** in 64 KiB chunks (never the whole object in memory) and cut at the size stored at
-  upload: a bucket object that grew is not sent beyond it (CJ L2).
+  images alive). **Every JPEG** is budgeted 6 more bytes per pixel: libjpeg keeps every DCT coefficient while it
+  decodes a progressive one, in memory `memory_limit` does not see (a 40 MP progressive 4:4:4 JPEG peaked at 407 MB RSS
+  in the audit, CJ L1), and whether libjpeg will decode a file progressively cannot be told reliably from its markers
+  (it skips junk bytes a strict scan stops at, CJ N1). At the 24 MP default: about 192 MB for a PNG / WebP, about
+  336 MB for a JPEG.
+- Proxied downloads ask the bucket for the size stored at upload only (`GetObject` with `Range: bytes=0-<size-1>`) and
+  send the body as it arrives; a bucket that ignores the range or serves a larger object is cut at the stored size and
+  the rest is not read, so neither memory nor the temp directory grows with what a hostile bucket sends (CJ L2, L2b).
+  What async-aws buffers is bounded by that size (≤ `upload.max_bytes`).
 - Per-user upload rate limit (`upload.rate_limit` per `upload.rate_interval`, sliding window); optional owner quota
   (`UploadLimitInterface`) checked before anything is written.
 - Storage requests: idle timeout `endpoints.request_timeout`, total 4× (`max_duration`), no redirects followed — set on
@@ -264,7 +268,7 @@ extracted with (SEC-STORAGE-SSRF, SEC-STORAGE-CSP-GLOBAL, SEC-FILE-REF-PIN; PERF
   animation): comments, XMP and other extension blocks survive. Privacy only; stripping them is on the
   [ROADMAP](ROADMAP.md).
 - **GD peak memory (PERF-IMAGE-GD-PEAK-MEMORY, CJ L1).** A 24 MP image (the default cap) needs about 96 MB decoded
-  (about 192 MB at the peak with a variant), plus about 144 MB of libjpeg coefficient buffers for a progressive JPEG —
+  (about 192 MB at the peak with a variant), plus about 144 MB of libjpeg coefficient buffers budgeted for any JPEG —
   that part is outside `memory_limit`, so the check budgets it but only RSS limits really bound it. A 40 MP
   progressive 4:4:4 JPEG peaked at 407 MB. In worker mode every thread keeps its peak RSS: lower `upload.max_pixels`
   (16 MP) for small hosts and set FrankenPHP `max_requests`.
@@ -281,7 +285,12 @@ extracted with (SEC-STORAGE-SSRF, SEC-STORAGE-CSP-GLOBAL, SEC-FILE-REF-PIN; PERF
 - **Old buckets keep their objects.** A switch never deletes objects from the old bucket, and the retired profile keeps
   its (encrypted) credentials so stray files still download. Once no file points at a retired profile, *Forget previous
   buckets* (Move page, CSRF) or `nowo:storage-kit:forget-retired` deletes it with its credentials (audited
-  `profiles_forgotten`, CJ L3). Delete the objects and rotate the old keys yourself.
+  `profiles_forgotten`, CJ L3). Delete the objects and rotate the old keys yourself. Race (CJ N2): retired profiles
+  receive no uploads, but a file row could still be repointed at one between the "no file uses it" check and the
+  delete; `storage_kit_file.profile_id` is a foreign key without cascade, so MySQL / MariaDB / PostgreSQL refuse that
+  delete (the command and the action fail, nothing is lost). SQLite only enforces it with foreign keys on
+  (`PRAGMA foreign_keys = ON`, which Doctrine's SQLite driver does not enable by default): do not run it concurrently
+  with moves there.
 - **Switch of the settings-backed instance bucket (CJ I3).** The `storage` section validates the target again on
   *Switch*; a refusal (for example an allow-list changed since the target was saved) is a handled error and nothing
   changes. Race: someone saving the `storage` section between the copy and *Switch* is overwritten by the switch (the

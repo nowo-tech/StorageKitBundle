@@ -17,15 +17,13 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-use function fclose;
 use function flush;
-use function fread;
 use function in_array;
 use function max;
-use function min;
 use function pathinfo;
 use function preg_replace;
 use function strlen;
+use function substr;
 use function trim;
 
 use const PATHINFO_FILENAME;
@@ -40,9 +38,6 @@ use const PATHINFO_FILENAME;
  */
 final readonly class FileDelivery
 {
-    /** Bytes read from the bucket and sent per step. */
-    public const CHUNK = 65536;
-
     /** CSP of a streamed file. */
     public const SANDBOX_CSP = "default-src 'none'; sandbox";
 
@@ -75,11 +70,11 @@ final readonly class FileDelivery
         if ($this->profiles->deliveryOf($file->getProfile()) === ConfigProfiles::DELIVERY_REDIRECT) {
             $response = new RedirectResponse($connection->presign($object['key'], $object['mime'], $disposition, new DateTimeImmutable('+' . $this->ttl . ' seconds')), Response::HTTP_FOUND);
         } else {
-            $stream = $connection->readStream($object['key']);
-            $size   = $object['size'];
+            $key  = $object['key'];
+            $size = $object['size'];
             // @igor-ignore - The closure is the response body callback of this request only.
-            $response = new StreamedResponse(static function () use ($stream, $size): void {
-                self::copy($stream, $size, static function (string $chunk): void {
+            $response = new StreamedResponse(static function () use ($connection, $key, $size): void {
+                self::copy($connection->readRange($key, $size), $size, static function (string $chunk): void {
                     echo $chunk;
                     flush();
                 });
@@ -101,28 +96,26 @@ final readonly class FileDelivery
     }
 
     /**
-     * Copies at most `$size` bytes of `$stream` to `$write` in {@see self::CHUNK} chunks (audit CJ L2: never the whole
-     * object in memory); an object longer than the size stored at upload is cut there and logged as an error by the
-     * caller's stream (the response length is the stored size). Returns the bytes written.
+     * Writes at most `$size` bytes of `$chunks` (audit CJ L2 / L2b: the object is asked for with a byte range of the size
+     * stored at upload and sent as it arrives, never buffered whole); a bucket that sends more is cut there, the rest
+     * is not read. Returns the bytes written.
      *
-     * @param resource $stream
+     * @param iterable<string> $chunks
      * @param callable(string): void $write
      *
-     * @throws RuntimeException when the object is longer than the stored size (the rest is not sent)
+     * @throws RuntimeException when the bucket sent more than the stored size (the rest is not sent)
      */
-    public static function copy($stream, int $size, callable $write): int
+    public static function copy(iterable $chunks, int $size, callable $write): int
     {
         $sent = 0;
-        try {
-            while ($sent < $size && ($chunk = fread($stream, max(1, min(self::CHUNK, $size - $sent)))) !== false && $chunk !== '') {
-                $sent += strlen($chunk);
-                $write($chunk);
-            }
-            if ($sent >= $size && fread($stream, 1) !== '') {
+        foreach ($chunks as $chunk) {
+            if ($sent + strlen($chunk) > $size) {
+                $write(substr($chunk, 0, $size - $sent));
+
                 throw new RuntimeException('The stored object is larger than the size recorded at upload; the download was cut.');
             }
-        } finally {
-            fclose($stream);
+            $sent += strlen($chunk);
+            $write($chunk);
         }
 
         return $sent;

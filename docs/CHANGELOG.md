@@ -82,7 +82,10 @@ Requires PHP `>=8.2 <8.6`, Symfony 7.4 / 8.x, Doctrine ORM 3.3+, `nowo-tech/inst
     regression tests against a slow and a redirecting server.
   - **L1** progressive JPEGs are budgeted 6 more bytes per pixel (libjpeg coefficient buffers); default
     `upload.max_pixels` is 24 MP.
-  - **L2** proxied downloads are streamed in 64 KiB chunks and cut at the size stored at upload.
+  - **L2 / L2b** proxied downloads ask the bucket for the stored size only (`Range: bytes=0-<size-1>`), are sent as
+    they arrive and cut at the stored size; the rest of an oversized body is never read (no temp-file growth).
+  - **N1** the progressive-JPEG memory budget applies to every JPEG (marker scans can be fooled by junk bytes).
+  - **N2** the forget / repoint race and the foreign-key behaviour per database are documented.
   - **L3** retired profiles no file uses can be forgotten with their credentials: *Forget previous buckets* on the Move
     page and `nowo:storage-kit:forget-retired [--scope=|--all] [--dry-run]`, audited `profiles_forgotten`.
   - **I1** bucket, region and prefix patterns anchored with `D`; **I2** `S3Settings` secret private (`secret()`),
