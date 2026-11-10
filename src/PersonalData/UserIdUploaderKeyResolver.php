@@ -15,6 +15,7 @@ use function hash;
 use function is_callable;
 use function is_int;
 use function is_string;
+use function str_contains;
 use function strlen;
 use function strrpos;
 use function substr;
@@ -28,7 +29,8 @@ use function trim;
  *   key.
  * - The id is the user's public `getId()` without arguments, when it returns an integer, a non-empty string or a
  *   stringable value (a `Uuid`, `Ulid`).
- * - A key longer than {@see UploaderKeyResolverInterface::MAX_LENGTH} becomes `sha256:<hex>` of it (never cut).
+ * - A key longer than {@see UploaderKeyResolverInterface::MAX_LENGTH}, or one with a NUL byte (the class name of an
+ *   anonymous class), becomes `sha256:<hex>` of it (never cut).
  * - No key (null) when there is no usable `getId()` (missing, private / protected, with required arguments, an
  *   uninitialised id, a getter that throws, an empty value): the file is then matched by the user identifier only.
  *   This is logged once per user class at `warning`.
@@ -65,7 +67,7 @@ final class UserIdUploaderKeyResolver implements UploaderKeyResolverInterface, R
         }
         $key = self::realClass($user) . ':' . $id;
 
-        return strlen($key) > self::MAX_LENGTH ? 'sha256:' . hash('sha256', $key) : $key;
+        return strlen($key) > self::MAX_LENGTH || str_contains($key, "\0") ? 'sha256:' . hash('sha256', $key) : $key;
     }
 
     /**

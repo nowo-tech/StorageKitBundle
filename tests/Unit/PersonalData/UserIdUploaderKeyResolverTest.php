@@ -40,7 +40,7 @@ final class UserIdUploaderKeyResolverTest extends TestCase
 
         self::assertSame(AppUser::class . ':42', $keys->keyOf(new AppUser(42, 'a@example.com')));
         self::assertSame(AppUser::class . ':abc', $keys->keyOf(new AppUser(' abc ', 'a@example.com')));
-        self::assertSame($user::class . ':' . $uuid->toRfc4122(), $keys->keyOf($user));
+        self::assertSame('sha256:' . hash('sha256', $user::class . ':' . $uuid->toRfc4122()), $keys->keyOf($user), 'an anonymous class name holds a NUL byte, which PostgreSQL refuses in VARCHAR');
     }
 
     public function testTwoUserClassesWithTheSameIdGetDifferentKeys(): void

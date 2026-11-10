@@ -14,7 +14,7 @@ Target 1.2.0 — GDPR export / erasure keep finding a user's files after their i
   missed every file uploaded under the old value. Each upload now also stores a stable uploader key
   (`storage_kit_file.uploaded_by_key`, indexed `idx_storage_kit_file_uploader_key`): `<real user class>:<id>` by
   default (`PersonalData\UserIdUploaderKeyResolver`; Doctrine proxies stripped, so two user classes with the same id
-  never share a key; no key and a one-time warning for users without a usable public `getId()`), or your
+  never share a key; `sha256:<hex>` above 180 characters or for an anonymous class; no key and a one-time warning for users without a usable public `getId()`), or your
   `personal_data.uploader_key_resolver` (`PersonalData\UploaderKeyResolverInterface`). The new
   `exportUser(UserInterface)` / `eraseUser(UserInterface)` match that key, plus files without a key under the current
   identifier; a file stored with another key is never matched by identifier, so a re-used identifier no longer reaches

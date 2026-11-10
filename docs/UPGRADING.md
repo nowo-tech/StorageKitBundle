@@ -59,7 +59,11 @@ the former owner's files. Each upload now also stores a stable **uploader key** 
    `getCreatedAt()` returning a date, files created before it are left without key (counted as "files older than
    their user"). Otherwise, leave such identifiers out (`--skip=<identifier>`, repeatable) and handle them by hand
    (`export()` / `erase()` per identifier, or an `UPDATE` limited to rows created after the new holder got the
-   identifier).
+   identifier). The same holds for an identifier that several user providers know (for example the same e-mail as
+   an admin and as a customer): with a provider chain such as `security.user_providers` it is attributed to the first
+   provider's user, so `--skip` it and handle those rows by hand. On a case-insensitive collation (MySQL / MariaDB
+   `_ci`), case variants of an identifier are processed as one value; with a case-sensitive user provider, rows whose
+   variant the provider does not know stay without key (identifier-only, as in 1.1).
 
    SQL alternative, **integer ids only** and the default resolver (the key is `<class>:<id>`; mind backslash
    escaping in MySQL string literals; exclude reassigned identifiers the same way):
@@ -104,11 +108,21 @@ the former owner's files. Each upload now also stores a stable **uploader key** 
    UPDATE storage_kit_file f
      JOIN app_user u ON f.uploaded_by_key = CONCAT('App\\Entity\\User:', u.id)
       SET f.uploaded_by_key = CONCAT('tenant:', u.tenant_id, ':', u.id);
-   -- PostgreSQL / SQLite
-   UPDATE storage_kit_file SET uploaded_by_key = (SELECT 'tenant:' || u.tenant_id || ':' || u.id FROM app_user u
+   -- PostgreSQL
+   UPDATE storage_kit_file f
+      SET uploaded_by_key = 'tenant:' || u.tenant_id || ':' || u.id
+     FROM app_user u
+    WHERE f.uploaded_by_key = 'App\Entity\User:' || u.id;
+   -- SQLite
+   UPDATE storage_kit_file
+      SET uploaded_by_key = (SELECT 'tenant:' || u.tenant_id || ':' || u.id FROM app_user u
           WHERE storage_kit_file.uploaded_by_key = 'App\Entity\User:' || u.id)
-    WHERE uploaded_by_key LIKE 'App%';
+    WHERE EXISTS (SELECT 1 FROM app_user u WHERE storage_kit_file.uploaded_by_key = 'App\Entity\User:' || u.id);
    ```
+
+   Only rows whose old key matches an existing user are touched: keys of other user classes and of deleted users stay
+   as they are. Never re-key with a correlated subquery that is not guarded like this: a row without a match would get
+   NULL and fall back to identifier-only matching.
 
    Clearing the keys and running the backfill again is **not** equivalent: rows whose uploader changed identifier
    since the upload are no longer found by the backfill and fall back to identifier-only matching.
@@ -117,7 +131,7 @@ Behaviour changes:
 
 - New uploads by users with a public `getId()` without arguments (an integer, a non-empty string or a `Uuid` /
   `Ulid`) store `<real class>:<id>` (Doctrine proxies give the entity class; a key above 180 characters is stored as
-  `sha256:<hex>`). Users without a usable id (`InMemoryUser`, a private or throwing `getId()`, an uninitialised id)
+  `sha256:<hex>`, as is a key with the NUL byte of an anonymous class name). Users without a usable id (`InMemoryUser`, a private or throwing `getId()`, an uninitialised id)
   store no key, as before, and a warning is logged once per user class.
 - With a key, a file stored with **another** key is no longer matched by identifier. This protects re-used
   identifiers **only for keyed rows**: until the backfill, rows without a key (and every identifier-only call) are

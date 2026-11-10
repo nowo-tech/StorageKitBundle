@@ -536,7 +536,9 @@ Files uploaded before 1.2.0 have no key: backfill it once with `nowo:storage-kit
 ([UPGRADING](UPGRADING.md#to-120)), or they are found only by the identifier they were uploaded under. The command loads
 each stored identifier through `personal_data.user_provider` and asks the resolver, so it works for any id type; it
 loads the identifier's **current** holder: files created before that user's `getCreatedAt()` (when it has one) stay
-without key, and you skip (`--skip`) identifiers that were ever given to someone else.
+without key, and you skip (`--skip`) identifiers that were ever given to someone else. With a provider chain, an
+identifier that several providers know (the same e-mail as admin and as customer) goes to the first provider's user:
+skip it too.
 
 ## Audit events
 
