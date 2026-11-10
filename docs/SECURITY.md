@@ -227,12 +227,16 @@ one user's decision is never reused for another within a request. See
 ## Personal data (GDPR)
 
 `storage_kit_file` keeps the uploader's user identifier (≤ 180 characters), a stable uploader key (`uploaded_by_key`,
-the user id by default, since 1.2.0), the original name and the context; the images themselves may be personal data.
+`<user class>:<id>` by default, since 1.2.0), the original name and the context; the images themselves may be personal data.
 `StoredFilesPersonalData::exportUser()` lists a user's uploads with a link to the original; `eraseUser()` removes name
 and uploader (identifier and key) from files still shown by a text and hands the others to the next purge. Both match
 the stable key, so files are still found after the user identifier (often an e-mail) changed; files stored without a
 key (before 1.2.0, until backfilled) are matched by the current identifier, and a file stored with another key is never
-matched by identifier (a re-used e-mail does not export or erase someone else's files). Before 1.2.0, an identifier
+matched by identifier: a re-used e-mail does not export or erase someone else's **keyed** files. Until the backfill
+(`nowo:storage-kit:backfill-uploader-keys`), and through `export($identifier)` / `erase($identifier)` without a key,
+files are matched by identifier as in 1.1. The key is class-qualified, so two user classes (or providers) with the
+same id never share files; tenants that share a user class and ids need a tenant-qualified resolver. A user class
+without a usable `getId()` gets no key (identifier-only, logged once). Before 1.2.0, an identifier
 change left the person's files out of the export and the erasure (see [UPGRADING](UPGRADING.md#to-120) for the
 backfill).
 Orphans are deleted after `purge.retention_days`. GIF and animated WebP keep their embedded metadata (see residual

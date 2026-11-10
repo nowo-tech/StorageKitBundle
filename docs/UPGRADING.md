@@ -26,55 +26,107 @@ composer update nowo-tech/storage-kit-bundle
 
 Why: uploads were linked to the person only by `getUserIdentifier()`, often an e-mail. After an e-mail change, the
 GDPR export and erasure (`StoredFilesPersonalData::export()` / `erase()` with the new identifier) missed every file
-uploaded under the old one. Each upload now also stores a stable **uploader key** (`uploaded_by_key`), the user's
-`getId()` by default.
+uploaded under the old one; and after an e-mail was given to someone else, the new holder's export / erasure reached
+the former owner's files. Each upload now also stores a stable **uploader key** (`uploaded_by_key`), by default
+`<user class>:<id>` (for example `App\Entity\Customer:5`).
 
-1. Migrate the schema (`doctrine:migrations:diff` then `migrate`), or by hand (add your `doctrine.table_prefix`):
+1. Migrate the schema (`doctrine:migrations:diff` then `migrate`), or by hand:
 
    ```sql
-   -- MySQL / MariaDB
+   -- MySQL / MariaDB / PostgreSQL / SQLite
    ALTER TABLE storage_kit_file ADD uploaded_by_key VARCHAR(180) DEFAULT NULL;
    CREATE INDEX idx_storage_kit_file_uploader_key ON storage_kit_file (uploaded_by_key);
-   -- PostgreSQL / SQLite: the same statements (VARCHAR(180) DEFAULT NULL)
    ```
 
-2. **Backfill** the key of the files uploaded before 1.2.0 once, **before** any further identifier change, from your
-   user table (adapt the table and column names; the key must be what your resolver returns, the plain id by default):
+   With `doctrine.table_prefix`, both the table **and the index** names get the prefix
+   (`app_storage_kit_file`, `app_idx_storage_kit_file_uploader_key`), as `migrations:diff` generates them.
+
+2. **Backfill** the key of the files uploaded before 1.2.0 once, **before** any further identifier change:
+
+   ```bash
+   php bin/console nowo:storage-kit:backfill-uploader-keys --dry-run -v   # review identifier → key
+   php bin/console nowo:storage-kit:backfill-uploader-keys
+   ```
+
+   The command loads each stored identifier through `personal_data.user_provider` (default `security.user_providers`,
+   your firewall user providers) and stores what the configured resolver returns, so it is exact for every id type
+   (integer, UUID, ULID) and for a custom resolver. It is idempotent (only rows without a key), batched (`--batch`,
+   default 200 identifiers) and skips identifiers the provider no longer knows and users without a key.
+
+   **Reassigned identifiers.** The user is loaded by the identifier as it is **now**. If an identifier (e-mail) was
+   given to another person after some uploads, the backfill would stamp the former owner's files with the new
+   holder's key and make them the new holder's for export / erasure. When the user object has a public
+   `getCreatedAt()` returning a date, files created before it are left without key (counted as "files older than
+   their user"). Otherwise, leave such identifiers out (`--skip=<identifier>`, repeatable) and handle them by hand
+   (`export()` / `erase()` per identifier, or an `UPDATE` limited to rows created after the new holder got the
+   identifier).
+
+   SQL alternative, **integer ids only** and the default resolver (the key is `<class>:<id>`; mind backslash
+   escaping in MySQL string literals; exclude reassigned identifiers the same way):
 
    ```sql
    -- MySQL / MariaDB
    UPDATE storage_kit_file f
-     JOIN app_user u ON u.email = f.uploaded_by
-      SET f.uploaded_by_key = CAST(u.id AS CHAR)
+     JOIN app_user u ON u.email = f.uploaded_by AND f.created_at >= u.created_at
+      SET f.uploaded_by_key = CONCAT('App\\Entity\\User:', u.id)
     WHERE f.uploaded_by_key IS NULL AND f.uploaded_by IS NOT NULL;
-
    -- PostgreSQL / SQLite
    UPDATE storage_kit_file
-      SET uploaded_by_key = (SELECT CAST(u.id AS VARCHAR(180)) FROM app_user u WHERE u.email = storage_kit_file.uploaded_by)
-    WHERE uploaded_by_key IS NULL AND uploaded_by IS NOT NULL;
+      SET uploaded_by_key = 'App\Entity\User:' || (SELECT u.id FROM app_user u
+          WHERE u.email = storage_kit_file.uploaded_by AND storage_kit_file.created_at >= u.created_at)
+    WHERE uploaded_by_key IS NULL AND uploaded_by IS NOT NULL
+      AND EXISTS (SELECT 1 FROM app_user u WHERE u.email = storage_kit_file.uploaded_by);
    ```
 
-   Files whose uploader already changed identifier before this backfill cannot be matched by SQL: if you keep a log
-   of identifier changes, run the same update with the old value, or call `export()` / `erase()` once per past
-   identifier of the person. Rows left without a key keep working as before (matched by identifier).
+   Do **not** use SQL for UUID / ULID ids: they are stored as `BINARY(16)` / BLOB (MySQL, MariaDB, SQLite) or as
+   RFC 4122 text for a ULID (PostgreSQL), never the string `getId()` returns, so every backfilled row would get a key
+   that never matches and would leave the export / erasure entirely. The join column must be unique; its collation
+   decides case sensitivity. Identifiers longer than 180 characters were cut at upload and never match.
+
+   Files whose uploader already changed identifier before the backfill cannot be matched: run `export()` / `erase()`
+   once per past identifier of the person. Rows left without a key keep working as in 1.1 (matched by identifier).
 
 3. Call `exportUser($user)` / `eraseUser($user)` (or `export($identifier, $key)` / `erase($identifier, $key)`) from
    your GDPR export provider and eraser. `export($identifier)` / `erase($identifier)` without a key behave exactly as
-   in 1.1 (identifier only).
+   in 1.1 (identifier only, including other people's keyed rows under that identifier).
 
-4. If `getId()` is not what identifies a person (several user classes sharing ids, users re-created on login, no
-   `getId()`), set `personal_data.uploader_key_resolver` to a service implementing
-   `PersonalData\UploaderKeyResolverInterface` (and backfill with what it returns).
+4. **The key must never change for a person.** If `<class>:<id>` is not what identifies a person — users of several
+   tenants in separate tables sharing ids and class, users re-created on login, no public `getId()` — set
+   `personal_data.uploader_key_resolver` to a service implementing `PersonalData\UploaderKeyResolverInterface`
+   (for example `sprintf('%s:%s:%s', $user::class, $user->getTenantId(), $user->getId())`) **before** the backfill.
+   Changing the resolver (or a user class name, or the id type) after uploads leaves rows whose old key nothing
+   matches, and keyed rows are never matched by identifier, so they silently leave the export / erasure. Re-key the
+   existing rows in the same deployment with an `UPDATE` that maps each old key to the new one, for example from the
+   default `<class>:<id>` to a `tenant:<tenant>:<id>` key (adapt to your schema; integer ids):
+
+   ```sql
+   -- MySQL / MariaDB (backslashes doubled inside string literals)
+   UPDATE storage_kit_file f
+     JOIN app_user u ON f.uploaded_by_key = CONCAT('App\\Entity\\User:', u.id)
+      SET f.uploaded_by_key = CONCAT('tenant:', u.tenant_id, ':', u.id);
+   -- PostgreSQL / SQLite
+   UPDATE storage_kit_file SET uploaded_by_key = (SELECT 'tenant:' || u.tenant_id || ':' || u.id FROM app_user u
+          WHERE storage_kit_file.uploaded_by_key = 'App\Entity\User:' || u.id)
+    WHERE uploaded_by_key LIKE 'App%';
+   ```
+
+   Clearing the keys and running the backfill again is **not** equivalent: rows whose uploader changed identifier
+   since the upload are no longer found by the backfill and fall back to identifier-only matching.
 
 Behaviour changes:
 
-- New uploads by users with a usable `getId()` (an integer, a non-empty string or a `Uuid`, at most 180 characters)
-  store it in `uploaded_by_key`. Users without one (for example `InMemoryUser`) store no key, as before.
-- With a key, a file stored with **another** key is no longer matched by identifier: if an e-mail was given to a new
-  person, `exportUser()` / `eraseUser()` of that person do not reach the former owner's files.
+- New uploads by users with a public `getId()` without arguments (an integer, a non-empty string or a `Uuid` /
+  `Ulid`) store `<real class>:<id>` (Doctrine proxies give the entity class; a key above 180 characters is stored as
+  `sha256:<hex>`). Users without a usable id (`InMemoryUser`, a private or throwing `getId()`, an uninitialised id)
+  store no key, as before, and a warning is logged once per user class.
+- With a key, a file stored with **another** key is no longer matched by identifier. This protects re-used
+  identifiers **only for keyed rows**: until the backfill, rows without a key (and every identifier-only call) are
+  matched by identifier as in 1.1.
 - Erasure also clears `uploaded_by_key`.
 - `ImageUploader` and `StoredFilesPersonalData` take an optional last constructor argument
   (`UploaderKeyResolverInterface`, default `UserIdUploaderKeyResolver`); code that builds them by hand keeps working.
+- New configuration `personal_data.uploader_key_resolver` (null) and `personal_data.user_provider`
+  (`security.user_providers`).
 
 ## To 1.1.0
 

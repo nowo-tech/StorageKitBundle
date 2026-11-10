@@ -65,7 +65,7 @@ objects and reduced to `getUserIdentifier()` plus a stable key (`PersonalData\Up
 | `Reference\FileReferenceSourceInterface` | which entity class / field holds a text that may mention files |
 | `Scope\ScopeResolverInterface`, `Scope\ScopeAccessCheckerInterface` | scope buckets (organisation, tenant) and who manages them |
 | `Upload\UploadLimitInterface` | quotas per `FileContextTarget::$owner` |
-| `PersonalData\UploaderKeyResolverInterface` | the stable id of a user (default: `getId()`), so personal data survives an e-mail change |
+| `PersonalData\UploaderKeyResolverInterface` | the stable key of a user (default: `<user class>:<id>`), so personal data survives an e-mail change |
 
 Call your own application services from these adapters (access policies, repositories); do not inject the bundle into
 your domain.
@@ -98,15 +98,16 @@ scalar data only, so it maps directly to your audit log or domain events.
 ### Personal data
 
 Call `StoredFilesPersonalData::exportUser()` / `eraseUser()` from your own GDPR use case; they match the stable
-uploader key, so an e-mail change does not orphan the person's files (see [Personal data](#personal-data)). If your
-user ids are not what identifies a person (several user classes, re-created users), implement
-`UploaderKeyResolverInterface`.
+uploader key (`<user class>:<id>` by default), so an e-mail change does not orphan the person's files (see
+[Personal data](#personal-data)). If class and id are not what identifies a person (tenants sharing a user class with
+overlapping ids, re-created users), implement `UploaderKeyResolverInterface`.
 
 ### Known limitations
 
 - The explicit `FileReferences::sync()` path is not a published interface yet, and `FileReferenceSourceInterface`
   still asks for `entityClass()` / `field()`.
-- Files uploaded before 1.2.0 carry no uploader key until you backfill it ([UPGRADING](UPGRADING.md#to-120)).
+- Files uploaded before 1.2.0 carry no uploader key until you run `nowo:storage-kit:backfill-uploader-keys`
+  ([UPGRADING](UPGRADING.md#to-120)); until then they are matched by identifier as in 1.1.
 - `ImageUploader::upload()` returns the `StoredFile` entity.
 - InstanceSettingsBundle is always installed, even when the bucket comes from configuration.
 
@@ -498,9 +499,23 @@ active profile and the values saved in the section are not used.
 
 `PersonalData\StoredFilesPersonalData` is the hook for your GDPR export / erasure (UserKit's eraser / export provider,
 or your own). Each upload stores the user identifier (`uploaded_by`) and, since 1.2.0, a **stable uploader key**
-(`uploaded_by_key`): the user's `getId()` by default, or what your `personal_data.uploader_key_resolver`
+(`uploaded_by_key`): `<user class>:<id>` by default (`App\Entity\Customer:5`; Doctrine proxies give the entity
+class, so two user classes with the same id never share a key), or what your `personal_data.uploader_key_resolver`
 (`PersonalData\UploaderKeyResolverInterface`) returns. The key is what keeps a person linked to their files when their
-identifier (often an e-mail) changes.
+identifier (often an e-mail) changes. It must never change for a person: if you change the resolver after uploads,
+re-key the existing rows ([UPGRADING](UPGRADING.md#to-120), step 4). Users without a usable public `getId()` get no key
+(logged once per class) and are matched by identifier only. Users of several tenants that share one user class and
+overlapping ids need a resolver that adds the tenant:
+
+```php
+final class TenantUploaderKeys implements UploaderKeyResolverInterface
+{
+    public function keyOf(object $user): ?string
+    {
+        return $user instanceof AppUser ? sprintf('%s:%s:%s', AppUser::class, $user->getTenantId(), $user->getId()) : null;
+    }
+}
+```
 
 - `exportUser(UserInterface $user): list<array>` — uuid, name, type, size, dimensions, sha256, context, whether a text
   still shows it, created at and an absolute link to the original (it answers while the user may still read the
@@ -511,13 +526,17 @@ identifier (often an e-mail) changes.
 
 Both match the files stored with the user's key, plus the files stored **without** a key (before 1.2.0, or by a user
 without id) under the user's current identifier. A file stored with another key is never matched by identifier, so a
-re-used e-mail does not reach someone else's files. For a user without key (no usable `getId()`) they match the
+re-used e-mail does not reach someone else's **keyed** files; until the backfill, the former owner's key-less rows are
+still matched by identifier, as in 1.1. For a user without key (no usable `getId()`) they match the
 identifier only, as before 1.2.0. When you only have the values (a queued erasure after the user row
 is gone), call `export(string $userIdentifier, ?string $userKey = null)` / `erase(…)` with both; with the identifier
 alone they match the identifier only, as before 1.2.0.
 
-Files uploaded before 1.2.0 have no key: backfill it once ([UPGRADING](UPGRADING.md#to-120)), or they are found only
-by the identifier they were uploaded under.
+Files uploaded before 1.2.0 have no key: backfill it once with `nowo:storage-kit:backfill-uploader-keys`
+([UPGRADING](UPGRADING.md#to-120)), or they are found only by the identifier they were uploaded under. The command loads
+each stored identifier through `personal_data.user_provider` and asks the resolver, so it works for any id type; it
+loads the identifier's **current** holder: files created before that user's `getCreatedAt()` (when it has one) stay
+without key, and you skip (`--skip`) identifiers that were ever given to someone else.
 
 ## Audit events
 

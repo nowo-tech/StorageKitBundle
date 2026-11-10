@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Lifecycle;
 
 use DateTimeImmutable;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\StorageKitBundle\Command\BackfillUploaderKeysCommand;
 use Nowo\StorageKitBundle\Command\PurgeFilesCommand;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
@@ -15,6 +16,10 @@ use Nowo\StorageKitBundle\Tests\Fixtures\AppUser;
 use Nowo\StorageKitBundle\Tests\Fixtures\Boards;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
 use Nowo\StorageKitBundle\Tests\Fixtures\PrefixedUploaderKeys;
+use Nowo\StorageKitBundle\Tests\Fixtures\Users\Admin;
+use Nowo\StorageKitBundle\Tests\Fixtures\Users\AppUsers;
+use Nowo\StorageKitBundle\Tests\Fixtures\Users\Customer;
+use Nowo\StorageKitBundle\Tests\Fixtures\Users\DatedUser;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
@@ -25,6 +30,7 @@ use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigura
 use Symfony\Component\Security\Core\User\InMemoryUser;
 
 use function array_column;
+use function preg_replace;
 use function str_repeat;
 
 /**
@@ -146,7 +152,7 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         $tester                              = new CommandTester((new Application($kernel))->find(PurgeFilesCommand::NAME));
 
         self::assertSame(1, $tester->execute(['--days' => '0']));
-        self::assertStringContainsString('failed: 1', $tester->getDisplay());
+        self::assertStringContainsString('failed: 1', $this->flat($tester));
         self::assertNotNull($this->entityManager($kernel)->find(StoredFile::class, $file->getId()));
 
         // A profile that is not usable any more keeps the row too.
@@ -158,7 +164,7 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         $this->entityManager($kernel)->clear();
         $this->buckets($kernel)->failDeletes = false;
         self::assertSame(0, $tester->execute(['--days' => '0']));
-        self::assertStringContainsString('purged: 1', $tester->getDisplay());
+        self::assertStringContainsString('purged: 1', $this->flat($tester));
         self::assertSame(2, $tester->execute(['--days' => 'abc']));
         self::assertSame(0, $tester->execute([]));
         self::assertNotNull($profile->getId());
@@ -201,14 +207,14 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         $uploader = $this->service($kernel, ImageUploader::class);
         $shown    = $uploader->upload($user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
         $hidden   = $uploader->upload($user, 'board', 'b1', Images::png(2000, 1000), 'other.png');
-        self::assertSame(['alice', '7'], [$shown->getUploadedBy(), $shown->getUploadedByKey()]);
+        self::assertSame(['alice', AppUser::class . ':7'], [$shown->getUploadedBy(), $shown->getUploadedByKey()]);
         $this->note($kernel, '![a](storage-file:' . $shown->getUuid() . ')');
         $data = $this->service($kernel, StoredFilesPersonalData::class);
 
         $user->email = 'alice@new.example';
         self::assertSame([], $data->export('alice@new.example'), 'the identifier alone misses the files (behaviour before 1.2.0)');
         self::assertSame([$shown->getUuid(), $hidden->getUuid()], array_column($data->exportUser($user), 'uuid'));
-        self::assertCount(2, $data->export('alice@new.example', '7'));
+        self::assertCount(2, $data->export('alice@new.example', AppUser::class . ':7'));
 
         self::assertSame(2, $data->eraseUser($user));
         self::assertSame([], $data->exportUser($user));
@@ -248,6 +254,89 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         self::assertNull($long->getUploadedByKey(), 'a key longer than 180 characters is dropped, never cut');
     }
 
+    public function testTwoUserClassesWithTheSameIdNeverShareFiles(): void
+    {
+        $kernel = $this->bootKernel();
+        $this->profile($kernel);
+        $uploader = $this->service($kernel, ImageUploader::class);
+        $admin    = $uploader->upload(new Admin(5, 'alice'), 'board', 'b1', Images::png(2000, 1000), 'admin.png');
+        $customer = $uploader->upload(new Customer(5, 'admin'), 'board', 'b1', Images::png(2000, 1000), 'customer.png');
+        $data     = $this->service($kernel, StoredFilesPersonalData::class);
+
+        self::assertSame([$customer->getUuid()], array_column($data->exportUser(new Customer(5, 'customer@new.example')), 'uuid'));
+        self::assertSame(1, $data->eraseUser(new Customer(5, 'customer@new.example')));
+        self::assertSame([$admin->getUuid()], array_column($data->exportUser(new Admin(5, 'admin@new.example')), 'uuid'), "the admin's file survives the customer's erasure");
+    }
+
+    public function testTheBackfillKeysLegacyRowsThroughTheUserProvider(): void
+    {
+        $kernel = $this->bootKernel(['personal_data' => ['user_provider' => AppUsers::class]], extra: static function (ContainerConfigurator $container): void {
+            $container->services()->set(AppUsers::class);
+        });
+        $this->profile($kernel);
+        $alice = $this->upload($kernel);
+        $this->upload($kernel);
+        $bob   = $this->upload($kernel, 'b2', 'bob');
+        $admin = $this->upload($kernel, 'b1', 'admin');
+        self::assertNull($alice->getUploadedByKey(), 'legacy-like rows: in-memory users have no id');
+        $application = new Application($kernel);
+        $tester      = new CommandTester($application->find(BackfillUploaderKeysCommand::NAME));
+
+        self::assertSame(0, $tester->execute(['--dry-run' => true]));
+        self::assertStringContainsString('[dry run] Identifiers keyed: 2 (files: 0); unknown to the provider: 1', $this->flat($tester));
+        self::assertSame(0, $tester->execute(['--batch' => '1', '--skip' => ['bob']]));
+        self::assertStringContainsString('Identifiers keyed: 1 (files: 2); unknown to the provider: 1; users without key: 0; skipped: 1; files older than their user, left without key: 0.', $this->flat($tester));
+        self::assertSame(0, $tester->execute([]));
+        self::assertStringContainsString('Identifiers keyed: 1 (files: 1)', $this->flat($tester), 'idempotent: only bob is left');
+        self::assertSame(2, $tester->execute(['--batch' => 'x']));
+
+        $this->entityManager($kernel)->clear();
+        $key = fn (StoredFile $f): ?string => $this->entityManager($kernel)->find(StoredFile::class, $f->getId())?->getUploadedByKey();
+        self::assertSame([AppUser::class . ':7', AppUser::class . ':8', null], [$key($alice), $key($bob), $key($admin)]);
+        self::assertCount(2, $this->service($kernel, StoredFilesPersonalData::class)->exportUser(new AppUser(7, 'alice@new.example')));
+    }
+
+    public function testTheBackfillLeavesFilesOlderThanTheirCurrentUserWithoutKey(): void
+    {
+        $kernel = $this->bootKernel(['personal_data' => ['user_provider' => AppUsers::class]], extra: static function (ContainerConfigurator $container): void {
+            $container->services()->set(AppUsers::class);
+        });
+        $this->profile($kernel);
+        [$dave, $erin, $fred] = [$this->upload($kernel), $this->upload($kernel), $this->upload($kernel)];
+        foreach (['dave' => $dave, 'erin' => $erin, 'fred' => $fred] as $identifier => $file) {
+            $this->entityManager($kernel)->createQuery('UPDATE ' . StoredFile::class . ' f SET f.uploadedBy = :identifier WHERE f.id = :id')
+                ->setParameter('identifier', $identifier)
+                ->setParameter('id', $file->getId())
+                ->execute();
+        }
+        $tester = new CommandTester((new Application($kernel))->find(BackfillUploaderKeysCommand::NAME));
+
+        self::assertSame(0, $tester->execute(['--dry-run' => true]));
+        self::assertStringContainsString('[dry run] Identifiers keyed: 3 (files: 0); unknown to the provider: 0; users without key: 0; skipped: 0; files older than their user, left without key: 1.', $this->flat($tester));
+        self::assertSame(0, $tester->execute([]));
+        self::assertStringContainsString('Identifiers keyed: 3 (files: 2);', $this->flat($tester), 'a file uploaded before its current user existed belonged to a former holder of the identifier');
+
+        $this->entityManager($kernel)->clear();
+        $key = fn (StoredFile $f): ?string => $this->entityManager($kernel)->find(StoredFile::class, $f->getId())?->getUploadedByKey();
+        self::assertSame([null, DatedUser::class . ':10', DatedUser::class . ':11'], [$key($dave), $key($erin), $key($fred)]);
+    }
+
+    public function testTheBackfillReportsUsersWithoutKeyAndAMissingProvider(): void
+    {
+        $kernel = $this->bootKernel();
+        $this->profile($kernel);
+        $this->upload($kernel);
+        $tester = new CommandTester((new Application($kernel))->find(BackfillUploaderKeysCommand::NAME));
+
+        self::assertSame(0, $tester->execute([]));
+        self::assertStringContainsString('users without key: 1', $this->flat($tester), 'the default provider (security.user_providers) loads in-memory users, which have no id');
+
+        $kernel = $this->bootKernel(['personal_data' => ['user_provider' => 'missing.provider']]);
+        $tester = new CommandTester((new Application($kernel))->find(BackfillUploaderKeysCommand::NAME));
+        self::assertSame(1, $tester->execute([]));
+        self::assertStringContainsString('No user provider', $this->flat($tester));
+    }
+
     public function testATablePrefixIsAppliedToTheRawStatements(): void
     {
         $kernel = $this->bootKernel(['doctrine' => ['table_prefix' => 'app_']]);
@@ -259,5 +348,10 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         self::assertContains('app_storage_kit_file', $tables);
         self::assertSame(1, (int) $this->entityManager($kernel)->getConnection()->fetchOne('SELECT COUNT(*) FROM app_storage_kit_file_reference'));
         self::assertSame(0, $this->service($kernel, FilePurger::class)->run(new DateTimeImmutable('+30 days'))['purged']);
+    }
+
+    private function flat(CommandTester $tester): string
+    {
+        return (string) preg_replace('/\s+/', ' ', $tester->getDisplay());
     }
 }
