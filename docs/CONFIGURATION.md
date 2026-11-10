@@ -15,6 +15,7 @@ compiled; the defaults are the safe choice. Source of truth: `src/DependencyInje
 - [sync](#sync)
 - [scopes](#scopes)
 - [limits](#limits)
+- [personal_data](#personal_data)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
 - [security](#security)
@@ -67,6 +68,8 @@ nowo_storage_kit:
         path_prefix: /storage/scopes
     limits:
         upload_limit: null       # service id (UploadLimitInterface)
+    personal_data:
+        uploader_key_resolver: null # service id (UploaderKeyResolverInterface); null = the user's getId()
     doctrine:
         table_prefix: ''
         entity_manager: null
@@ -208,6 +211,12 @@ Buckets per scope (organisation, tenant, workspace…).
 | Key | Default | Effect |
 | --- | --- | --- |
 | `upload_limit` | `null` | Service id implementing `Upload\UploadLimitInterface` (a plan quota per owner), asked before anything is written. Null = only `upload.max_bytes`. |
+
+## personal_data
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `uploader_key_resolver` | `null` | Service id implementing `PersonalData\UploaderKeyResolverInterface`: the stable key stored with each upload (`uploaded_by_key`) and matched by `StoredFilesPersonalData::exportUser()` / `eraseUser()`, so the GDPR export and erasure still find a person's files after their user identifier (e-mail) changes. Null = `UserIdUploaderKeyResolver` (the user's `getId()` when it returns an integer, a non-empty string or a `Uuid`; no key otherwise). Since 1.2.0. |
 
 ## doctrine
 

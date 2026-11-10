@@ -13,17 +13,23 @@ use Nowo\StorageKitBundle\Download\FileUrls;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Repository\StoredFileRepository;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use Symfony\Component\Security\Core\User\UserInterface;
 
 use function count;
 
 /**
  * GDPR hooks for the host's personal-data export and erasure (UserKit's eraser / export provider, or your own), keyed
- * by the user identifier stored at upload:
+ * by the stable uploader key ({@see UploaderKeyResolverInterface}, the user id by default) and by the user identifier
+ * stored at upload for files that have no key:
  *
  * - {@see self::export()}: the files the user uploaded — metadata and the link that downloads the original (the bytes
  *   stay in the bucket; the link answers while the user may still read the context);
  * - {@see self::erase()}: files a kept text still shows lose their name and uploader; files no text shows are handed to
  *   the next purge (bucket objects and row). No bucket call here: erasers usually run inside one transaction.
+ *
+ * Pass the user ({@see self::exportUser()}, {@see self::eraseUser()}) or both values ({@see self::export()},
+ * {@see self::erase()} with `$userKey`): a file stored with the key is found after the user identifier (often an
+ * e-mail) changed. Called with the identifier only, they match the identifier only, as before 1.2.0.
  *
  * Both walk the files in keyset pages of {@see self::PAGE}.
  */
@@ -40,18 +46,38 @@ final readonly class StoredFilesPersonalData
         private StorageEntityManager $entityManager,
         private FileUrls $urls,
         private AuditRecorder $audit,
+        private UploaderKeyResolverInterface $uploaderKeys = new UserIdUploaderKeyResolver(),
     ) {
     }
 
     /**
-     * The export section of a user.
+     * The export section of a security user: their stable key and their current user identifier.
      *
      * @return list<array<string, scalar|null>>
      */
-    public function export(string $userIdentifier): array
+    public function exportUser(UserInterface $user): array
+    {
+        return $this->export($user->getUserIdentifier(), $this->uploaderKeys->keyOf($user));
+    }
+
+    /**
+     * Erases a security user's link to their files (stable key and current user identifier); returns the files touched.
+     */
+    public function eraseUser(UserInterface $user): int
+    {
+        return $this->erase($user->getUserIdentifier(), $this->uploaderKeys->keyOf($user));
+    }
+
+    /**
+     * The export section of a user: files stored with `$userKey` (when given) and files without a key stored under
+     * `$userIdentifier`.
+     *
+     * @return list<array<string, scalar|null>>
+     */
+    public function export(string $userIdentifier, ?string $userKey = null): array
     {
         $rows = [];
-        foreach ($this->pages($userIdentifier) as $page) {
+        foreach ($this->pages($userIdentifier, $userKey) as $page) {
             foreach ($page as ['file' => $file, 'referenced' => $referenced]) {
                 $rows[] = [
                     'uuid'       => $file->getUuid(),
@@ -73,14 +99,14 @@ final readonly class StoredFilesPersonalData
     }
 
     /**
-     * Erases a user's link to their files; returns the number of files touched.
+     * Erases a user's link to their files (same match as {@see self::export()}); returns the number of files touched.
      */
-    public function erase(string $userIdentifier): int
+    public function erase(string $userIdentifier, ?string $userKey = null): int
     {
         $longAgo = new DateTimeImmutable('2000-01-01');
         $manager = $this->entityManager->manager();
         $count   = 0;
-        foreach ($this->pages($userIdentifier) as $page) {
+        foreach ($this->pages($userIdentifier, $userKey) as $page) {
             foreach ($page as ['file' => $file, 'referenced' => $referenced]) {
                 $file->anonymise();
                 if (!$referenced) {
@@ -98,11 +124,11 @@ final readonly class StoredFilesPersonalData
     /**
      * @return iterable<list<array{file: StoredFile, referenced: bool}>>
      */
-    private function pages(string $userIdentifier): iterable
+    private function pages(string $userIdentifier, ?string $userKey): iterable
     {
         $after = 0;
         while (true) {
-            $page = $this->files->uploadedBy($userIdentifier, $after, self::PAGE);
+            $page = $this->files->uploadedBy($userIdentifier, $after, self::PAGE, $userKey);
             if ($page === []) {
                 return;
             }

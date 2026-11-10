@@ -40,6 +40,8 @@ use Nowo\StorageKitBundle\Message\RunStorageSyncMessage;
 use Nowo\StorageKitBundle\MessageHandler\RunStorageSyncHandler;
 use Nowo\StorageKitBundle\NowoStorageKitBundle;
 use Nowo\StorageKitBundle\PersonalData\StoredFilesPersonalData;
+use Nowo\StorageKitBundle\PersonalData\UploaderKeyResolverInterface;
+use Nowo\StorageKitBundle\PersonalData\UserIdUploaderKeyResolver;
 use Nowo\StorageKitBundle\Profile\ConfigProfiles;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Reference\FileReferenceListener;
@@ -149,7 +151,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /* @var array{profiles: array<string, array{dsn: string|null, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string|null, prefix: string, access_key: string|null, secret: string|null, path_style: bool, delivery: string}>, instance_profile: string|null, uri_scheme: string, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, upload: array{enabled: bool, path_prefix: string, access_roles: list<string>, max_bytes: int, max_pixels: int, variants: array<string, int>, rate_limit: int, rate_interval: string}, download: array{url_ttl: int, disposition: string}, purge: array{retention_days: int, batch_size: int, max_batches: int}, sync: array{batch_size: int, slice_seconds: int, stale_seconds: int}, scopes: array{enabled: bool, resolver: string|null, access_checker: string|null, path_prefix: string}, limits: array{upload_limit: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
+        /* @var array{profiles: array<string, array{dsn: string|null, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string|null, prefix: string, access_key: string|null, secret: string|null, path_style: bool, delivery: string}>, instance_profile: string|null, uri_scheme: string, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, upload: array{enabled: bool, path_prefix: string, access_roles: list<string>, max_bytes: int, max_pixels: int, variants: array<string, int>, rate_limit: int, rate_interval: string}, download: array{url_ttl: int, disposition: string}, purge: array{retention_days: int, batch_size: int, max_batches: int}, sync: array{batch_size: int, slice_seconds: int, stale_seconds: int}, scopes: array{enabled: bool, resolver: string|null, access_checker: string|null, path_prefix: string}, limits: array{upload_limit: string|null}, personal_data: array{uploader_key_resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
         if (!$this->hasBundle($container, 'NowoDoctrineEncryptBundle') && !$container->hasExtension('nowo_doctrine_encrypt')) {
             throw new LogicException('NowoStorageKitBundle requires nowo-tech/doctrine-encrypt-bundle (bucket secrets are encrypted at rest): register Nowo\DoctrineEncryptBundle\NowoDoctrineEncryptBundle in config/bundles.php.');
         }
@@ -282,9 +284,15 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
      */
     private function registerFiles(ContainerBuilder $container, array $config): void
     {
-        /** @var array{uri_scheme: string, upload: array{path_prefix: string, max_bytes: int, max_pixels: int, variants: array<string, int>}, download: array{url_ttl: int, disposition: string}, limits: array{upload_limit: string|null}} $config */
+        /** @var array{uri_scheme: string, upload: array{path_prefix: string, max_bytes: int, max_pixels: int, variants: array<string, int>}, download: array{url_ttl: int, disposition: string}, limits: array{upload_limit: string|null}, personal_data: array{uploader_key_resolver: string|null}} $config */
         $logger = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
         $limit  = $config['limits']['upload_limit'];
+        $keys   = $config['personal_data']['uploader_key_resolver'];
+        if (is_string($keys) && trim($keys) !== '') {
+            $container->setAlias(UploaderKeyResolverInterface::class, $keys);
+        } else {
+            $container->setDefinition(UploaderKeyResolverInterface::class, new Definition(UserIdUploaderKeyResolver::class));
+        }
 
         $container->setDefinition(FileContexts::class, (new Definition(FileContexts::class, [new TaggedIteratorArgument(FileContextInterface::TAG)]))
             ->setPublic(true)->addTag('kernel.reset', ['method' => 'reset']));
@@ -313,6 +321,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             new Reference(AuditRecorder::class),
             is_string($limit) && trim($limit) !== '' ? new Reference($limit) : null,
             $logger,
+            new Reference(UploaderKeyResolverInterface::class),
         ]))->setPublic(true));
         $container->setDefinition(FileUrls::class, (new Definition(FileUrls::class, [new Reference('router')]))->setPublic(true));
         $container->setDefinition(FileDelivery::class, (new Definition(FileDelivery::class, [
@@ -332,6 +341,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             new Reference(StorageEntityManager::class),
             new Reference(FileUrls::class),
             new Reference(AuditRecorder::class),
+            new Reference(UploaderKeyResolverInterface::class),
         ]))->setPublic(true));
         $container->setDefinition(StorageCspSources::class, (new Definition(StorageCspSources::class, [new Reference(ConfigProfiles::class)]))->setPublic(true));
         if (interface_exists(CspSourceProviderInterface::class)) {

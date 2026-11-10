@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Entity;
 
 use DateTimeImmutable;
 use Doctrine\ORM\Mapping as ORM;
+use Nowo\StorageKitBundle\PersonalData\UploaderKeyResolverInterface;
 use Symfony\Component\Uid\Uuid;
 
 use function array_map;
@@ -30,6 +31,7 @@ use function array_values;
 #[ORM\Index(name: 'idx_storage_kit_file_context', columns: ['context_type', 'context_id'])]
 #[ORM\Index(name: 'idx_storage_kit_file_owner', columns: ['owner'])]
 #[ORM\Index(name: 'idx_storage_kit_file_uploader', columns: ['uploaded_by'])]
+#[ORM\Index(name: 'idx_storage_kit_file_uploader_key', columns: ['uploaded_by_key'])]
 #[ORM\Index(name: 'idx_storage_kit_file_orphaned', columns: ['orphaned_since'])]
 class StoredFile
 {
@@ -58,6 +60,10 @@ class StoredFile
 
     #[ORM\Column(name: 'uploaded_by', length: 180, nullable: true)]
     private ?string $uploadedBy = null;
+
+    /** Stable key of the uploader (user id), kept when the user identifier changes; null for rows before 1.2.0. */
+    #[ORM\Column(name: 'uploaded_by_key', length: 180, nullable: true)]
+    private ?string $uploadedByKey = null;
 
     #[ORM\Column(length: 64, nullable: true)]
     private ?string $owner = null;
@@ -229,6 +235,23 @@ class StoredFile
     }
 
     /**
+     * Stable key of the uploader (see {@see UploaderKeyResolverInterface}); null
+     * when the user had none, for files uploaded before 1.2.0 (until backfilled) and after an erasure.
+     */
+    public function getUploadedByKey(): ?string
+    {
+        return $this->uploadedByKey;
+    }
+
+    /**
+     * Sets the stable key of the uploader.
+     */
+    public function setUploadedByKey(?string $userKey): void
+    {
+        $this->uploadedByKey = $userKey;
+    }
+
+    /**
      * Usage owner key.
      */
     public function getOwner(): ?string
@@ -326,7 +349,8 @@ class StoredFile
      */
     public function anonymise(): void
     {
-        $this->originalName = self::ANONYMOUS_NAME;
-        $this->uploadedBy   = null;
+        $this->originalName  = self::ANONYMOUS_NAME;
+        $this->uploadedBy    = null;
+        $this->uploadedByKey = null;
     }
 }

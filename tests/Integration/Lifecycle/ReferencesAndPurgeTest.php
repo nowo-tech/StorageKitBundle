@@ -11,15 +11,21 @@ use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
 use Nowo\StorageKitBundle\Lifecycle\FilePurger;
 use Nowo\StorageKitBundle\PersonalData\StoredFilesPersonalData;
+use Nowo\StorageKitBundle\Tests\Fixtures\AppUser;
 use Nowo\StorageKitBundle\Tests\Fixtures\Boards;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
+use Nowo\StorageKitBundle\Tests\Fixtures\PrefixedUploaderKeys;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\Security\Core\User\InMemoryUser;
+
+use function array_column;
+use function str_repeat;
 
 /**
  * REQ-MEDIA-005 reference-aware purge: texts point at files (URI or download path), only files of the text's own
@@ -185,6 +191,61 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         self::assertCount(1, $data->export('bob'));
         self::assertContains(StorageAuditEvent::FILES_ERASED, $this->audit($kernel)->actions());
         self::assertSame(1, $this->entityManager($kernel)->getRepository(StoredFileReference::class)->count([]));
+    }
+
+    public function testExportAndErasureFindTheFilesAfterTheIdentifierChanged(): void
+    {
+        $kernel = $this->bootKernel();
+        $this->profile($kernel);
+        $user     = new AppUser(7, 'alice');
+        $uploader = $this->service($kernel, ImageUploader::class);
+        $shown    = $uploader->upload($user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        $hidden   = $uploader->upload($user, 'board', 'b1', Images::png(2000, 1000), 'other.png');
+        self::assertSame(['alice', '7'], [$shown->getUploadedBy(), $shown->getUploadedByKey()]);
+        $this->note($kernel, '![a](storage-file:' . $shown->getUuid() . ')');
+        $data = $this->service($kernel, StoredFilesPersonalData::class);
+
+        $user->email = 'alice@new.example';
+        self::assertSame([], $data->export('alice@new.example'), 'the identifier alone misses the files (behaviour before 1.2.0)');
+        self::assertSame([$shown->getUuid(), $hidden->getUuid()], array_column($data->exportUser($user), 'uuid'));
+        self::assertCount(2, $data->export('alice@new.example', '7'));
+
+        self::assertSame(2, $data->eraseUser($user));
+        self::assertSame([], $data->exportUser($user));
+        $this->entityManager($kernel)->clear();
+        $row = $this->entityManager($kernel)->find(StoredFile::class, $shown->getId());
+        self::assertSame([StoredFile::ANONYMOUS_NAME, null, null], [$row?->getOriginalName(), $row?->getUploadedBy(), $row?->getUploadedByKey()]);
+        self::assertSame('2000', $this->entityManager($kernel)->find(StoredFile::class, $hidden->getId())?->getOrphanedSince()?->format('Y'));
+    }
+
+    public function testRowsWithoutKeyAreMatchedByIdentifierAndOtherKeysAreNot(): void
+    {
+        $kernel = $this->bootKernel();
+        $this->profile($kernel);
+        $legacy = $this->upload($kernel);
+        self::assertNull($legacy->getUploadedByKey(), 'an in-memory user has no id');
+        $former = $this->service($kernel, ImageUploader::class)->upload(new AppUser(3, 'alice'), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        $data   = $this->service($kernel, StoredFilesPersonalData::class);
+
+        self::assertSame([$legacy->getUuid()], array_column($data->exportUser(new AppUser(9, 'alice')), 'uuid'), 'the identifier now belongs to user 9: user 3\'s file stays out');
+        self::assertSame([$legacy->getUuid(), $former->getUuid()], array_column($data->export('alice'), 'uuid'), 'identifier only: as before 1.2.0');
+        self::assertSame([$legacy->getUuid(), $former->getUuid()], array_column($data->exportUser(new InMemoryUser('alice', null)), 'uuid'), 'a user without key: identifier only, as before 1.2.0');
+    }
+
+    public function testACustomUploaderKeyResolverIsUsed(): void
+    {
+        $kernel = $this->bootKernel(['personal_data' => ['uploader_key_resolver' => PrefixedUploaderKeys::class]], extra: static function (ContainerConfigurator $container): void {
+            $container->services()->set(PrefixedUploaderKeys::class);
+        });
+        $this->profile($kernel);
+        $user = new AppUser(5, 'alice');
+        $file = $this->service($kernel, ImageUploader::class)->upload($user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        self::assertSame('user:5', $file->getUploadedByKey());
+
+        $user->email = 'renamed';
+        self::assertCount(1, $this->service($kernel, StoredFilesPersonalData::class)->exportUser($user));
+        $long = $this->service($kernel, ImageUploader::class)->upload(new AppUser(str_repeat('9', 180), 'alice'), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        self::assertNull($long->getUploadedByKey(), 'a key longer than 180 characters is dropped, never cut');
     }
 
     public function testATablePrefixIsAppliedToTheRawStatements(): void

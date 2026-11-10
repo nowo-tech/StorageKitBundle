@@ -5,6 +5,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Target 1.2.0 — GDPR export / erasure keep finding a user's files after their identifier changes
+
+### Security
+
+- **Personal data after an identifier change** (DDD audit 2026-11-10, G2): uploads were linked to the person only by
+  `getUserIdentifier()` (often an e-mail), so after an e-mail change `StoredFilesPersonalData::export()` / `erase()`
+  missed every file uploaded under the old value. Each upload now also stores a stable uploader key
+  (`storage_kit_file.uploaded_by_key`, indexed `idx_storage_kit_file_uploader_key`): the user's `getId()` by default
+  (`PersonalData\UserIdUploaderKeyResolver`), or your `personal_data.uploader_key_resolver`
+  (`PersonalData\UploaderKeyResolverInterface`). The new `exportUser(UserInterface)` / `eraseUser(UserInterface)` match
+  that key, plus files without a key under the current identifier; a file stored with another key is never matched by
+  identifier. Erasure clears the key too. **Schema change** (one nullable column and an index); files uploaded before
+  this version need the one-off backfill in UPGRADING.
+
+### Added
+
+- `PersonalData\UploaderKeyResolverInterface`, `PersonalData\UserIdUploaderKeyResolver`, configuration
+  `personal_data.uploader_key_resolver`, `StoredFile::getUploadedByKey()` / `setUploadedByKey()`,
+  `StoredFilesPersonalData::exportUser()` / `eraseUser()`, optional `$userKey` on `export()` / `erase()` and
+  `StoredFileRepository::uploadedBy()`.
+
+### Changed
+
+- Docs: USAGE gains "Using it from a DDD / hexagonal application"; Personal data, CONFIGURATION, SECURITY and
+  ARCHITECTURE describe the uploader key.
+
 ## [1.1.0] - 2026-11-03
 
 Import the AWS access-key CSV in the S3 profile form

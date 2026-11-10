@@ -11,6 +11,8 @@ use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StoredFile;
+use Nowo\StorageKitBundle\PersonalData\UploaderKeyResolverInterface;
+use Nowo\StorageKitBundle\PersonalData\UserIdUploaderKeyResolver;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Storage\ErrorScrubber;
 use Nowo\StorageKitBundle\Storage\FileStorage;
@@ -44,7 +46,7 @@ final readonly class ImageUploader
     public const NAME_MAX = 120;
 
     /**
-     * Contexts, profiles, storage, checks, entity manager, audit, optional limit and logger.
+     * Contexts, profiles, storage, checks, entity manager, audit, optional limit, logger and the stable uploader key.
      */
     public function __construct(
         private FileContexts $contexts,
@@ -55,6 +57,7 @@ final readonly class ImageUploader
         private AuditRecorder $audit,
         private ?UploadLimitInterface $limit = null,
         private LoggerInterface $logger = new NullLogger(),
+        private UploaderKeyResolverInterface $uploaderKeys = new UserIdUploaderKeyResolver(),
     ) {
     }
 
@@ -107,6 +110,7 @@ final readonly class ImageUploader
                 $file->addVariant($name, ['key' => $variantKey, 'size' => strlen($variant['bytes']), 'width' => $variant['width'], 'height' => $variant['height'], 'mime' => $variant['mime']]);
             }
             $file->setUploadedBy($user instanceof UserInterface ? mb_substr($user->getUserIdentifier(), 0, 180) : null);
+            $file->setUploadedByKey($this->validKey($this->uploaderKeys->keyOf($user)));
             $file->setOwner($target->owner);
             $file->markOrphaned(new DateTimeImmutable());
             $manager = $this->entityManager->manager();
@@ -135,6 +139,14 @@ final readonly class ImageUploader
         $name = trim((string) preg_replace('/[\x00-\x1F\x7F]+/u', '', basename(str_replace('\\', '/', $name))));
 
         return $name === '' ? StoredFile::ANONYMOUS_NAME : mb_substr($name, 0, self::NAME_MAX);
+    }
+
+    /**
+     * A resolver's key, or null when it is empty or too long (never cut: a cut key could match another person).
+     */
+    private function validKey(?string $key): ?string
+    {
+        return $key === null || $key === '' || strlen($key) > UploaderKeyResolverInterface::MAX_LENGTH ? null : $key;
     }
 
     /**

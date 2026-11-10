@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.2.0](#to-120)
 - [To 1.1.0](#to-110)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
   - [Requirements](#requirements)
@@ -12,6 +13,68 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+## To 1.2.0
+
+From **1.1.x**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
+
+**Schema change** (one nullable column, one index), no breaking API change.
+
+Why: uploads were linked to the person only by `getUserIdentifier()`, often an e-mail. After an e-mail change, the
+GDPR export and erasure (`StoredFilesPersonalData::export()` / `erase()` with the new identifier) missed every file
+uploaded under the old one. Each upload now also stores a stable **uploader key** (`uploaded_by_key`), the user's
+`getId()` by default.
+
+1. Migrate the schema (`doctrine:migrations:diff` then `migrate`), or by hand (add your `doctrine.table_prefix`):
+
+   ```sql
+   -- MySQL / MariaDB
+   ALTER TABLE storage_kit_file ADD uploaded_by_key VARCHAR(180) DEFAULT NULL;
+   CREATE INDEX idx_storage_kit_file_uploader_key ON storage_kit_file (uploaded_by_key);
+   -- PostgreSQL / SQLite: the same statements (VARCHAR(180) DEFAULT NULL)
+   ```
+
+2. **Backfill** the key of the files uploaded before 1.2.0 once, **before** any further identifier change, from your
+   user table (adapt the table and column names; the key must be what your resolver returns, the plain id by default):
+
+   ```sql
+   -- MySQL / MariaDB
+   UPDATE storage_kit_file f
+     JOIN app_user u ON u.email = f.uploaded_by
+      SET f.uploaded_by_key = CAST(u.id AS CHAR)
+    WHERE f.uploaded_by_key IS NULL AND f.uploaded_by IS NOT NULL;
+
+   -- PostgreSQL / SQLite
+   UPDATE storage_kit_file
+      SET uploaded_by_key = (SELECT CAST(u.id AS VARCHAR(180)) FROM app_user u WHERE u.email = storage_kit_file.uploaded_by)
+    WHERE uploaded_by_key IS NULL AND uploaded_by IS NOT NULL;
+   ```
+
+   Files whose uploader already changed identifier before this backfill cannot be matched by SQL: if you keep a log
+   of identifier changes, run the same update with the old value, or call `export()` / `erase()` once per past
+   identifier of the person. Rows left without a key keep working as before (matched by identifier).
+
+3. Call `exportUser($user)` / `eraseUser($user)` (or `export($identifier, $key)` / `erase($identifier, $key)`) from
+   your GDPR export provider and eraser. `export($identifier)` / `erase($identifier)` without a key behave exactly as
+   in 1.1 (identifier only).
+
+4. If `getId()` is not what identifies a person (several user classes sharing ids, users re-created on login, no
+   `getId()`), set `personal_data.uploader_key_resolver` to a service implementing
+   `PersonalData\UploaderKeyResolverInterface` (and backfill with what it returns).
+
+Behaviour changes:
+
+- New uploads by users with a usable `getId()` (an integer, a non-empty string or a `Uuid`, at most 180 characters)
+  store it in `uploaded_by_key`. Users without one (for example `InMemoryUser`) store no key, as before.
+- With a key, a file stored with **another** key is no longer matched by identifier: if an e-mail was given to a new
+  person, `exportUser()` / `eraseUser()` of that person do not reach the former owner's files.
+- Erasure also clears `uploaded_by_key`.
+- `ImageUploader` and `StoredFilesPersonalData` take an optional last constructor argument
+  (`UploaderKeyResolverInterface`, default `UserIdUploaderKeyResolver`); code that builds them by hand keeps working.
 
 ## To 1.1.0
 

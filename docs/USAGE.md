@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [How it fits together](#how-it-fits-together)
+- [Using it from a DDD / hexagonal application](#using-it-from-a-ddd--hexagonal-application)
 - [The instance bucket](#the-instance-bucket)
   - [The `storage` settings section](#the-storage-settings-section)
   - [A bucket from the configuration](#a-bucket-from-the-configuration)
@@ -47,6 +48,67 @@
   bucket under a random key `yyyy/mm/<uuid>`.
 - **References** (`StoredFileReference` rows) record which text points at which file; a file no text points at is an
   orphan, deleted by `nowo:storage-kit:purge` after `purge.retention_days`.
+
+## Using it from a DDD / hexagonal application
+
+StorageKitBundle is a **bounded context with its own persistence**: it owns `StorageProfile`, `StoredFile`,
+`StoredFileReference` and `StorageSync` (in the entity manager set by `doctrine.entity_manager`) and talks to S3
+buckets itself. It has **no Doctrine relation to your entities**: your texts, contexts and owners are stored as
+strings (`context_type`, `context_id`, `owner`, `uploaded_by`, `uploaded_by_key`), and users are passed as plain
+objects and reduced to `getUserIdentifier()` plus a stable key (`PersonalData\UploaderKeyResolverInterface`).
+
+### What you implement (infrastructure adapters)
+
+| Port | Your adapter answers |
+|---|---|
+| `Context\FileContextInterface` | which context ids a viewer may read, which still exist, and whether a user may write into one (`FileContextTarget`) |
+| `Reference\FileReferenceSourceInterface` | which entity class / field holds a text that may mention files |
+| `Scope\ScopeResolverInterface`, `Scope\ScopeAccessCheckerInterface` | scope buckets (organisation, tenant) and who manages them |
+| `Upload\UploadLimitInterface` | quotas per `FileContextTarget::$owner` |
+| `PersonalData\UploaderKeyResolverInterface` | the stable id of a user (default: `getId()`), so personal data survives an e-mail change |
+
+Call your own application services from these adapters (access policies, repositories); do not inject the bundle into
+your domain.
+
+### Texts that are not Doctrine entities
+
+`FileReferenceListener` records references automatically only for Doctrine entities of a registered source class.
+If your texts are written another way (DBAL, an event-sourced aggregate, another entity manager), call
+`Nowo\StorageKitBundle\Reference\FileReferences` yourself, for example from a domain-event handler:
+
+```php
+final readonly class SyncCommentFileReferences
+{
+    public function __construct(private FileReferences $references) {}
+
+    public function __invoke(CommentSaved $event): void
+    {
+        $this->references->sync('comment', $event->commentId, $event->body, ['issue', $event->issueId]);
+    }
+}
+```
+
+Use `FileReferences::forget('comment', [$id])` when a text is deleted.
+
+### Listening to it
+
+`Audit\StorageAuditEvent` (`action`, `scope`, `actor` identifier, `details`) is dispatched after every mutation with
+scalar data only, so it maps directly to your audit log or domain events.
+
+### Personal data
+
+Call `StoredFilesPersonalData::exportUser()` / `eraseUser()` from your own GDPR use case; they match the stable
+uploader key, so an e-mail change does not orphan the person's files (see [Personal data](#personal-data)). If your
+user ids are not what identifies a person (several user classes, re-created users), implement
+`UploaderKeyResolverInterface`.
+
+### Known limitations
+
+- The explicit `FileReferences::sync()` path is not a published interface yet, and `FileReferenceSourceInterface`
+  still asks for `entityClass()` / `field()`.
+- Files uploaded before 1.2.0 carry no uploader key until you backfill it ([UPGRADING](UPGRADING.md#to-120)).
+- `ImageUploader::upload()` returns the `StoredFile` entity.
+- InstanceSettingsBundle is always installed, even when the bucket comes from configuration.
 
 ## The instance bucket
 
@@ -435,14 +497,27 @@ active profile and the values saved in the section are not used.
 ## Personal data
 
 `PersonalData\StoredFilesPersonalData` is the hook for your GDPR export / erasure (UserKit's eraser / export provider,
-or your own), keyed by the user identifier stored at upload:
+or your own). Each upload stores the user identifier (`uploaded_by`) and, since 1.2.0, a **stable uploader key**
+(`uploaded_by_key`): the user's `getId()` by default, or what your `personal_data.uploader_key_resolver`
+(`PersonalData\UploaderKeyResolverInterface`) returns. The key is what keeps a person linked to their files when their
+identifier (often an e-mail) changes.
 
-- `export(string $userIdentifier): list<array>` — uuid, name, type, size, dimensions, sha256, context, whether a text
+- `exportUser(UserInterface $user): list<array>` — uuid, name, type, size, dimensions, sha256, context, whether a text
   still shows it, created at and an absolute link to the original (it answers while the user may still read the
   context);
-- `erase(string $userIdentifier): int` — files a kept text still shows lose their name and uploader; files no text
-  shows are expired for the next purge. No bucket call (erasers usually run in one transaction). Audited as
+- `eraseUser(UserInterface $user): int` — files a kept text still shows lose their name, uploader and key; files no
+  text shows are expired for the next purge. No bucket call (erasers usually run in one transaction). Audited as
   `files_erased`.
+
+Both match the files stored with the user's key, plus the files stored **without** a key (before 1.2.0, or by a user
+without id) under the user's current identifier. A file stored with another key is never matched by identifier, so a
+re-used e-mail does not reach someone else's files. For a user without key (no usable `getId()`) they match the
+identifier only, as before 1.2.0. When you only have the values (a queued erasure after the user row
+is gone), call `export(string $userIdentifier, ?string $userKey = null)` / `erase(…)` with both; with the identifier
+alone they match the identifier only, as before 1.2.0.
+
+Files uploaded before 1.2.0 have no key: backfill it once ([UPGRADING](UPGRADING.md#to-120)), or they are found only
+by the identifier they were uploaded under.
 
 ## Audit events
 
