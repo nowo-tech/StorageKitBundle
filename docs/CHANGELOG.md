@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Target 1.2.0 — GDPR export / erasure keep finding a user's files after their identifier changes
+
+### Security
+
+- **Personal data after an identifier change** (DDD audit 2026-11-10, G2): uploads were linked to the person only by
+  `getUserIdentifier()` (often an e-mail), so after an e-mail change `StoredFilesPersonalData::export()` / `erase()`
+  missed every file uploaded under the old value. Each upload now also stores a stable uploader key
+  (`storage_kit_file.uploaded_by_key`, indexed `idx_storage_kit_file_uploader_key`): `<real user class>:<id>` by
+  default (`PersonalData\UserIdUploaderKeyResolver`; Doctrine proxies stripped, so two user classes with the same id
+  never share a key; `sha256:<hex>` above 180 characters or for an anonymous class; no key and a one-time warning for users without a usable public `getId()`), or your
+  `personal_data.uploader_key_resolver` (`PersonalData\UploaderKeyResolverInterface`). The new
+  `exportUser(UserInterface)` / `eraseUser(UserInterface)` match that key, plus files without a key under the current
+  identifier; a file stored with another key is never matched by identifier, so a re-used identifier no longer reaches
+  the former owner's files **stored with a key**. Until the backfill, and through `export($identifier)` /
+  `erase($identifier)` without a key, files are matched by identifier as in 1.1. Tenants sharing one user class with
+  overlapping ids need a tenant-qualified resolver. Erasure clears the key too. **Schema
+  change** (one nullable column and an index); files uploaded before this version need the one-off backfill
+  (`nowo:storage-kit:backfill-uploader-keys`, see UPGRADING).
+
+### Added
+
+- `PersonalData\UploaderKeyResolverInterface`, `PersonalData\UserIdUploaderKeyResolver`, configuration
+  `personal_data.uploader_key_resolver` and `personal_data.user_provider`, console command
+  `nowo:storage-kit:backfill-uploader-keys` (loads each stored identifier through the user provider and asks the
+  configured resolver, so it is exact for integer, UUID and ULID ids; idempotent, batched, `--dry-run`, `--skip`;
+  files older than the user's `getCreatedAt()` stay without key), `StoredFile::getUploadedByKey()` / `setUploadedByKey()`,
+  `StoredFilesPersonalData::exportUser()` / `eraseUser()`, optional `$userKey` on `export()` / `erase()` and
+  `StoredFileRepository::uploadedBy()`.
+
+### Changed
+
+- Docs: USAGE gains "Using it from a DDD / hexagonal application"; Personal data, CONFIGURATION, SECURITY and
+  ARCHITECTURE describe the uploader key.
+
 ## [1.1.0] - 2026-11-03
 
 Import the AWS access-key CSV in the S3 profile form

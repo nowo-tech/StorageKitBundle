@@ -15,6 +15,7 @@ compiled; the defaults are the safe choice. Source of truth: `src/DependencyInje
 - [sync](#sync)
 - [scopes](#scopes)
 - [limits](#limits)
+- [personal_data](#personal_data)
 - [doctrine](#doctrine)
 - [web_ui](#web_ui)
 - [security](#security)
@@ -67,6 +68,9 @@ nowo_storage_kit:
         path_prefix: /storage/scopes
     limits:
         upload_limit: null       # service id (UploadLimitInterface)
+    personal_data:
+        uploader_key_resolver: null # service id (UploaderKeyResolverInterface); null = <user class>:<getId()>
+        user_provider: security.user_providers # used by nowo:storage-kit:backfill-uploader-keys
     doctrine:
         table_prefix: ''
         entity_manager: null
@@ -208,6 +212,13 @@ Buckets per scope (organisation, tenant, workspace…).
 | Key | Default | Effect |
 | --- | --- | --- |
 | `upload_limit` | `null` | Service id implementing `Upload\UploadLimitInterface` (a plan quota per owner), asked before anything is written. Null = only `upload.max_bytes`. |
+
+## personal_data
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `uploader_key_resolver` | `null` | Service id implementing `PersonalData\UploaderKeyResolverInterface`: the stable key stored with each upload (`uploaded_by_key`) and matched by `StoredFilesPersonalData::exportUser()` / `eraseUser()`, so the GDPR export and erasure still find a person's files after their user identifier (e-mail) changes. Null = `UserIdUploaderKeyResolver`: `<real user class>:<id>` from a public `getId()` without arguments returning an integer, a non-empty string or a `Uuid` / `Ulid` (`sha256:<hex>` above 180 characters or for an anonymous class); no key otherwise (logged once per class). **The key must never change for a person**: changing the resolver after uploads needs a re-key ([UPGRADING](UPGRADING.md#to-120), step 4). Since 1.2.0. |
+| `user_provider` | `security.user_providers` | Service id of the `UserProviderInterface` that `nowo:storage-kit:backfill-uploader-keys` loads users with, by stored identifier. A missing service only disables the command. Since 1.2.0. |
 
 ## doctrine
 

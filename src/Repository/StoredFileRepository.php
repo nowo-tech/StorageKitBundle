@@ -91,22 +91,31 @@ final readonly class StoredFileRepository
     /**
      * A page of the files a user uploaded (keyset by id), each with whether a text points at it.
      *
+     * Without `$userKey`, the files whose stored user identifier is `$userIdentifier`. With it, the files stored with
+     * that stable key plus the files stored without a key (before 1.2.0, or by a user without one) under
+     * `$userIdentifier`; a file stored with another key is never matched by identifier (the identifier may have been
+     * given to someone else since).
+     *
      * @return list<array{file: StoredFile, referenced: bool}>
      */
-    public function uploadedBy(string $userIdentifier, int $afterId, int $limit): array
+    public function uploadedBy(string $userIdentifier, int $afterId, int $limit, ?string $userKey = null): array
     {
-        $rows = $this->entityManager->manager()->createQueryBuilder()
+        $query = $this->entityManager->manager()->createQueryBuilder()
             ->select('f')
             ->addSelect('(SELECT COUNT(r.id) FROM ' . StoredFileReference::class . ' r WHERE r.file = f) AS refs')
             ->from(StoredFile::class, 'f')
-            ->andWhere('f.uploadedBy = :user')
             ->andWhere('f.id > :after')
             ->setParameter('user', $userIdentifier)
             ->setParameter('after', $afterId)
             ->orderBy('f.id', 'ASC')
-            ->setMaxResults($limit)
-            ->getQuery()
-            ->getResult();
+            ->setMaxResults($limit);
+        if ($userKey === null || $userKey === '') {
+            $query->andWhere('f.uploadedBy = :user');
+        } else {
+            $query->andWhere('f.uploadedByKey = :key OR (f.uploadedByKey IS NULL AND f.uploadedBy = :user)')
+                ->setParameter('key', $userKey);
+        }
+        $rows  = $query->getQuery()->getResult();
         $files = [];
         foreach ($rows as $row) {
             assert(is_array($row) && $row[0] instanceof StoredFile);
