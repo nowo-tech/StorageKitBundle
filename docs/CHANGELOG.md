@@ -5,7 +5,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Target 1.2.0 — GDPR export / erasure keep finding a user's files after their identifier changes
+## [1.2.0] - 2026-11-10
+
+GDPR export / erasure keep finding a user's files after their identifier changes (stable, class-qualified uploader key; backfill command). See [UPGRADING](https://github.com/nowo-tech/StorageKitBundle/blob/v1.2.0/docs/UPGRADING.md#to-120).
 
 ### Security
 
