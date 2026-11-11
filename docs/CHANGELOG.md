@@ -3,9 +3,20 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## Table of contents
+
+- [[Unreleased]](#unreleased)
+- [[1.3.0] - 2026-11-11](#130---2026-11-11)
+- [[1.2.0] - 2026-11-10](#120---2026-11-10)
+- [[1.1.0] - 2026-11-03](#110---2026-11-03)
+- [[1.0.0] - 2026-11-03](#100---2026-11-03)
+
 ## [Unreleased]
 
-Target 1.3.0. Architecture bar (standard Symfony and DDD hosts, rules 1, 3, 6, 7 and 8; audit 2026-11-10).
+## [1.3.0] - 2026-11-11
+
+Uploads write their row with a DBAL insert and never flush the host's entity manager; new ImageUploaderInterface with a StoredFileView DTO; InstanceSettings becomes optional. See [UPGRADING](https://github.com/nowo-tech/StorageKitBundle/blob/v1.3.0/docs/UPGRADING.md#to-130).
+
 
 ### Fixed
 

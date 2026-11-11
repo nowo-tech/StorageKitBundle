@@ -3,7 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
-  - [To 1.3.0](#to-130)
+- [To 1.3.0](#to-130)
 - [To 1.2.0](#to-120)
 - [To 1.1.0](#to-110)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
@@ -15,7 +15,7 @@
 
 ## Unreleased
 
-### To 1.3.0
+## To 1.3.0
 
 Target **1.3.0**, from **1.2.0**:
 
