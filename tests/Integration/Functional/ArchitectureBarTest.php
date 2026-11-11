@@ -19,6 +19,7 @@ use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\StoredFileView;
 use Nowo\StorageKitBundle\Upload\UploadRefused;
 use Symfony\Component\Security\Core\User\InMemoryUser;
+use Throwable;
 
 /**
  * 1.3 architecture bar: an upload never flushes the application's entity manager (rule 6), the DTO upload port with
@@ -96,6 +97,34 @@ final class ArchitectureBarTest extends KernelTestCase
         }
         $connection->commit();
         self::assertSame('inserted', $this->entityManager($kernel)->getConnection()->fetchOne('SELECT body FROM ' . $this->noteTable($kernel) . ' WHERE id = ?', [$note->getId()]));
+    }
+
+    /**
+     * LG-SK-L2: when the database rolled back more than the statement (SQLite RAISE(ROLLBACK)), the savepoint rollback
+     * fails too; the ORIGINAL error is rethrown.
+     */
+    public function testTheOriginalErrorSurvivesAFailedSavepointRollback(): void
+    {
+        $kernel     = $this->bootKernel();
+        $connection = $this->entityManager($kernel)->getConnection();
+        if (!$connection->getDatabasePlatform() instanceof SQLitePlatform) {
+            self::markTestSkipped('RAISE(ROLLBACK) is SQLite-specific.');
+        }
+        $table = $this->noteTable($kernel);
+        $connection->executeStatement('CREATE TRIGGER storage_kit_refuse_all BEFORE INSERT ON ' . $table . " WHEN NEW.body = 'doomed' BEGIN SELECT RAISE(ROLLBACK, 'original refusal'); END");
+
+        $connection->beginTransaction();
+        try {
+            $this->service($kernel, StorageEntityManager::class)->insert(new Note('b1', 'doomed'));
+            self::fail('Expected the refusal.');
+        } catch (Throwable $e) {
+            self::assertStringContainsString('original refusal', $e->getMessage());
+        }
+        try {
+            $connection->rollBack();
+        } catch (Throwable) {
+            // SQLite already ended the transaction.
+        }
     }
 
     public function testAFailedInsertInsideAHostTransactionRollsBackOnlyItsSavepoint(): void

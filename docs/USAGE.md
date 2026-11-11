@@ -130,8 +130,9 @@ overlapping ids, re-created users), implement `UploaderKeyResolverInterface`.
 - `nowo-tech/instance-settings-bundle` is still installed through this package's `require`, although only the
   settings-backed instance bucket (`instance_profile: null`) needs it; a config-pinned bucket works without the bundle
   registered. Relying on the implicit install is deprecated: require it yourself (it moves to `suggest` in 2.0).
-- Admin writes (profiles, move, sync, purge, settings) still flush the bundle's entity manager (`doctrine.entity_manager`,
-  the default one when null); give the bundle its own manager if your default one must never be flushed by it.
+- Admin writes (profiles, move, sync, purge, settings, GDPR erase) still flush the bundle's entity manager, which is
+  your default one. A dedicated manager is **not supported yet**: `doctrine.entity_manager` does not move the entity
+  mapping (it stays on the default manager), so do not set it; real support is planned for 2.x.
 
 ## The instance bucket
 

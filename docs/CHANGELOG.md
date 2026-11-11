@@ -13,7 +13,9 @@ Target 1.3.0. Architecture bar (standard Symfony and DDD hosts, rules 1, 3, 6, 7
   bundle's entity manager (the default one with `doctrine.entity_manager: null`), committing every change the
   application had left pending. The row is now written with a DBAL insert built from the entity metadata
   (`StorageEntityManager::insert()`), in a savepoint inside an open transaction (id read before the release; a failed
-  insert rolls back only the savepoint and rethrows). `upload()` still returns the managed row.
+  insert rolls back only the savepoint and rethrows the original error, even when that rollback fails too). The DBAL
+  insert runs no ORM lifecycle events (`prePersist` / `postPersist`, host Doctrine listeners) for new `StoredFile`
+  rows; `StoredFile` has no callbacks of its own. `upload()` still returns the managed row.
 
 ### Added
 

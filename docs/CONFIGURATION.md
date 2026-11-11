@@ -225,7 +225,7 @@ Buckets per scope (organisation, tenant, workspace…).
 | Key | Default | Validation / effect |
 | --- | --- | --- |
 | `table_prefix` | `''` | `[A-Za-z0-9_]*`. Prefixes the tables and index names: `app_` gives `app_storage_kit_file`. |
-| `entity_manager` | `null` | Entity manager name of the bundle entities (null = default). |
+| `entity_manager` | `null` | Keep `null`. A dedicated entity manager is **not supported yet**: the entity mapping is always registered on the default manager, so another name only fails at the first write. |
 
 Tables: `storage_kit_profile`, `storage_kit_file`, `storage_kit_file_reference`, `storage_kit_sync` (see
 [ARCHITECTURE](ARCHITECTURE.md#entities-and-tables)).

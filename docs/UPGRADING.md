@@ -27,6 +27,8 @@ No configuration change.
 
 1. **Uploads do not flush your entity manager any more.** If some code relied on an upload to persist its own pending
    entities, flush them yourself.
+   The new row is a DBAL insert: Doctrine lifecycle events (`prePersist`, `postPersist`, your own Doctrine listeners)
+   no longer fire for new `StoredFile` rows; listen to the `file_uploaded` `StorageAuditEvent` instead.
 2. **Deprecated: `ImageUploader::upload()` returning the entity.** Inject `ImageUploaderInterface` and call
    `uploadImage()` (a `StoredFileView`; reference the file by `uuid`). Inside your own transaction, call
    `afterCommit($view)` after the commit to record the audit event.

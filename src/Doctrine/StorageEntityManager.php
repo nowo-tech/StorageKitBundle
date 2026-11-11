@@ -68,7 +68,7 @@ final readonly class StorageEntityManager
      * Inserts one new bundle entity with DBAL, built from its class metadata (1.3, architecture bar rule 6): no entity
      * manager is flushed, so nothing the application left pending in it is written. Inside an open transaction the
      * insert runs in a savepoint (the generated id is read before the savepoint is released; a failed insert rolls
-     * back only the savepoint and rethrows). The generated id is set on the entity, which stays
+     * back only the savepoint and rethrows the original error, even when the savepoint rollback fails too). The generated id is set on the entity, which stays
      * unmanaged.
      *
      * @return int|string the generated identifier
@@ -114,7 +114,12 @@ final readonly class StorageEntityManager
             }
         } catch (Throwable $e) {
             if ($savepoint !== null) {
-                $connection->rollbackSavepoint($savepoint);
+                try {
+                    $connection->rollbackSavepoint($savepoint);
+                } catch (Throwable) {
+                    // The savepoint is gone too (the database rolled back more than the statement): the original
+                    // error explains what happened, so it is the one rethrown.
+                }
             }
 
             throw $e;
