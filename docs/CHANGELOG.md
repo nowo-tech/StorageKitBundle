@@ -6,13 +6,30 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Target 1.4.0](#target-140)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
+  - [Fixed](#fixed-1)
+  - [Added](#added-1)
+  - [Changed](#changed-1)
+  - [Deprecated](#deprecated)
 - [[1.2.0] - 2026-11-10](#120---2026-11-10)
+  - [Security](#security)
+  - [Added](#added-2)
+  - [Changed](#changed-2)
 - [[1.1.0] - 2026-11-03](#110---2026-11-03)
+  - [Added](#added-3)
+  - [Changed](#changed-3)
+  - [Fixed](#fixed-2)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
+  - [Added](#added-4)
+  - [Security](#security-1)
 
 ## [Unreleased]
+
+## [1.4.0] - 2026-11-11
+
+Named buckets from a host provider port without Instance Settings; worker-safe per-viewer read memo. See [UPGRADING](https://github.com/nowo-tech/StorageKitBundle/blob/v1.4.0/docs/UPGRADING.md#to-140).
 
 ### Target 1.4.0
 
@@ -59,7 +76,6 @@ no Instance Settings needed), plus a rule 6 and a worker-mode fix found on the w
 ## [1.3.0] - 2026-11-11
 
 Uploads write their row with a DBAL insert and never flush the host's entity manager; new ImageUploaderInterface with a StoredFileView DTO; InstanceSettings becomes optional. See [UPGRADING](https://github.com/nowo-tech/StorageKitBundle/blob/v1.3.0/docs/UPGRADING.md#to-130).
-
 
 ### Fixed
 

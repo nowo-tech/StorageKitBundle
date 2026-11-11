@@ -3,7 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
-  - [To 1.4.0](#to-140)
+- [To 1.4.0](#to-140)
 - [To 1.3.0](#to-130)
 - [To 1.2.0](#to-120)
 - [To 1.1.0](#to-110)
@@ -16,7 +16,7 @@
 
 ## Unreleased
 
-### To 1.4.0
+## To 1.4.0
 
 Target **1.4.0**, from **1.3.0**: `composer update nowo-tech/storage-kit-bundle`. **Standard hosts: nothing to
 change** (same services, same defaults; no schema change).
