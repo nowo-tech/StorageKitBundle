@@ -5,6 +5,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Target 1.3.0. Architecture bar (standard Symfony and DDD hosts, rules 1, 3, 6, 7 and 8; audit 2026-11-10).
+
+### Fixed
+
+- **An upload no longer flushes the application's entity manager.** `ImageUploader` persisted the row and flushed the
+  bundle's entity manager (the default one with `doctrine.entity_manager: null`), committing every change the
+  application had left pending. The row is now written with a DBAL insert built from the entity metadata
+  (`StorageEntityManager::insert()`), in a savepoint inside an open transaction (id read before the release; a failed
+  insert rolls back only the savepoint and rethrows the original error, even when that rollback fails too). The DBAL
+  insert runs no ORM lifecycle events (`prePersist` / `postPersist`, host Doctrine listeners) for new `StoredFile`
+  rows; `StoredFile` has no callbacks of its own. `upload()` still returns the managed row.
+
+### Added
+
+- `Upload\ImageUploaderInterface` (public alias of `ImageUploader`): `uploadImage()` returns the `StoredFileView`
+  DTO; inside a host transaction it dispatches nothing and the host calls `afterCommit($view)` after its commit
+  (the `file_uploaded` audit event follows the commit). The upload endpoint uses it.
+
+### Changed
+
+- `StorageSettingsController::SETTINGS_SECTION_ROUTE` is the literal route name (no InstanceSettings class constant),
+  and a settings-backed instance bucket without `nowo-tech/instance-settings-bundle` installed fails the build with a
+  clear message.
+
+### Deprecated
+
+- The `StoredFile` entity return of `ImageUploader::upload()`: use `ImageUploaderInterface::uploadImage()` (changes in
+  2.0).
+- Relying on this package to install `nowo-tech/instance-settings-bundle`: only the settings-backed instance bucket
+  needs it; require it in your application. It moves to `suggest` in 2.0.
+
 ## [1.2.0] - 2026-11-10
 
 GDPR export / erasure keep finding a user's files after their identifier changes (stable, class-qualified uploader key; backfill command). See [UPGRADING](https://github.com/nowo-tech/StorageKitBundle/blob/v1.2.0/docs/UPGRADING.md#to-120).

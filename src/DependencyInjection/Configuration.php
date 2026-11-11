@@ -203,7 +203,7 @@ final class Configuration implements ConfigurationInterface
                             ->end()
                         ->end()
                         ->scalarNode('entity_manager')
-                            ->info('Doctrine ORM entity manager name (null = default).')
+                            ->info('Keep null: a dedicated entity manager is not supported yet (the mapping stays on the default manager).')
                             ->defaultNull()
                         ->end()
                     ->end()

@@ -134,10 +134,11 @@ jobs:
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
-      - name: Lifecycle tests (purge, references, moves, adoption)
+      - name: Lifecycle and architecture-bar tests (purge, references, moves, adoption, DBAL upload insert)
         run: |
           export STORAGE_KIT_TEST_DATABASE_URL="${{ matrix.db.scheme }}://${{ matrix.db.user }}:${DB_CI_PASSWORD}@127.0.0.1:${{ matrix.db.port }}/storagekit?${{ matrix.db.query }}"
           vendor/bin/phpunit --no-coverage tests/Integration/Lifecycle
+          vendor/bin/phpunit --no-coverage tests/Integration/Functional/ArchitectureBarTest.php
 
   code-style:
     name: Code Style
