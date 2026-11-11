@@ -10,7 +10,8 @@ use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\NowoStorageKitBundle;
 use Nowo\StorageKitBundle\Reference\FileUris;
 use Nowo\StorageKitBundle\Security\AccessGuard;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
+use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
+use Nowo\StorageKitBundle\Upload\StoredFileView;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
 use Nowo\StorageKitBundle\Upload\UploadRefused;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -70,7 +71,7 @@ final class FileUploadController
         private readonly AccessGuard $guard,
         private readonly CsrfTokenManagerInterface $csrf,
         private readonly RateLimiterFactory $limiter,
-        private readonly ImageUploader $uploader,
+        private readonly ImageUploaderInterface $uploader,
         private readonly FileUrls $urls,
         private readonly FileUris $uris,
         private readonly int $maxBytes,
@@ -89,16 +90,16 @@ final class FileUploadController
         } catch (UploadRefused $e) {
             return $this->refuse($e->reason);
         }
-        $alt = trim((string) preg_replace('/[\[\]()\\\\<>]+/', ' ', pathinfo($stored->getOriginalName(), PATHINFO_FILENAME)));
+        $alt = trim((string) preg_replace('/[\[\]()\\\\<>]+/', ' ', pathinfo($stored->originalName, PATHINFO_FILENAME)));
         $alt = $alt === '' ? StoredFile::ANONYMOUS_NAME : $alt;
-        $uri = $this->uris->uri($stored->getUuid());
+        $uri = $this->uris->uri($stored->uuid);
 
         $response = new JsonResponse([
-            'uuid'         => $stored->getUuid(),
+            'uuid'         => $stored->uuid,
             'uri'          => $uri,
-            'url'          => $this->urls->download($stored->getUuid(), StoredFile::VARIANT_PREVIEW),
-            'original_url' => $this->urls->download($stored->getUuid(), StoredFile::VARIANT_ORIGINAL),
-            'name'         => $stored->getOriginalName(),
+            'url'          => $this->urls->download($stored->uuid, StoredFile::VARIANT_PREVIEW),
+            'original_url' => $this->urls->download($stored->uuid, StoredFile::VARIANT_ORIGINAL),
+            'name'         => $stored->originalName,
             'alt'          => $alt,
             'image'        => true,
             'markdown'     => sprintf('![%s](%s)', $alt, $uri),
@@ -128,7 +129,7 @@ final class FileUploadController
     /**
      * @throws UploadRefused
      */
-    private function store(Request $request, string $type, string $id): StoredFile
+    private function store(Request $request, string $type, string $id): StoredFileView
     {
         $token = (string) $request->headers->get(UploadEndpoint::CSRF_HEADER, '');
         if ($token === '' || !$this->csrf->isTokenValid(new CsrfToken(UploadEndpoint::tokenId($type, $id), $token))) {
@@ -149,7 +150,7 @@ final class FileUploadController
             throw new UploadRefused(UploadRefused::SIZE);
         }
 
-        return $this->uploader->upload($user, $type, $id, (string) file_get_contents($file->getPathname()), $file->getClientOriginalName());
+        return $this->uploader->uploadImage($user, $type, $id, (string) file_get_contents($file->getPathname()), $file->getClientOriginalName());
     }
 
     private function refuse(string $reason): JsonResponse

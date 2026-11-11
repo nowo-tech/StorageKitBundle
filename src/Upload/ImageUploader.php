@@ -39,8 +39,11 @@ use function trim;
  * variants under a random server-generated `yyyy/mm/<uuid>` key — no user input in the key, so no path traversal) and
  * last the row. A failed write removes the objects already written. The new file is an orphan until a text that points
  * at it is saved.
+ *
+ * Since 1.3 (architecture bar rule 6) the row is written with a DBAL insert built from the entity metadata (in a
+ * savepoint inside an open transaction): no entity manager is flushed. Type-hint {@see ImageUploaderInterface}.
  */
-final readonly class ImageUploader
+final readonly class ImageUploader implements ImageUploaderInterface
 {
     /** Longest kept file name. */
     public const NAME_MAX = 120;
@@ -62,13 +65,57 @@ final readonly class ImageUploader
     }
 
     /**
-     * Stores an image for `$user` in a context.
+     * Stores an image for `$user` in a context and returns the row (loaded through the bundle's entity manager).
+     *
+     * The `file_uploaded` audit event is recorded at once, as before 1.3.
+     *
+     * @deprecated since 1.3 for its entity return type: use {@see uploadImage()} (a {@see StoredFileView}); the return
+     *             type changes in 2.0
      *
      * @param object $user security user (writes are checked by the context)
      *
      * @throws UploadRefused
      */
     public function upload(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFile
+    {
+        $file = $this->store($user, $contextType, $contextId, $bytes, $originalName);
+        $this->record($file->getProfile()->getScope(), $user, $file->getUuid(), $contextType, $contextId, $file->totalBytes());
+        $id = $file->getId();
+
+        return ($id === null ? null : $this->entityManager->manager()->find(StoredFile::class, $id)) ?? $file;
+    }
+
+    /**
+     * Stores an image and returns its view; the audit event follows the commit (see the interface).
+     *
+     * @throws UploadRefused
+     */
+    public function uploadImage(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFileView
+    {
+        $view = StoredFileView::fromEntity($this->store($user, $contextType, $contextId, $bytes, $originalName));
+        if (!$this->entityManager->connection()->isTransactionActive()) {
+            $this->afterCommit($view);
+        }
+
+        return $view;
+    }
+
+    /**
+     * Records the `file_uploaded` audit event of each upload (after the host commit).
+     */
+    public function afterCommit(StoredFileView ...$uploaded): void
+    {
+        foreach ($uploaded as $view) {
+            $this->record($view->scope, $view->uploadedBy, $view->uuid, $view->contextType, $view->contextId, $view->totalBytes);
+        }
+    }
+
+    /**
+     * The checks, the objects and the row (DBAL insert; no entity manager is flushed).
+     *
+     * @throws UploadRefused
+     */
+    private function store(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFile
     {
         $target = FileContexts::isType($contextType) && FileContexts::isId($contextId)
             ? $this->contexts->get($contextType)?->writableTarget($user, $contextId)
@@ -113,22 +160,27 @@ final readonly class ImageUploader
             $file->setUploadedByKey($this->validKey($this->uploaderKeys->keyOf($user)));
             $file->setOwner($target->owner);
             $file->markOrphaned(new DateTimeImmutable());
-            $manager = $this->entityManager->manager();
-            $manager->persist($file);
-            $manager->flush();
+            $this->entityManager->insert($file);
         } catch (Throwable $e) {
             $this->discard($connection, $written);
             $this->logger->warning('Image upload failed: {error}', ['error' => ErrorScrubber::message($e, $settings)]);
 
             throw new UploadRefused(UploadRefused::STORAGE);
         }
-        $this->audit->record(StorageAuditEvent::FILE_UPLOADED, $profile->getScope(), $user, [
-            'file'    => $uuid,
-            'context' => $contextType . '/' . $contextId,
-            'bytes'   => $file->totalBytes(),
-        ]);
 
         return $file;
+    }
+
+    /**
+     * @param object|string|null $actor security user or its identifier
+     */
+    private function record(?string $scope, object|string|null $actor, string $uuid, string $contextType, string $contextId, int $bytes): void
+    {
+        $this->audit->record(StorageAuditEvent::FILE_UPLOADED, $scope, $actor, [
+            'file'    => $uuid,
+            'context' => $contextType . '/' . $contextId,
+            'bytes'   => $bytes,
+        ]);
     }
 
     /**

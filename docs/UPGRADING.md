@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [To 1.3.0](#to-130)
 - [To 1.2.0](#to-120)
 - [To 1.1.0](#to-110)
 - [To 1.0.0 (initial release)](#to-100-initial-release)
@@ -13,6 +14,25 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+### To 1.3.0
+
+Target **1.3.0**, from **1.2.0**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
+
+No configuration change.
+
+1. **Uploads do not flush your entity manager any more.** If some code relied on an upload to persist its own pending
+   entities, flush them yourself.
+2. **Deprecated: `ImageUploader::upload()` returning the entity.** Inject `ImageUploaderInterface` and call
+   `uploadImage()` (a `StoredFileView`; reference the file by `uuid`). Inside your own transaction, call
+   `afterCommit($view)` after the commit to record the audit event.
+3. **Deprecated: the implicit InstanceSettings install.** With the default settings-backed instance bucket
+   (`instance_profile: null`) add `nowo-tech/instance-settings-bundle` to your own `composer.json`; 2.0 moves it to
+   `suggest`. A config-pinned bucket (`instance_profile: <name>`) does not need it.
 
 ## To 1.2.0
 

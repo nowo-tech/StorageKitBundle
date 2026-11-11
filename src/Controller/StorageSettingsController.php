@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Controller;
 
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
-use Nowo\InstanceSettingsBundle\Routing\InstanceSettingsRoutes;
 use Nowo\StorageKitBundle\Audit\AuditRecorder;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
@@ -63,7 +62,8 @@ final class StorageSettingsController extends AbstractController
     public const ROUTE_SCOPE_TEST = 'nowo_storage_kit_scope_settings_test';
 
     /** Instance Settings section page route (`nowo_instance_settings_section`). */
-    public const SETTINGS_SECTION_ROUTE = InstanceSettingsRoutes::SECTION;
+    /** InstanceSettingsBundle's `InstanceSettingsRoutes::SECTION` (literal: the bundle is optional, 1.3). */
+    public const SETTINGS_SECTION_ROUTE = 'nowo_instance_settings_section';
 
     /** Fields compared to name the changed ones in the audit event. */
     /** `from` query value of the instance test posted from the Instance Settings section (redirects back there). */

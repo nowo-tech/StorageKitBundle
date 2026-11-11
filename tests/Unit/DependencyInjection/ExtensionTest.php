@@ -32,6 +32,26 @@ final class ExtensionTest extends TestCase
         self::assertSame([], $container->getExtensionConfig('doctrine'));
     }
 
+    public function testTheSettingsBackedBucketNeedsInstanceSettingsInstalled(): void
+    {
+        $container = new ContainerBuilder();
+        $container->setParameter('kernel.bundles', ['NowoDoctrineEncryptBundle' => 'x', 'SecurityBundle' => 'y']);
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('which needs nowo-tech/instance-settings-bundle');
+        (new NowoStorageKitExtension(false))->load([[]], $container);
+    }
+
+    public function testAConfigPinnedBucketDoesNotNeedInstanceSettings(): void
+    {
+        $container = new ContainerBuilder();
+        $container->setParameter('kernel.bundles', ['NowoDoctrineEncryptBundle' => 'x', 'SecurityBundle' => 'y']);
+        (new NowoStorageKitExtension(false))->load([['instance_profile' => 'main', 'profiles' => ['main' => ['bucket' => 'files', 'endpoint' => 'https://s3.example.test', 'access_key' => 'k', 'secret' => 's']]]], $container);
+
+        self::assertFalse($container->getParameter('nowo_storage_kit.instance_settings'));
+        self::assertSame('Nowo\StorageKitBundle\Upload\ImageUploader', (string) $container->getAlias('Nowo\StorageKitBundle\Upload\ImageUploaderInterface'));
+    }
+
     public function testANonOrmManagerIsRefused(): void
     {
         $manager  = $this->createStub(ObjectManager::class);

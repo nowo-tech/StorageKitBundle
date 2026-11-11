@@ -90,6 +90,24 @@ final readonly class SyncCommentFileReferences
 
 Use `FileReferences::forget('comment', [$id])` when a text is deleted.
 
+### Uploading from your code (1.3)
+
+Inject `Upload\ImageUploaderInterface` and call `uploadImage($user, $contextType, $contextId, $bytes, $name)`: it
+returns a `StoredFileView` DTO (`uuid`, `scope`, context, name, type, sizes, variants, `uploadedBy`, `createdAt`);
+reference the file by its `uuid`. The row is written with a DBAL insert built from the entity metadata: **no entity
+manager is flushed**, so an upload never commits what your own unit of work left pending (standard applications get
+the same guarantee through the deprecated `upload()`, which still returns the `StoredFile` entity).
+
+- *Outside a transaction* the row is committed at once and the `file_uploaded` audit event follows.
+- *Inside your transaction* (the host controls the unit of work) the row joins it in a savepoint (a failed insert rolls
+  back only the savepoint) and nothing is dispatched: after your commit call `afterCommit($view)`; on rollback drop the
+  view (the bucket objects become unreferenced and are not counted).
+
+```php
+$view = $connection->transactional(fn () => $this->uploader->uploadImage($user, 'issue', $issueId, $bytes, $name));
+$this->uploader->afterCommit($view);
+```
+
 ### Listening to it
 
 `Audit\StorageAuditEvent` (`action`, `scope`, `actor` identifier, `details`) is dispatched after every mutation with
@@ -108,8 +126,12 @@ overlapping ids, re-created users), implement `UploaderKeyResolverInterface`.
   still asks for `entityClass()` / `field()`.
 - Files uploaded before 1.2.0 carry no uploader key until you run `nowo:storage-kit:backfill-uploader-keys`
   ([UPGRADING](UPGRADING.md#to-120)); until then they are matched by identifier as in 1.1.
-- `ImageUploader::upload()` returns the `StoredFile` entity.
-- InstanceSettingsBundle is always installed, even when the bucket comes from configuration.
+- `ImageUploader::upload()` still returns the `StoredFile` entity (deprecated since 1.3; use `uploadImage()`).
+- `nowo-tech/instance-settings-bundle` is still installed through this package's `require`, although only the
+  settings-backed instance bucket (`instance_profile: null`) needs it; a config-pinned bucket works without the bundle
+  registered. Relying on the implicit install is deprecated: require it yourself (it moves to `suggest` in 2.0).
+- Admin writes (profiles, move, sync, purge, settings) still flush the bundle's entity manager (`doctrine.entity_manager`,
+  the default one when null); give the bundle its own manager if your default one must never be flushed by it.
 
 ## The instance bucket
 

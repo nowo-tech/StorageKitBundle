@@ -76,6 +76,7 @@ use Nowo\StorageKitBundle\Ui\ProfileTester;
 use Nowo\StorageKitBundle\Ui\StorageKitPages;
 use Nowo\StorageKitBundle\Upload\ImageProcessor;
 use Nowo\StorageKitBundle\Upload\ImageUploader;
+use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\Argument\TaggedIteratorArgument;
@@ -104,6 +105,14 @@ use function trim;
  */
 final class NowoStorageKitExtension extends Extension implements PrependExtensionInterface
 {
+    /**
+     * @param bool|null $instanceSettingsInstalled whether nowo-tech/instance-settings-bundle is installed (null = detect; tests)
+     */
+    public function __construct(
+        private readonly ?bool $instanceSettingsInstalled = null,
+    ) {
+    }
+
     /** Service id of the bucket connection factory (tests replace it with an in-memory one). */
     public const CONNECTION_FACTORY_ID = 'nowo_storage_kit.connection_factory';
 
@@ -251,6 +260,10 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             $settingsBacked ? new Reference(InstanceStorageSettings::class) : null,
         ]))->setPublic(true)->addTag('kernel.reset', ['method' => 'reset']));
         $container->setParameter(InstanceSettingsPass::PARAMETER, $settingsBacked);
+        if ($settingsBacked && !($this->instanceSettingsInstalled ?? interface_exists(InstanceSettingsInterface::class))) {
+            // 1.3 (rule 8): InstanceSettings is only needed for the settings-backed instance bucket (2.0 moves it to suggest).
+            throw new LogicException('NowoStorageKitBundle: the instance bucket is edited in Instance Settings (nowo_storage_kit.instance_profile is null), which needs nowo-tech/instance-settings-bundle: require it, or manage the instance bucket in the configuration (nowo_storage_kit.instance_profile).');
+        }
         if ($settingsBacked) {
             $container->setDefinition(InstanceStorageSettings::class, (new Definition(InstanceStorageSettings::class, [
                 new Reference(InstanceSettingsInterface::class),
@@ -324,6 +337,8 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             $logger,
             new Reference(UploaderKeyResolverInterface::class),
         ]))->setPublic(true));
+        // 1.3 (rule 1): the upload port (DTO return, after-commit audit).
+        $container->setAlias(ImageUploaderInterface::class, ImageUploader::class)->setPublic(true);
         $container->setDefinition(FileUrls::class, (new Definition(FileUrls::class, [new Reference('router')]))->setPublic(true));
         $container->setDefinition(FileDelivery::class, (new Definition(FileDelivery::class, [
             new Reference(StorageProfiles::class),
@@ -504,7 +519,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
                 new Reference(AccessGuard::class),
                 new Reference('security.csrf.token_manager'),
                 new Reference(self::LIMITER_ID),
-                new Reference(ImageUploader::class),
+                new Reference(ImageUploaderInterface::class),
                 new Reference(FileUrls::class),
                 new Reference(FileUris::class),
                 $upload['max_bytes'],
