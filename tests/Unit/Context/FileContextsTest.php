@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Tests\Unit\Context;
 
 use InvalidArgumentException;
+use Nowo\StorageKitBundle\Context\FileContextInterface;
 use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Scope\StorageScope;
 use Nowo\StorageKitBundle\Scope\TargetScopeResolver;
+use Nowo\StorageKitBundle\Tests\Fixtures\AppUser;
 use Nowo\StorageKitBundle\Tests\Fixtures\Boards;
 use Nowo\StorageKitBundle\Tests\Fixtures\NoteContext;
 use PHPUnit\Framework\TestCase;
@@ -46,6 +48,25 @@ final class FileContextsTest extends TestCase
         self::assertSame(['board'], $contexts->types());
         self::assertSame($context, $contexts->get('board'));
         self::assertNull($contexts->get('nope'));
+    }
+
+    public function testTwoUsersSharingAnIdentifierNeverShareADecision(): void
+    {
+        // Audit LR-S-L1: an admin-provider "alice" and a customer-provider "alice" in the same boundary.
+        $context = $this->createMock(FileContextInterface::class);
+        $context->method('type')->willReturn('board');
+        $context->expects(self::exactly(4))->method('readable')
+            ->willReturnCallback(static fn (?object $viewer, array $ids): array => $viewer instanceof InMemoryUser ? $ids : []);
+        $contexts = new FileContexts([$context]);
+        $file     = $this->file('b1');
+        $other    = new AppUser(7, 'alice');
+
+        self::assertTrue($contexts->readable(new InMemoryUser('alice', null), [$file])[$file->getUuid()]);
+        self::assertFalse($contexts->readable($other, [$file])[$file->getUuid()], 'asked again: another user object');
+        self::assertFalse($contexts->readable($other, [$file])[$file->getUuid()], 'memoised for that object');
+        self::assertFalse($contexts->readable(null, [$file])[$file->getUuid()]);
+        self::assertFalse($contexts->readable(null, [$file])[$file->getUuid()], 'memoised for anonymous visitors');
+        self::assertFalse($contexts->readable(new stdClass(), [$file])[$file->getUuid()]);
     }
 
     public function testSyntaxChecks(): void

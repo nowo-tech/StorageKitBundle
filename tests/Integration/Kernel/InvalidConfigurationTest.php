@@ -37,6 +37,7 @@ final class InvalidConfigurationTest extends KernelTestCase
         yield 'env placeholder switch' => [['upload' => ['enabled' => '%env(bool:STORAGE_UPLOADS)%']], 'literal boolean'];
         yield 'scopes without checker' => [['scopes' => ['enabled' => true, 'access_checker' => null]], 'access_checker must be set'];
         yield 'unknown instance profile' => [['instance_profile' => 'nope'], 'is not a configured profile'];
+        yield 'profiles tree and provider' => [['config_profile_provider' => 'app.buckets', 'profiles' => ['main' => ['dsn' => 's3://k:s@aws/b']]], 'are exclusive'];
         yield 'profile without credentials' => [['profiles' => ['main' => ['bucket' => 'b']]], 'needs a "dsn"'];
         yield 'profile name' => [['profiles' => ['Main' => ['dsn' => 's3://k:s@aws/b']]], 'names must be'];
         yield 'profile delivery' => [['profiles' => ['main' => ['dsn' => 's3://k:s@aws/b', 'delivery' => 'public']]], 'delivery'];

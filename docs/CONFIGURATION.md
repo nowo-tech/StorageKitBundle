@@ -7,6 +7,7 @@ compiled; the defaults are the safe choice. Source of truth: `src/DependencyInje
 
 - [Full reference](#full-reference)
 - [profiles and instance_profile](#profiles-and-instance_profile)
+  - [config_profile_provider (1.4)](#config_profile_provider-14)
 - [uri_scheme](#uri_scheme)
 - [endpoints (SSRF guard)](#endpoints-ssrf-guard)
 - [upload](#upload)
@@ -32,6 +33,7 @@ compiled; the defaults are the safe choice. Source of truth: `src/DependencyInje
 # config/packages/nowo_storage_kit.yaml (defaults shown)
 nowo_storage_kit:
     profiles: {}                 # name => bucket set by operations (see below)
+    config_profile_provider: null # 1.4: service id of your ConfigProfileProviderInterface (replaces "profiles")
     instance_profile: null       # null = the instance bucket is the "storage" Instance Settings section
     uri_scheme: storage-file     # texts keep ![alt](storage-file:<uuid>)
     endpoints:
@@ -132,6 +134,20 @@ nowo_storage_kit:
 ```
 
 Credentials belong in environment variables / Symfony secrets, never in committed YAML.
+
+### config_profile_provider (1.4)
+
+Service id of your `Nowo\StorageKitBundle\Profile\ConfigProfileProviderInterface`: the named buckets then come from
+it (a secret manager, your own tenant configuration) instead of the `profiles` tree, which must stay empty (the two are
+exclusive). `instance_profile` may name one of its buckets; the name is checked at runtime (unknown = uploads off), not
+at compilation. Same trust as `profiles`: no SSRF guard, and a `redirect` bucket adds its origin to the CSP. A name
+must keep meaning the same bucket; methods are called per use (worker mode: keep no request state in the service).
+
+```yaml
+nowo_storage_kit:
+    config_profile_provider: App\Infrastructure\Storage\VaultBuckets
+    instance_profile: primary
+```
 
 ## uri_scheme
 

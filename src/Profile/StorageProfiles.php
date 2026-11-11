@@ -41,7 +41,7 @@ final class StorageProfiles implements ResetInterface
     public function __construct(
         private readonly StorageProfileRepository $profiles,
         private readonly StorageEntityManager $entityManager,
-        private readonly ConfigProfiles $config,
+        private readonly ConfigProfileProviderInterface $config,
         private readonly ScopeResolverInterface $scopes,
         private readonly ?string $instanceProfile = null,
         private readonly bool $guardInstance = true,
@@ -175,11 +175,8 @@ final class StorageProfiles implements ResetInterface
         }
         $profile = new StorageProfile();
         $profile->useInstanceSettings();
-        $manager = $this->entityManager->manager();
-        $manager->persist($profile);
-        $manager->flush();
 
-        return $profile;
+        return $this->created($profile);
     }
 
     /**
@@ -194,10 +191,7 @@ final class StorageProfiles implements ResetInterface
         if (!isset($this->memo[$key])) {
             $profile = $this->profiles->configRow($name);
             if (!$profile instanceof StorageProfile) {
-                $profile = new StorageProfile(null, StorageProfile::STATE_ACTIVE, $name);
-                $manager = $this->entityManager->manager();
-                $manager->persist($profile);
-                $manager->flush();
+                $profile = $this->created(new StorageProfile(null, StorageProfile::STATE_ACTIVE, $name));
             }
             // @igor-ignore - Request-scoped memo, cleared by reset() (kernel.reset).
             $this->memo[$key] = $profile;
@@ -205,6 +199,18 @@ final class StorageProfiles implements ResetInterface
         $profile = $this->memo[$key];
 
         return $profile instanceof StorageProfile ? $profile : null;
+    }
+
+    /**
+     * Writes a new row without flushing any entity manager (1.4, architecture bar rule 6: these rows are created on
+     * the first upload, inside whatever the application left pending) and returns it managed (read back by uuid).
+     * The rows created here carry no secret, so the DBAL insert stores nothing DoctrineEncrypt would encrypt.
+     */
+    private function created(StorageProfile $profile): StorageProfile
+    {
+        $this->entityManager->insert($profile);
+
+        return $this->profiles->findOneByUuid($profile->getUuid()) ?? $profile;
     }
 
     /**

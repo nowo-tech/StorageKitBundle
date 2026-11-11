@@ -68,6 +68,10 @@ final class Configuration implements ConfigurationInterface
                     ->info('Name of a "profiles" entry that is the instance bucket (managed by the configuration: its Storage page is read-only). Null = the instance bucket is edited on the Storage page (stored encrypted).')
                     ->defaultNull()
                 ->end()
+                ->scalarNode('config_profile_provider')
+                    ->info('Service id of your Nowo\\StorageKitBundle\\Profile\\ConfigProfileProviderInterface (1.4): the named buckets of "profiles" and "instance_profile" come from it instead of the "profiles" tree (secret manager, tenant configuration). Null = the "profiles" tree.')
+                    ->defaultNull()
+                ->end()
                 ->scalarNode('uri_scheme')
                     ->info('Scheme of the file URIs kept in texts: "storage-file" gives ![alt](storage-file:<uuid>).')
                     ->defaultValue('storage-file')
@@ -273,7 +277,11 @@ final class Configuration implements ConfigurationInterface
                 ->end()
             ->end()
             ->validate()
-                ->ifTrue(static fn (array $v): bool => is_string($v['instance_profile'] ?? null) && !isset($v['profiles'][$v['instance_profile']]))
+                ->ifTrue(static fn (array $v): bool => self::hostProfiles($v) && is_array($v['profiles'] ?? null) && $v['profiles'] !== [])
+                ->thenInvalid('nowo_storage_kit.profiles and config_profile_provider are exclusive: the provider replaces the "profiles" tree (return those buckets from your provider).')
+            ->end()
+            ->validate()
+                ->ifTrue(static fn (array $v): bool => is_string($v['instance_profile'] ?? null) && !self::hostProfiles($v) && !isset($v['profiles'][$v['instance_profile']]))
                 ->then(static function (array $v): never {
                     throw new InvalidConfigurationException(sprintf('nowo_storage_kit.instance_profile "%s" is not a configured profile (nowo_storage_kit.profiles).', (string) $v['instance_profile']));
                 })
@@ -284,6 +292,18 @@ final class Configuration implements ConfigurationInterface
             ->end();
 
         return $treeBuilder;
+    }
+
+    /**
+     * Whether the named buckets come from a host `config_profile_provider` (their names are known only at runtime).
+     *
+     * @param array<array-key, mixed> $v
+     */
+    private static function hostProfiles(array $v): bool
+    {
+        $provider = $v['config_profile_provider'] ?? null;
+
+        return is_string($provider) && trim($provider) !== '';
     }
 
     /**

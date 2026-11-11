@@ -21,9 +21,11 @@ use function trim;
  * entry (for instance an empty env var) makes the profile unusable (uploads off) instead of failing the request; the
  * log says which profile, never the value.
  *
+ * Default {@see ConfigProfileProviderInterface} (1.4): hosts may replace it with `config_profile_provider`.
+ *
  * @phpstan-type ProfileConfig array{dsn: string|null, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string|null, prefix: string, access_key: string|null, secret: string|null, path_style: bool, delivery: string}
  */
-final readonly class ConfigProfiles
+final readonly class ConfigProfiles implements ConfigProfileProviderInterface
 {
     /** Redirect downloads to pre-signed URLs of the bucket. */
     public const DELIVERY_REDIRECT = 'redirect';

@@ -66,9 +66,49 @@ objects and reduced to `getUserIdentifier()` plus a stable key (`PersonalData\Up
 | `Scope\ScopeResolverInterface`, `Scope\ScopeAccessCheckerInterface` | scope buckets (organisation, tenant) and who manages them |
 | `Upload\UploadLimitInterface` | quotas per `FileContextTarget::$owner` |
 | `PersonalData\UploaderKeyResolverInterface` | the stable key of a user (default: `<user class>:<id>`), so personal data survives an e-mail change |
+| `Profile\ConfigProfileProviderInterface` (1.4) | the named buckets set by operations (default: the `profiles` tree), e.g. from your secret manager |
 
 Call your own application services from these adapters (access policies, repositories); do not inject the bundle into
 your domain.
+
+### Configuration: with or without Instance Settings (1.4)
+
+The bucket configuration comes through ports; Instance Settings is one source among others.
+
+- **Standard path (default, nothing to configure).** Register `NowoInstanceSettingsBundle`: the instance bucket is the
+  `storage` section, edited on the settings page and stored encrypted; scope and move buckets are database rows.
+- **DDD path (opt-in).** Leave Instance Settings out of `config/bundles.php` and pin the instance bucket to a named
+  bucket. The named buckets come from the `profiles` tree (`%env()%`) or from your own service:
+
+```yaml
+# config/packages/nowo_storage_kit.yaml — config/bundles.php has no NowoInstanceSettingsBundle
+nowo_storage_kit:
+    config_profile_provider: App\Infrastructure\Storage\VaultBuckets   # optional; default = the "profiles" tree
+    instance_profile: primary
+```
+
+```php
+final readonly class VaultBuckets implements ConfigProfileProviderInterface
+{
+    public function __construct(private SecretStore $secrets) {} // your port
+
+    public function names(): array { return ['primary']; }
+    public function has(string $name): bool { return $name === 'primary'; }
+    public function delivery(string $name): string { return ConfigProfiles::DELIVERY_PROXY; }
+
+    public function settings(string $name): ?S3Settings
+    {
+        $bucket = $this->secrets->bucket($name); // read per call: rotated credentials apply at once
+
+        return $bucket === null ? null : new S3Settings($bucket->name, $bucket->accessKey, $bucket->secret, $bucket->region, $bucket->endpoint);
+    }
+}
+```
+
+The provider is called on every upload, download and page, so keep no request, user or tenant state in it (FrankenPHP
+worker mode); a name must keep meaning the same bucket, because files point at it. Doctrine stays required: it is the
+bundle's own persistence (files, references, profiles), not configuration. The first upload creates the bucket's
+profile row with a DBAL insert, without flushing your unit of work.
 
 ### Texts that are not Doctrine entities
 
@@ -127,9 +167,10 @@ overlapping ids, re-created users), implement `UploaderKeyResolverInterface`.
 - Files uploaded before 1.2.0 carry no uploader key until you run `nowo:storage-kit:backfill-uploader-keys`
   ([UPGRADING](UPGRADING.md#to-120)); until then they are matched by identifier as in 1.1.
 - `ImageUploader::upload()` still returns the `StoredFile` entity (deprecated since 1.3; use `uploadImage()`).
-- `nowo-tech/instance-settings-bundle` is still installed through this package's `require`, although only the
-  settings-backed instance bucket (`instance_profile: null`) needs it; a config-pinned bucket works without the bundle
-  registered. Relying on the implicit install is deprecated: require it yourself (it moves to `suggest` in 2.0).
+- `nowo-tech/instance-settings-bundle` is still installed through this package's `require` (it moves to `suggest` in
+  2.0), although only the settings-backed instance bucket (`instance_profile: null`) needs it registered; a
+  config-pinned bucket (from `profiles` or `config_profile_provider`) works without it. Relying on the implicit install
+  is deprecated: require it yourself.
 - Admin writes (profiles, move, sync, purge, settings, GDPR erase) still flush the bundle's entity manager, which is
   your default one. A dedicated manager is **not supported yet**: `doctrine.entity_manager` does not move the entity
   mapping (it stays on the default manager), so do not set it; real support is planned for 2.x.
@@ -243,7 +284,9 @@ final class IssueCommentContext implements FileContextInterface
 - Context ids: 1–64 characters `[A-Za-z0-9_.:-]` (they appear in URLs and CSRF token ids).
 - `FileContextTarget::$scope` picks the scope bucket (only with `scopes.enabled`; null = the instance);
   `$owner` (≤ 64 characters) is the key usage and limits are counted on.
-- Read decisions are memoised per viewer and context for the request (reset between worker requests).
+- Read decisions are memoised per viewer object and context for the request (1.4: never per identifier) and cleared
+  at every request / Messenger boundary. A long-running host command that resolves files for many viewers calls
+  `Nowo\StorageKitBundle\EventListener\RequestBoundaryListener::reset()` between items.
 - An unknown context type reads nothing and writes nothing.
 
 ## Uploading from an editor
