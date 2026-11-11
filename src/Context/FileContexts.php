@@ -6,21 +6,23 @@ namespace Nowo\StorageKitBundle\Context;
 
 use InvalidArgumentException;
 use Nowo\StorageKitBundle\Entity\StoredFile;
-use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Contracts\Service\ResetInterface;
+use WeakMap;
 
 use function array_fill_keys;
 use function array_flip;
 use function array_keys;
 use function array_map;
 use function preg_match;
-use function spl_object_id;
 use function sprintf;
 
 /**
  * Registry of the upload contexts and the batched read check: the files of a text are grouped by context and each
- * context type is asked once; decisions are memoised per viewer for the request ({@see self::reset()} between worker
- * requests). An unknown context type reads nothing.
+ * context type is asked once; decisions are memoised per viewer **object** for the request boundary (1.4.0, audit
+ * LR-S-L1: a {@see WeakMap} keyed by the viewer instance, so two users that share an identifier — another firewall or
+ * user provider, a tenant-scoped e-mail — never share a decision). {@see self::reset()} runs between worker requests and
+ * Messenger messages; a long-running host command that resolves files for many viewers calls it per item. An unknown
+ * context type reads nothing.
  */
 final class FileContexts implements ResetInterface
 {
@@ -33,8 +35,11 @@ final class FileContexts implements ResetInterface
     /** @var array<string, FileContextInterface> */
     private array $types = [];
 
-    /** @var array<string, bool> "viewer|type|id" => readable */
-    private array $decisions = [];
+    /** @var WeakMap<object, array<string, bool>> viewer => "type|id" => readable */
+    private WeakMap $decisions;
+
+    /** @var array<string, bool> anonymous viewer: "type|id" => readable */
+    private array $anonymous = [];
 
     /**
      * @param iterable<FileContextInterface> $types tagged contexts
@@ -43,6 +48,7 @@ final class FileContexts implements ResetInterface
      */
     public function __construct(iterable $types = [])
     {
+        $this->decisions = new WeakMap();
         foreach ($types as $type) {
             $name = $type->type();
             if (!self::isType($name) || isset($this->types[$name])) {
@@ -95,11 +101,10 @@ final class FileContexts implements ResetInterface
      */
     public function readable(?object $viewer, array $files): array
     {
-        $prefix  = $this->viewerKey($viewer) . '|';
+        $memo    = $viewer === null ? $this->anonymous : ($this->decisions[$viewer] ?? []);
         $pending = [];
         foreach ($files as $file) {
-            $key = $prefix . $file->getContextType() . '|' . $file->getContextId();
-            if (!isset($this->decisions[$key])) {
+            if (!isset($memo[$file->getContextType() . '|' . $file->getContextId()])) {
                 $pending[$file->getContextType()][$file->getContextId()] = true;
             }
         }
@@ -107,13 +112,19 @@ final class FileContexts implements ResetInterface
             $ids     = array_map(strval(...), array_keys($ids));
             $allowed = array_flip($this->get($type)?->readable($viewer, $ids) ?? []);
             foreach ($ids as $id) {
-                // @igor-ignore - Request-scoped memo, cleared by reset() (kernel.reset).
-                $this->decisions[$prefix . $type . '|' . $id] = isset($allowed[$id]);
+                $memo[$type . '|' . $id] = isset($allowed[$id]);
             }
+        }
+        if ($viewer === null) {
+            // @igor-ignore - Request-scoped memo, cleared at the request boundary (RequestBoundaryListener) and by reset().
+            $this->anonymous = $memo;
+        } else {
+            // @igor-ignore - Request-scoped memo per viewer object, cleared at the request boundary and by reset().
+            $this->decisions[$viewer] = $memo;
         }
         $readable = array_fill_keys(array_map(static fn (StoredFile $f): string => $f->getUuid(), $files), false);
         foreach ($files as $file) {
-            $readable[$file->getUuid()] = $this->decisions[$prefix . $file->getContextType() . '|' . $file->getContextId()];
+            $readable[$file->getUuid()] = $memo[$file->getContextType() . '|' . $file->getContextId()];
         }
 
         return $readable;
@@ -124,15 +135,7 @@ final class FileContexts implements ResetInterface
      */
     public function reset(): void
     {
-        $this->decisions = [];
-    }
-
-    private function viewerKey(?object $viewer): string
-    {
-        return match (true) {
-            $viewer === null                 => 'anon',
-            $viewer instanceof UserInterface => 'u:' . $viewer->getUserIdentifier(),
-            default                          => 'o:' . spl_object_id($viewer),
-        };
+        $this->decisions = new WeakMap();
+        $this->anonymous = [];
     }
 }

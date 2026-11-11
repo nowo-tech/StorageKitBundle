@@ -284,7 +284,9 @@ final class IssueCommentContext implements FileContextInterface
 - Context ids: 1–64 characters `[A-Za-z0-9_.:-]` (they appear in URLs and CSRF token ids).
 - `FileContextTarget::$scope` picks the scope bucket (only with `scopes.enabled`; null = the instance);
   `$owner` (≤ 64 characters) is the key usage and limits are counted on.
-- Read decisions are memoised per viewer and context for the request (reset between worker requests).
+- Read decisions are memoised per viewer object and context for the request (1.4: never per identifier) and cleared
+  at every request / Messenger boundary. A long-running host command that resolves files for many viewers calls
+  `Nowo\StorageKitBundle\EventListener\RequestBoundaryListener::reset()` between items.
 - An unknown context type reads nothing and writes nothing.
 
 ## Uploading from an editor

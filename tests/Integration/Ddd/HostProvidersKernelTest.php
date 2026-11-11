@@ -7,7 +7,9 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Ddd;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\StorageKitBundle\Command\AdoptInstanceBucketCommand;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\InstanceSettingsPass;
+use Nowo\StorageKitBundle\DependencyInjection\NowoStorageKitExtension;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
+use Nowo\StorageKitBundle\EventListener\RequestBoundaryListener;
 use Nowo\StorageKitBundle\Http\StorageCspSources;
 use Nowo\StorageKitBundle\Profile\ConfigProfileProviderInterface;
 use Nowo\StorageKitBundle\Settings\InstanceStorageSettings;
@@ -20,6 +22,7 @@ use Nowo\StorageKitBundle\Tests\Support\HostBucketProfiles;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\HttpKernel;
 use Symfony\Component\Security\Core\User\InMemoryUser;
@@ -28,6 +31,7 @@ use function array_filter;
 use function array_keys;
 use function array_values;
 use function gc_collect_cycles;
+use function is_array;
 use function memory_get_usage;
 
 /**
@@ -71,6 +75,14 @@ final class HostProvidersKernelTest extends KernelTestCase
         // A second upload reuses the row.
         $this->service($kernel, ImageUploaderInterface::class)->uploadImage(new InMemoryUser('alice', null), 'board', 'b1', Images::png(12, 12), 'b.png');
         self::assertSame(1, (int) $manager->getConnection()->fetchOne('SELECT COUNT(*) FROM storage_kit_profile'));
+
+        // Every Messenger message is a boundary, handled or failed (audit LR-S-L2).
+        $dispatcher = $this->service($kernel, 'event_dispatcher');
+        self::assertInstanceOf(EventDispatcherInterface::class, $dispatcher);
+        foreach ([NowoStorageKitExtension::WORKER_MESSAGE_HANDLED, NowoStorageKitExtension::WORKER_MESSAGE_FAILED] as $event) {
+            $boundary = array_filter($dispatcher->getListeners($event), static fn (mixed $listener): bool => is_array($listener) && $listener[0] instanceof RequestBoundaryListener);
+            self::assertCount(1, $boundary, $event);
+        }
 
         // Redirect-delivered host buckets open the CSP; streamed ones do not.
         $csp = $this->service($kernel, StorageCspSources::class);

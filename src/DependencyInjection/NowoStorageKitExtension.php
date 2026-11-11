@@ -125,6 +125,9 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
     /** Messenger's `WorkerMessageHandledEvent` (by name: symfony/messenger is optional). */
     public const WORKER_MESSAGE_HANDLED = 'Symfony\\Component\\Messenger\\Event\\WorkerMessageHandledEvent';
 
+    /** Messenger's `WorkerMessageFailedEvent` (by name; audit LR-S-L2: a failed message is a boundary too). */
+    public const WORKER_MESSAGE_FAILED = 'Symfony\\Component\\Messenger\\Event\\WorkerMessageFailedEvent';
+
     /** Service id of the bounded DNS lookup of the SSRF guard. */
     public const DNS_LOOKUP_ID = 'nowo_storage_kit.dns_lookup';
 
@@ -204,7 +207,8 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             ->setPublic(true)
             ->addTag('kernel.event_listener', ['event' => KernelEvents::REQUEST, 'method' => 'onKernelRequest', 'priority' => 4096])
             ->addTag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onBoundary'])
-            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_HANDLED, 'method' => 'onBoundary']));
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_HANDLED, 'method' => 'onBoundary'])
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_FAILED, 'method' => 'onBoundary']));
     }
 
     /**

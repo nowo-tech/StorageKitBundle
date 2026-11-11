@@ -29,14 +29,21 @@ no Instance Settings needed), plus a rule 6 and a worker-mode fix found on the w
   (kernel test: no Instance Settings, buckets from the host).
 - `EventListener\RequestBoundaryListener`: clears the request memos of `StorageProfiles`, `FileStorage`,
   `FileContexts` and `FileReferenceListener` at the start of every main request, at `kernel.terminate` and after every
-  Messenger message.
+  Messenger message, handled or failed (`WorkerMessageHandledEvent`, `WorkerMessageFailedEvent`). Its public `reset()`
+  is the boundary for long-running host commands (call it per item).
 
 #### Fixed
 
 - **Worker mode without the services resetter** (FrankenPHP `FRANKENPHP_RESET_KERNEL=false`): the read decisions of
   `FileContexts` were memoised per viewer identifier until `kernel.reset`, so in a kept-alive worker that does not run
-  the resetter a read permission the application revoked was still honoured for that viewer (and memos grew with every
-  viewer / bucket). They are now cleared at the request boundary.
+  the resetter a read permission the application revoked was still honoured for that viewer, a context the application
+  un-published stayed readable for anonymous visitors, and two users sharing an identifier (another firewall or user
+  provider) shared decisions (memos also grew with every viewer / bucket). They are now cleared at the request
+  boundary.
+- **Read decisions are memoised per viewer object, not per identifier** (audit LR-S-L1): within one request, Messenger
+  message or command, two users that share `getUserIdentifier()` (or two viewer objects that reuse an object id) no
+  longer share a decision; `FileContexts` keeps a `WeakMap` keyed by the viewer instance (plus one memo for anonymous
+  visitors).
 - **The first upload to a config-pinned or settings-backed instance bucket no longer flushes the application's entity
   manager.** The profile row created on first use (`StorageProfiles::configRow()` / the `storage` section row) was
   persisted and flushed on the bundle's entity manager (the default one), committing whatever the application had

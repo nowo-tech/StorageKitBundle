@@ -3,10 +3,10 @@
 | Field | Value |
 |-------|-------|
 | Package | `nowo-tech/storage-kit-bundle` (`symfony-bundle`) |
-| Audited revision | `1.0.0` (unreleased, branch `feat/1.0.0`) |
+| Audited revision | `1.0.0` (unreleased, branch `feat/1.0.0`); re-audited for `1.4.0` (see the Re-audit row) |
 | Audit date | 2026-11-03 |
 | Method | Manual review of every file under `src/`; PHPStan `ruleset-classic` + `ruleset-worker-strict` + `ruleset-hardening`; Igor (`composer igor`); unit tests of the memos and their reset; demo run in worker mode |
-| **Verdict** | ✅ **Viable** in both scenarios. Four services keep request-scoped memos, all `ResetInterface` + `kernel.reset`; since 1.4 `RequestBoundaryListener` also clears them at the start of every main request, at `kernel.terminate` and after every Messenger message, so scenario B (no reset at all, `FRANKENPHP_RESET_KERNEL=false`) is covered too — see [Findings](#findings) |
+| **Verdict** | ✅ **Viable** in both scenarios. Four services keep request-scoped memos, all `ResetInterface` + `kernel.reset`; since 1.4 `RequestBoundaryListener` also clears them at the start of every main request, at `kernel.terminate` and after every Messenger message (handled or failed), so scenario B (no reset at all, `FRANKENPHP_RESET_KERNEL=false`) is covered too — see [Findings](#findings) |
 | Re-audit | 1.4.0 (2026-11-11): request-boundary reset; kernel test serving 600 requests through `http_kernel` without the services resetter (`tests/Integration/Ddd/HostProvidersKernelTest.php`) |
 
 ## Table of contents
@@ -59,15 +59,20 @@ scenarios are evaluated:
 
 No finding under scenario **A**, which is what FrankenPHP's Symfony integration and Messenger workers
 (`reset_on_message`) provide. Up to 1.3, under scenario **B** the three request-scoped memos above outlived the
-request (a read permission revoked by the application was still honoured for the same viewer in that worker). Since
+request: a read permission revoked by the application was still honoured for the same viewer in that worker, an
+un-published context stayed readable for anonymous visitors, and users sharing an identifier shared decisions. Since
 1.4 the bundle clears them itself at the request boundary (`RequestBoundaryListener`: main `kernel.request`,
-`kernel.terminate`, Messenger `WorkerMessageHandledEvent`), and `kernel.reset` stays as well.
+`kernel.terminate`, Messenger `WorkerMessageHandledEvent` and `WorkerMessageFailedEvent`), and `kernel.reset` stays as
+well. Within a boundary, `FileContexts` memoises per viewer object (`WeakMap`), never per identifier.
 
 ## Usage recommendations in worker mode
 
 - Keeping `kernel.reset` (the services resetter) and Messenger's `reset_on_message` is still recommended, but since
   1.4 the bundle does not depend on them.
 - Do not cache `StorageProfiles::forTarget()` results or `FileContexts::readable()` decisions in your own services.
+- A long-running host command (a loop that resolves files for many viewers or tenants, a scheduler) has no request
+  or message boundary: call `Nowo\StorageKitBundle\EventListener\RequestBoundaryListener::reset()` (public service)
+  between items.
 - GD keeps the peak RSS of an upload in the worker thread: lower `upload.max_pixels` on small hosts and set FrankenPHP
   `max_requests` (PERF-IMAGE-GD-PEAK-MEMORY).
 
