@@ -6,12 +6,48 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Target 1.4.0](#target-140)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
 - [[1.2.0] - 2026-11-10](#120---2026-11-10)
 - [[1.1.0] - 2026-11-03](#110---2026-11-03)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
 
 ## [Unreleased]
+
+### Target 1.4.0
+
+Architecture bar W2 (standard Symfony by default, strict DDD opt-in): rule 8 (configuration through provider ports,
+no Instance Settings needed), plus a rule 6 and a worker-mode fix found on the way.
+
+#### Added
+
+- `Profile\ConfigProfileProviderInterface` (`names()`, `has()`, `delivery()`, `settings()`), public alias of
+  `ConfigProfiles` (the `profiles` tree), and the `config_profile_provider` option: a host service that supplies the
+  named buckets (secret manager, its own tenant configuration). `instance_profile` may then name one of them (checked
+  at runtime: an unknown name turns uploads off instead of failing the build); `profiles` and `config_profile_provider`
+  are exclusive. With `instance_profile` set, `NowoInstanceSettingsBundle` does not have to be registered
+  (kernel test: no Instance Settings, buckets from the host).
+- `EventListener\RequestBoundaryListener`: clears the request memos of `StorageProfiles`, `FileStorage`,
+  `FileContexts` and `FileReferenceListener` at the start of every main request, at `kernel.terminate` and after every
+  Messenger message.
+
+#### Fixed
+
+- **Worker mode without the services resetter** (FrankenPHP `FRANKENPHP_RESET_KERNEL=false`): the read decisions of
+  `FileContexts` were memoised per viewer identifier until `kernel.reset`, so in a kept-alive worker that does not run
+  the resetter a read permission the application revoked was still honoured for that viewer (and memos grew with every
+  viewer / bucket). They are now cleared at the request boundary.
+- **The first upload to a config-pinned or settings-backed instance bucket no longer flushes the application's entity
+  manager.** The profile row created on first use (`StorageProfiles::configRow()` / the `storage` section row) was
+  persisted and flushed on the bundle's entity manager (the default one), committing whatever the application had
+  pending; it is now a DBAL insert (`StorageEntityManager::insert()`, savepoint inside an open transaction) read back
+  managed.
+
+#### Changed
+
+- `StorageProfiles` and `StorageCspSources` take a `ConfigProfileProviderInterface` (`ConfigProfiles` implements it).
+- Standard hosts: no configuration change, same defaults. `nowo-tech/instance-settings-bundle` stays in `require`
+  until 2.0.
 
 ## [1.3.0] - 2026-11-11
 

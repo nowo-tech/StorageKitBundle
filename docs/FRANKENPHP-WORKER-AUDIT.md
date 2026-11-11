@@ -6,7 +6,8 @@
 | Audited revision | `1.0.0` (unreleased, branch `feat/1.0.0`) |
 | Audit date | 2026-11-03 |
 | Method | Manual review of every file under `src/`; PHPStan `ruleset-classic` + `ruleset-worker-strict` + `ruleset-hardening`; Igor (`composer igor`); unit tests of the memos and their reset; demo run in worker mode |
-| **Verdict** | ✅ **Viable** with the standard Symfony runtime (`kernel.reset` between requests, scenario A). Four services keep request-scoped memos, all `ResetInterface` + `kernel.reset`. Under scenario B (no reset at all) they would survive into the next request — see [Findings](#findings) |
+| **Verdict** | ✅ **Viable** in both scenarios. Four services keep request-scoped memos, all `ResetInterface` + `kernel.reset`; since 1.4 `RequestBoundaryListener` also clears them at the start of every main request, at `kernel.terminate` and after every Messenger message, so scenario B (no reset at all, `FRANKENPHP_RESET_KERNEL=false`) is covered too — see [Findings](#findings) |
+| Re-audit | 1.4.0 (2026-11-11): request-boundary reset; kernel test serving 600 requests through `http_kernel` without the services resetter (`tests/Integration/Ddd/HostProvidersKernelTest.php`) |
 
 ## Table of contents
 
@@ -44,9 +45,10 @@ scenarios are evaluated:
 
 | Service | Mutable state | Scenario A | Scenario B |
 |---------|---------------|------------|------------|
-| `FileStorage` | connections keyed by settings fingerprint | ✅ | ⚠️ connections kept (keyed by settings, so a changed bucket gets a new one; old ones accumulate) |
-| `StorageProfiles` | resolved profile rows per owner / config name | ✅ | ⚠️ a switch or scope change made by another worker is not seen until reset |
-| `FileContexts` | read decisions per viewer / context | ✅ | ⚠️ a revoked read permission could be reused for the same viewer |
+| `FileStorage` | connections keyed by settings fingerprint | ✅ | ✅ since 1.4 (cleared at the request boundary; before: connections accumulated) |
+| `StorageProfiles` | resolved profile rows per owner / config name | ✅ | ✅ since 1.4 (cleared at the request boundary; before: a switch made by another worker was not seen) |
+| `FileContexts` | read decisions per viewer / context | ✅ | ✅ since 1.4 (cleared at the request boundary; before: a revoked read permission was reused for the same viewer) |
+| `RequestBoundaryListener` (1.4) | none (iterates the four memos above) | ✅ | ✅ |
 | `FileReferenceListener` | texts collected in `onFlush`, emptied in `postFlush` | ✅ | ✅ (emptied per flush; reset only drops a failed flush's leftovers) |
 | `StorageKitRouteLoader` | `loaded` flag (cache warm-up only) | ✅ | ✅ |
 | `ImageProcessor`, `ImageUploader`, `UploadEndpoint`, `FileDelivery`, `FileUrls`, `StoredImageResolver`, `FileUris`, `FileReferences`, `FilePurger`, `StorageSyncer`, `StorageMove`, `StorageProbe`, `EndpointGuard`, `ConfigProfiles`, `InstanceStorageSettings`, `AuditRecorder`, repositories | none (`readonly`) | ✅ | ✅ |
@@ -56,14 +58,15 @@ scenarios are evaluated:
 ## Findings
 
 No finding under scenario **A**, which is what FrankenPHP's Symfony integration and Messenger workers
-(`reset_on_message`) provide. Under scenario **B** the three request-scoped memos above would outlive the request; the
-bundle relies on `kernel.reset` for them, and saving the `storage` section resets the profile and connection memos in
-the worker that saved it.
+(`reset_on_message`) provide. Up to 1.3, under scenario **B** the three request-scoped memos above outlived the
+request (a read permission revoked by the application was still honoured for the same viewer in that worker). Since
+1.4 the bundle clears them itself at the request boundary (`RequestBoundaryListener`: main `kernel.request`,
+`kernel.terminate`, Messenger `WorkerMessageHandledEvent`), and `kernel.reset` stays as well.
 
 ## Usage recommendations in worker mode
 
-- Keep `kernel.reset` running between requests (do not disable the services resetter) and Messenger's
-  `reset_on_message` (default) for the move worker.
+- Keeping `kernel.reset` (the services resetter) and Messenger's `reset_on_message` is still recommended, but since
+  1.4 the bundle does not depend on them.
 - Do not cache `StorageProfiles::forTarget()` results or `FileContexts::readable()` decisions in your own services.
 - GD keeps the peak RSS of an upload in the worker thread: lower `upload.max_pixels` on small hosts and set FrankenPHP
   `max_requests` (PERF-IMAGE-GD-PEAK-MEMORY).

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Http;
 
+use Nowo\StorageKitBundle\Profile\ConfigProfileProviderInterface;
 use Nowo\StorageKitBundle\Profile\ConfigProfiles;
 use Nowo\StorageKitBundle\Storage\S3Settings;
 
@@ -22,7 +23,7 @@ final readonly class StorageCspSources
      * Dependencies and configuration.
      */
     public function __construct(
-        private ConfigProfiles $profiles,
+        private ConfigProfileProviderInterface $profiles,
     ) {
     }
 

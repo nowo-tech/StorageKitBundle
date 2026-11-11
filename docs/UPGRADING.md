@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [To 1.4.0](#to-140)
 - [To 1.3.0](#to-130)
 - [To 1.2.0](#to-120)
 - [To 1.1.0](#to-110)
@@ -14,6 +15,24 @@
   - [Breaking changes](#breaking-changes)
 
 ## Unreleased
+
+### To 1.4.0
+
+Target **1.4.0**, from **1.3.0**: `composer update nowo-tech/storage-kit-bundle`. **Standard hosts: nothing to
+change** (same services, same defaults; no schema change).
+
+1. **Named buckets from your own service (optional, DDD hosts).** Implement
+   `Nowo\StorageKitBundle\Profile\ConfigProfileProviderInterface` and set
+   `nowo_storage_kit.config_profile_provider` to its service id (remove `profiles`: the two are exclusive). Pin the
+   instance bucket to one of its names with `instance_profile`; `NowoInstanceSettingsBundle` can then stay out of
+   `config/bundles.php`. A name must keep meaning the same bucket (files point at it); the provider is asked on every
+   use, so keep no request state in it.
+2. **No flush on the first upload.** The profile row created by the first upload to a config-pinned or settings-backed
+   instance bucket is a DBAL insert: if some code relied on that upload to flush its own pending entities, flush them
+   yourself.
+3. **Worker mode.** The bundle clears its request memos itself at the request boundary; nothing to configure.
+4. Code that constructs `StorageProfiles` or `StorageCspSources` itself keeps working (`ConfigProfiles` implements the
+   new interface).
 
 ## To 1.3.0
 
