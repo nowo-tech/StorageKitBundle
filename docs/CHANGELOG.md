@@ -6,26 +6,78 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Added](#added)
+  - [Changed](#changed)
+  - [Deprecated](#deprecated)
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
-  - [Target 1.4.0](#target-140)
+  - [Added](#added-1)
+  - [Security](#security)
+  - [Fixed](#fixed)
+  - [Changed](#changed-1)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
   - [Fixed](#fixed-1)
-  - [Added](#added-1)
-  - [Changed](#changed-1)
-  - [Deprecated](#deprecated)
-- [[1.2.0] - 2026-11-10](#120---2026-11-10)
-  - [Security](#security)
   - [Added](#added-2)
   - [Changed](#changed-2)
-- [[1.1.0] - 2026-11-03](#110---2026-11-03)
+  - [Deprecated](#deprecated-1)
+- [[1.2.0] - 2026-11-10](#120---2026-11-10)
+  - [Security](#security-1)
   - [Added](#added-3)
   - [Changed](#changed-3)
+- [[1.1.0] - 2026-11-03](#110---2026-11-03)
+  - [Added](#added-4)
+  - [Changed](#changed-4)
   - [Fixed](#fixed-2)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
-  - [Added](#added-4)
-  - [Security](#security-1)
+  - [Added](#added-5)
+  - [Security](#security-2)
 
 ## [Unreleased]
+
+Architecture bar W3 (REQ-ARCH-001 rules 1, 3, 6 and 8; REQ-RUNTIME-002). See [UPGRADING](UPGRADING.md#to-150).
+
+### Added
+
+- **Dedicated entity manager** (rule 6): `doctrine.entity_manager` is supported. Set it to a manager of your own (same
+  connection recommended, for example `storage_kit`): the bundle entities are mapped on it **only** (removed from the
+  other managers' drivers, `auto_mapping` included; `StorageEntityManagerPass` fails the build on an unknown manager or
+  one that does not map them), every bundle read and write uses it, and `Doctrine\OwnEntityManagerSubscriber` recovers
+  it when a failed write closed it (main `kernel.request`, `WorkerMessageReceivedEvent`) and clears it at
+  `kernel.terminate`, `console.terminate` and after every Messenger message, handled or failed. The host's managers are
+  never cleared. `null` (default) keeps the default manager. Recommended for new installs.
+- **Download port** (rule 3): `Download\FileDeliveryInterface::deliver(string $uuid, string $variant): DeliverableFile`,
+  a framework-free VO (`redirect` / `stream`, status, headers, private max age, policy headers; the pre-signed URL and
+  the bucket stream are kept in an internal `WeakMap`, out of every dump, cast, JSON and serialization; not cloneable
+  nor serializable), `Download\FileDeliveryResponder` (HttpFoundation adapter, the 1.4 response) and
+  `Download\FileNotDeliverable`. The download controller calls the port; alias or decorate the interface to serve files
+  your way (`FileDeliveryPortsPass` fails the build when the service behind it does not implement it).
+- **Ports for the documented services** (rule 1): `Reference\FileReferencesInterface` (`sync()`, `forget()`),
+  `Download\StoredImageResolverInterface` (`resolve()`, `resolveText()`) and
+  `PersonalData\StoredFilesPersonalDataInterface` (`export()`, `erase()` by plain strings), public aliases of
+  `FileReferences`, `StoredImageResolver` and `StoredFilesPersonalData`.
+- `StorageEntityManager::update()` / `updateRows()`: DBAL `UPDATE` of bundle rows that also aligns the instances the
+  entity manager holds (no later flush rewrites them); encrypted (`#[Encrypted]`) fields are refused.
+- Tests: v1.4.0 equivalence (downloads through both controllers and services: status, headers, bytes; erasure and
+  settings listener: every column of the tables) against literal copies under `tests/Support/Legacy/`; dedicated-manager
+  kernel test (no admin or CLI write flushes the host manager); DDD host on the ports only; kept-alive worker test
+  (1,200 downloads, two users, bundle manager empty after each request, flat memory); `lint:container` for the bundle
+  ports, a host port, a 1.4 decorator, a dual decorator and a DDD host.
+
+### Changed
+
+- **GDPR erasure and the `storage` settings listener write with DBAL, never flush** (rule 6): `StoredFilesPersonalData::erase()`
+  pages the matching ids (same match and keyset as before, no entity loaded) and updates them; the listener forgets
+  the instance profile's test result with an `UPDATE` of its three columns. Same rows as 1.4; what the host left
+  pending is not committed any more.
+- **`nowo-tech/instance-settings-bundle` moved from `require` to `suggest`** (rule 8; deprecated implicit install since
+  1.3.0). The settings-backed instance bucket (default `instance_profile: null`) still needs it: require it in your
+  application. It stays in `require-dev` for the tests.
+- `RequestBoundaryListener` also clears the request memos at `console.terminate`.
+- `symfony/deprecation-contracts` is required explicitly.
+
+### Deprecated
+
+- `FileDelivery::respond()` (removed in 2.0): use `FileDeliveryInterface::deliver()` and `FileDeliveryResponder`. It
+  still returns the same response and triggers a deprecation.
 
 ## [1.4.0] - 2026-11-11
 

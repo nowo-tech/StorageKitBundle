@@ -163,7 +163,8 @@ final class IssueContext implements FileContextInterface   // autoconfigured
 - Symfony **7.4**, **8.0** or **8.1** (FrameworkBundle with CSRF, Form, Validator, RateLimiter, HttpClient, Lock,
   TwigBundle; SecurityBundle for the admin pages)
 - Doctrine ORM **3.3+**; `nowo-tech/doctrine-encrypt-bundle` **^2.10** (registered); `nowo-tech/instance-settings-bundle`
-  **^1.3.1**; `nowo-tech/ui-kit-bundle` **^2.23**; `nowo-tech/form-kit-bundle` **^2.17**;
+  **^1.3.1** for the default settings-backed instance bucket (a `suggest` since 1.5: require it yourself);
+  `nowo-tech/ui-kit-bundle` **^2.23**; `nowo-tech/form-kit-bundle` **^2.17**;
   `nowo-tech/outbound-url-guard-bundle` **^1.3**; `async-aws/s3` **^2.8 || ^3.0**; `league/flysystem` **^3.29**;
   `twig/extra-bundle`
 - Optional: `symfony/messenger` (background moves), `nowo-tech/http-hardening-bundle` (CSP adapter),
@@ -180,7 +181,9 @@ under `/admin/storage` for `ROLE_ADMIN`, uploads for `ROLE_USER`.
 
 The instance bucket and providers, file contexts, uploading from an editor, rendering, downloads and CSP, references and
 the purge, scope buckets, quotas, moving to another bucket, adopting an existing instance bucket
-(`nowo:storage-kit:adopt-instance-bucket`), personal data and audit events: [docs/USAGE.md](docs/USAGE.md).
+(`nowo:storage-kit:adopt-instance-bucket`), personal data and audit events: [docs/USAGE.md](docs/USAGE.md). Both host
+kinds are covered: [Standard Symfony host](docs/USAGE.md#standard-symfony-host) (zero configuration) and
+[DDD / hexagonal host](docs/USAGE.md#ddd--hexagonal-host) (ports, dedicated entity manager, no Instance Settings).
 
 ## Demo
 

@@ -18,6 +18,8 @@ compiled; the defaults are the safe choice. Source of truth: `src/DependencyInje
 - [limits](#limits)
 - [personal_data](#personal_data)
 - [doctrine](#doctrine)
+  - [Standard Symfony host](#standard-symfony-host)
+  - [DDD / hexagonal host (and new installs)](#ddd--hexagonal-host-and-new-installs)
 - [web_ui](#web_ui)
 - [security](#security)
 - [The `storage` Instance Settings section](#the-storage-instance-settings-section)
@@ -75,7 +77,7 @@ nowo_storage_kit:
         user_provider: security.user_providers # used by nowo:storage-kit:backfill-uploader-keys
     doctrine:
         table_prefix: ''
-        entity_manager: null
+        entity_manager: null      # 1.5: a dedicated manager name (recommended for new installs)
     web_ui:
         enabled: true
         path_prefix: /admin/storage
@@ -241,10 +243,34 @@ Buckets per scope (organisation, tenant, workspace…).
 | Key | Default | Validation / effect |
 | --- | --- | --- |
 | `table_prefix` | `''` | `[A-Za-z0-9_]*`. Prefixes the tables and index names: `app_` gives `app_storage_kit_file`. |
-| `entity_manager` | `null` | Keep `null`. A dedicated entity manager is **not supported yet**: the entity mapping is always registered on the default manager, so another name only fails at the first write. |
+| `entity_manager` | `null` | `\w+` or `null` (1.5). Null: the default manager (unchanged for existing installs). A name: the bundle entities are mapped on that manager **only** (removed from the others, `auto_mapping` included), every bundle read and write uses it, the bundle recovers it when closed and clears it at the end of every request, Messenger message and console command; the build fails when the manager is not declared under `doctrine.orm.entity_managers` or does not map the entities. **Recommended for new installs**, on the same connection as your default manager (see below). |
 
 Tables: `storage_kit_profile`, `storage_kit_file`, `storage_kit_file_reference`, `storage_kit_sync` (see
 [ARCHITECTURE](ARCHITECTURE.md#entities-and-tables)).
+
+### Standard Symfony host
+
+Keep `entity_manager: null`: the entities are attribute-mapped on your default manager. Uploads, references, the GDPR
+erasure and the settings listener never flush it (DBAL statements); the admin pages and console commands do flush it
+(profile save and test, moves, purge).
+
+### DDD / hexagonal host (and new installs)
+
+```yaml
+doctrine:
+    orm:
+        default_entity_manager: default
+        entity_managers:
+            default: { connection: default }   # your mappings
+            storage_kit: { connection: default }
+nowo_storage_kit:
+    doctrine:
+        entity_manager: storage_kit
+```
+
+No bundle write flushes your manager then, admin and CLI included. Use the same connection, so uploads and
+references join your transactions; reference the files by `uuid`, never with a Doctrine relation (see
+[USAGE](USAGE.md#a-dedicated-entity-manager-15)).
 
 ## web_ui
 
