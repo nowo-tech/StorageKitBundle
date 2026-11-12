@@ -21,6 +21,9 @@ use function implode;
  * Reacts to a change of the `storage` Instance Settings section: drops the memoised profiles and connections (worker
  * safe: the next request reads the new values), forgets the instance row's last test result (it tested the old
  * connection) and records a `profile_saved` audit event with the changed field names (never values).
+ *
+ * Since 1.5 the test result is forgotten with a DBAL statement: the listener runs inside the host's settings save and
+ * never flushes an entity manager (architecture bar rule 6).
  */
 final readonly class InstanceSettingsListener
 {
@@ -53,7 +56,8 @@ final readonly class InstanceSettingsListener
         $active = $this->profiles->activeOf(null);
         if ($active instanceof StorageProfile && $active->isSettingsBacked() && $active->getTestedAt() instanceof DateTimeImmutable) {
             $active->forgetTest();
-            $this->entityManager->manager()->flush();
+            // 1.5 (rule 6): a DBAL update of these three columns; the host's settings save is never flushed by us.
+            $this->entityManager->update($active, StorageProfile::TEST_FIELDS);
         }
         $this->audit->record(StorageAuditEvent::PROFILE_SAVED, null, $this->tokens?->getToken()?->getUser(), [
             'profile' => $active?->getUuid(),

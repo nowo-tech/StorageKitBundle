@@ -9,8 +9,8 @@ use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * Clears the bundle's per-request memos (profiles, bucket connections, access decisions, pending references) at the
- * request boundary itself (1.4): at the start of every main request, at `kernel.terminate` and after every Messenger
- * message, handled or failed. A long-running host command (a loop over many viewers or tenants, a scheduler) has no
+ * request boundary itself (1.4): at the start of every main request, at `kernel.terminate`, after every Messenger
+ * message, handled or failed, and (1.5) at the end of every console command. A long-running host command (a loop over many viewers or tenants, a scheduler) has no
  * such boundary: it calls the public {@see self::reset()} of this service per item. A FrankenPHP worker with the kernel kept alive and no services resetter (`FRANKENPHP_RESET_KERNEL=false`)
  * then never answers one request with a decision, a profile or a connection memoised for another user or tenant;
  * `kernel.reset` stays as well.
@@ -36,8 +36,8 @@ final readonly class RequestBoundaryListener
     }
 
     /**
-     * After the response (`kernel.terminate`) and after a Messenger message (`WorkerMessageHandledEvent`,
-     * `WorkerMessageFailedEvent`).
+     * After the response (`kernel.terminate`), after a Messenger message (`WorkerMessageHandledEvent`,
+     * `WorkerMessageFailedEvent`) and, since 1.5, after a console command (`console.terminate`).
      */
     public function onBoundary(): void
     {

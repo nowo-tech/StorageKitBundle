@@ -4,21 +4,31 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Doctrine;
 
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ToOneOwningSideMapping;
 use Doctrine\Persistence\ManagerRegistry;
 use LogicException;
+use Nowo\DoctrineEncryptBundle\Configuration\Encrypted;
 use Throwable;
 
+use function implode;
+use function in_array;
 use function is_array;
+use function is_int;
 use function is_numeric;
 use function is_object;
+use function is_string;
+use function spl_object_id;
+use function sprintf;
 
 /**
  * The entity manager of the bundle entities (`doctrine.entity_manager`, null = the default one), fetched per call so a
  * reset / closed manager is replaced in worker mode, plus the DBAL connection and the (prefixed) table names for the
- * bounded raw-SQL statements.
+ * bounded raw-SQL statements. Since 1.5 a dedicated manager is supported (the entities are mapped on it only); the
+ * host-called writes ({@see self::insert()}, {@see self::update()}, {@see self::updateRows()}) never flush any manager.
  */
 final readonly class StorageEntityManager
 {
@@ -129,6 +139,95 @@ final readonly class StorageEntityManager
         $metadata->setIdentifierValues($entity, [$idField => $id]);
 
         return $id;
+    }
+
+    /**
+     * Writes the current value of `$fields` of one bundle entity with a DBAL `UPDATE` by its identifier (1.5,
+     * architecture bar rule 6): no entity manager is flushed, so nothing the application left pending is written.
+     * When the entity is managed, its original data is aligned with the written values, so a later flush of that
+     * manager does not write them again. Inside an open transaction the statement is part of it.
+     *
+     * @param list<string> $fields mapped field names (never an encrypted one: see {@see self::updateRows()})
+     *
+     * @throws LogicException when the entity has no identifier yet, or a field is unknown or encrypted
+     */
+    public function update(object $entity, array $fields): void
+    {
+        $manager  = $this->manager();
+        $metadata = $manager->getClassMetadata($entity::class);
+        $id       = $metadata->getIdentifierValues($entity)[$metadata->getSingleIdentifierFieldName()] ?? null;
+        if (!is_int($id) && !is_string($id)) {
+            throw new LogicException(sprintf('%s has no identifier yet: insert it first.', $entity::class));
+        }
+        $values = [];
+        foreach ($fields as $field) {
+            $values[$field] = $metadata->getFieldValue($entity, $field);
+        }
+        $this->updateRows($entity::class, [$id], $values);
+    }
+
+    /**
+     * Sets `$values` (field => value) on the rows of `$ids` with one DBAL `UPDATE` (1.5, rule 6: no flush), then
+     * applies the same values to the instances of those rows the entity manager already manages, original data
+     * included, so the identity map shows what the database holds and no later flush writes them again. Returns the
+     * number of rows the database reports as changed.
+     *
+     * Encrypted fields (`#[Encrypted]`) are refused: a DBAL statement would bypass the encryption listener and store
+     * the plain value.
+     *
+     * @param class-string $class bundle entity class
+     * @param list<int|string> $ids identifiers
+     * @param array<string, mixed> $values field name => value
+     *
+     * @throws LogicException when a field is unknown, an identifier or encrypted
+     */
+    public function updateRows(string $class, array $ids, array $values): int
+    {
+        if ($ids === [] || $values === []) {
+            return 0;
+        }
+        $manager       = $this->manager();
+        $connection    = $manager->getConnection();
+        $platform      = $connection->getDatabasePlatform();
+        $quoteStrategy = $manager->getConfiguration()->getQuoteStrategy();
+        $metadata      = $manager->getClassMetadata($class);
+        $set           = [];
+        $parameters    = [];
+        $types         = [];
+        foreach ($values as $field => $value) {
+            if (!$metadata->hasField($field) || $metadata->isIdentifier($field)) {
+                throw new LogicException(sprintf('%s::$%s is not a writable mapped field.', $class, $field));
+            }
+            if ($metadata->getReflectionClass()->getProperty($field)->getAttributes(Encrypted::class) !== []) {
+                throw new LogicException(sprintf('%s::$%s is encrypted: it is never written with a DBAL statement.', $class, $field));
+            }
+            $set[]        = $quoteStrategy->getColumnName($field, $metadata, $platform) . ' = ?';
+            $parameters[] = $value;
+            $types[]      = (string) $metadata->getTypeOfField($field);
+        }
+        $idField = $metadata->getSingleIdentifierFieldName();
+        $idType  = (string) $metadata->getTypeOfField($idField);
+        $changed = (int) $connection->executeStatement(
+            'UPDATE ' . $quoteStrategy->getTableName($metadata, $platform) . ' SET ' . implode(', ', $set)
+            . ' WHERE ' . $quoteStrategy->getColumnName($idField, $metadata, $platform) . ' IN (?)',
+            [...$parameters, $ids],
+            [...$types, in_array($idType, [Types::INTEGER, Types::BIGINT, Types::SMALLINT], true) ? ArrayParameterType::INTEGER : ArrayParameterType::STRING],
+        );
+        $unitOfWork = $manager->getUnitOfWork();
+        foreach ($ids as $id) {
+            $managed = $unitOfWork->tryGetById($id, $metadata->rootEntityName);
+            if (!$managed instanceof $class) {
+                continue;
+            }
+            foreach ($values as $field => $value) {
+                // @igor-ignore - Aligns the managed instance (an argument row of this call) with the row just written.
+                $metadata->setFieldValue($managed, $field, $value);
+                // @igor-ignore - Aligns the original data of that managed row (per call), so no later flush rewrites it.
+                $unitOfWork->setOriginalEntityProperty(spl_object_id($managed), $field, $value);
+            }
+        }
+
+        return $changed;
     }
 
     /**

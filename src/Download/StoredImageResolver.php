@@ -14,7 +14,7 @@ use Nowo\StorageKitBundle\Repository\StoredFileRepository;
  * access check per context type; an image of a context the viewer may not read is left out (render a neutral "not
  * visible" placeholder for it).
  */
-final readonly class StoredImageResolver
+final readonly class StoredImageResolver implements StoredImageResolverInterface
 {
     /**
      * Dependencies and configuration.

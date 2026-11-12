@@ -43,6 +43,8 @@ final class StorageKitTestKernel extends Kernel
      * @param Closure(RoutingConfigurator): void $routes routes
      * @param list<string> $without bundles / features to leave out (security, messenger, csrf, encrypt, settings —
      *                              Instance Settings also needs encrypt)
+     * @param array<string, mixed>|null $orm doctrine.orm configuration (null: the single-manager shorthand with the
+     *                                       `Tests` mapping)
      */
     public function __construct(
         private readonly string $id,
@@ -50,6 +52,7 @@ final class StorageKitTestKernel extends Kernel
         private readonly Closure $routes,
         private readonly array $without = [],
         bool $debug = false,
+        private readonly ?array $orm = null,
     ) {
         parent::__construct('test', $debug);
     }
@@ -97,6 +100,21 @@ final class StorageKitTestKernel extends Kernel
         return self::baseDir() . '/' . $this->id . '/log';
     }
 
+    /**
+     * Mapping of the host test entities (`Note`).
+     *
+     * @return array<string, mixed>
+     */
+    public static function testsMapping(): array
+    {
+        return [
+            'type'      => 'attribute',
+            'dir'       => '%kernel.project_dir%/tests/Fixtures/Entity',
+            'prefix'    => 'Nowo\StorageKitBundle\Tests\Fixtures\Entity',
+            'is_bundle' => false,
+        ];
+    }
+
     public static function databaseUrl(): string
     {
         $url = getenv('STORAGE_KIT_TEST_DATABASE_URL');
@@ -135,12 +153,7 @@ final class StorageKitTestKernel extends Kernel
         $container->extension('twig', ['strict_variables' => true]);
         $container->extension('doctrine', [
             'dbal' => ['url' => self::databaseUrl()],
-            'orm'  => ['mappings' => ['Tests' => [
-                'type'      => 'attribute',
-                'dir'       => '%kernel.project_dir%/tests/Fixtures/Entity',
-                'prefix'    => 'Nowo\StorageKitBundle\Tests\Fixtures\Entity',
-                'is_bundle' => false,
-            ]]],
+            'orm'  => $this->orm ?? ['mappings' => ['Tests' => self::testsMapping()]],
         ]);
         if (!in_array('encrypt', $this->without, true)) {
             $container->extension('nowo_doctrine_encrypt', [

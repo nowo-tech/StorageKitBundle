@@ -25,7 +25,7 @@ use function array_values;
  * stored file is ignored, and so is one of another file context: a UUID learned elsewhere cannot keep someone else's
  * orphan from the purge.
  */
-final readonly class FileReferences
+final readonly class FileReferences implements FileReferencesInterface
 {
     /**
      * Dependencies and configuration.

@@ -39,6 +39,9 @@ use function trim;
 #[ORM\Index(name: 'idx_storage_kit_profile_owner', columns: ['scope', 'state'])]
 class StorageProfile
 {
+    /** Fields {@see self::forgetTest()} and {@see self::recordTest()} change (1.5: written with DBAL, no flush). */
+    public const TEST_FIELDS = ['testedAt', 'testOk', 'testPublicRead'];
+
     /** The owner's profile uploads go to. */
     public const STATE_ACTIVE = 'active';
 

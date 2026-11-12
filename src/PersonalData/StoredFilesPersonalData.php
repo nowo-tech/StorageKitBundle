@@ -31,9 +31,10 @@ use function count;
  * {@see self::erase()} with `$userKey`): a file stored with the key is found after the user identifier (often an
  * e-mail) changed. Called with the identifier only, they match the identifier only, as before 1.2.0.
  *
- * Both walk the files in keyset pages of {@see self::PAGE}.
+ * Both walk the files in keyset pages of {@see self::PAGE}. Type-hint {@see StoredFilesPersonalDataInterface} (1.5) to
+ * depend on the port only (strings in, scalars out).
  */
-final readonly class StoredFilesPersonalData
+final readonly class StoredFilesPersonalData implements StoredFilesPersonalDataInterface
 {
     /** Files per page. */
     public const PAGE = 500;
@@ -100,21 +101,34 @@ final readonly class StoredFilesPersonalData
 
     /**
      * Erases a user's link to their files (same match as {@see self::export()}); returns the number of files touched.
+     *
+     * Since 1.5 (architecture bar rule 6) the rows are changed with DBAL `UPDATE` statements, page by page: no entity
+     * manager is flushed, so nothing the application left pending in it is written (an eraser may run in the middle of
+     * the host's own unit of work). Inside the host's transaction the statements are part of it. Files the entity
+     * manager already holds show the erased values too.
      */
     public function erase(string $userIdentifier, ?string $userKey = null): int
     {
         $longAgo = new DateTimeImmutable('2000-01-01');
-        $manager = $this->entityManager->manager();
         $count   = 0;
-        foreach ($this->pages($userIdentifier, $userKey) as $page) {
-            foreach ($page as ['file' => $file, 'referenced' => $referenced]) {
-                $file->anonymise();
+        $after   = 0;
+        while (true) {
+            $page = $this->files->uploadedIdsBy($userIdentifier, $after, self::PAGE, $userKey);
+            if ($page === []) {
+                break;
+            }
+            $ids     = [];
+            $orphans = [];
+            foreach ($page as ['id' => $id, 'referenced' => $referenced]) {
+                $ids[] = $id;
                 if (!$referenced) {
-                    $file->expireOrphan($longAgo);
+                    $orphans[] = $id;
                 }
             }
-            $manager->flush();
+            $this->entityManager->updateRows(StoredFile::class, $ids, ['originalName' => StoredFile::ANONYMOUS_NAME, 'uploadedBy' => null, 'uploadedByKey' => null]);
+            $this->entityManager->updateRows(StoredFile::class, $orphans, ['orphanedSince' => $longAgo]);
             $count += count($page);
+            $after = $page[count($page) - 1]['id'];
         }
         $this->audit->record(StorageAuditEvent::FILES_ERASED, null, null, ['files' => $count]);
 

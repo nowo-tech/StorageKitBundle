@@ -9,6 +9,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
 use Doctrine\Persistence\ManagerRegistry;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Storage\StorageProvider;
 use Nowo\StorageKitBundle\Tests\Fixtures\AuditLog;
@@ -57,8 +58,9 @@ abstract class KernelTestCase extends TestCase
      * @param list<string> $without bundles / features to leave out
      * @param Closure(RoutingConfigurator): void|null $routes routes (default: the bundle loader)
      * @param Closure(ContainerConfigurator): void|null $extra extra container configuration
+     * @param array<string, mixed>|null $orm doctrine.orm configuration (null: single manager with the `Tests` mapping)
      */
-    protected function bootKernel(array $config = [], array $without = [], ?Closure $routes = null, bool $debug = false, ?Closure $extra = null, bool $memory = true): StorageKitTestKernel
+    protected function bootKernel(array $config = [], array $without = [], ?Closure $routes = null, bool $debug = false, ?Closure $extra = null, bool $memory = true, ?array $orm = null): StorageKitTestKernel
     {
         $config += [
             'scopes'    => ['enabled' => true, 'access_checker' => ScopeAccess::class],
@@ -96,18 +98,21 @@ abstract class KernelTestCase extends TestCase
             },
             $without,
             $debug,
+            $orm,
         );
         $this->kernels[] = $kernel;
         $kernel->boot();
 
         $doctrine = $kernel->getContainer()->get('doctrine');
         self::assertInstanceOf(ManagerRegistry::class, $doctrine);
-        $entityManager = $doctrine->getManager();
-        if ($entityManager instanceof EntityManagerInterface) {
-            $metadata = $entityManager->getMetadataFactory()->getAllMetadata();
-            $tool     = new SchemaTool($entityManager);
-            $tool->dropSchema($metadata);
-            $tool->createSchema($metadata);
+        // Every manager's tables (a dedicated bundle manager maps the bundle entities only).
+        foreach ($doctrine->getManagers() as $entityManager) {
+            if ($entityManager instanceof EntityManagerInterface) {
+                $metadata = $entityManager->getMetadataFactory()->getAllMetadata();
+                $tool     = new SchemaTool($entityManager);
+                $tool->dropSchema($metadata);
+                $tool->createSchema($metadata);
+            }
         }
 
         return $kernel;
@@ -185,7 +190,8 @@ abstract class KernelTestCase extends TestCase
     {
         $profile = new StorageProfile($scope, $state);
         $profile->configure(StorageProvider::S3_COMPATIBLE, true, $endpoint, null, 'us-east-1', $bucket, 'app', 'test-key', 'test-secret-not-real', true);
-        $manager = $this->entityManager($kernel);
+        // The bundle's manager: the default one, or the dedicated `doctrine.entity_manager` (1.5).
+        $manager = $this->service($kernel, StorageEntityManager::class)->manager();
         $manager->persist($profile);
         $manager->flush();
 
