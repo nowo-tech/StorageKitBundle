@@ -145,11 +145,17 @@ final class UnitOfWorkFrames
         return $this->frames === [] && !$this->isMessageInFlight() && $this->requests === [];
     }
 
+    /**
+     * Whether a Messenger message is in flight in any worker.
+     */
     public function isMessageInFlight(): bool
     {
         return $this->messageDepth($this->workers) > 0;
     }
 
+    /**
+     * Number of main requests in flight.
+     */
     public function requestsInFlight(): int
     {
         return count($this->requests);
