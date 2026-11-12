@@ -49,6 +49,15 @@ All notable changes to this project are documented here. The format follows
   its own message, and a stack of the main requests in flight, popped by their own `kernel.finish_request` /
   `kernel.terminate` (unbalanced events heal); a skipped message ends with its received event or at its worker's next
   `WorkerRunningEvent`. Message boundaries clear only outside another message. No configuration change.
+- **Unit boundary tracker: aborted worker runs, skip read, nested terminate (audit OB).** A Messenger run aborted by an
+  exception thrown out of `Worker::run()` (a throwing received, handled or running listener) left its worker "in
+  flight", so inside a long-running command every later worker's messages stopped clearing (OB-M1) and the worker stack
+  grew with every aborted run (OB-L1); the tracker now holds weak references to the worker and to the received event of
+  the message in flight, and drops a run as soon as either is gone. The `shouldHandle(false)` read at the end of a
+  received event no longer ends an outer message when a listener already ended the skipped one (OB-L2). The
+  `kernel.terminate` of a main request handled in-process inside another one no longer clears the outer request nor
+  resets the tracker (OB-L3). Note: in hosts with Messenger, DoctrineBundle's own subscriber clears every manager after
+  each message, so a worker run inside a handler keeps the bundle's pending events and memos, not the identity map.
 
 ## [1.5.1] - 2026-11-12
 
