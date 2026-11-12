@@ -2,7 +2,8 @@
 
 ## Table of contents
 
-- [Unreleased](#unreleased)
+- [Planned for 2.0](#planned-for-20)
+- [To 1.5.0](#to-150)
 - [To 1.4.0](#to-140)
 - [To 1.3.0](#to-130)
 - [To 1.2.0](#to-120)
@@ -14,7 +15,75 @@
   - [Template contract](#template-contract)
   - [Breaking changes](#breaking-changes)
 
-## Unreleased
+## Planned for 2.0
+
+Breaking changes announced in 1.x (deprecated now, applied in the next major per REQ-BC-001):
+
+1. **`nowo-tech/instance-settings-bundle` moves from `require` to `suggest`** (announced in 1.3.0; REQ-ARCH-001
+   rule 8). With the settings-backed instance bucket (`instance_profile: null`), require it in your own
+   `composer.json` now; a config-pinned bucket does not need it.
+2. **`doctrine.entity_manager` defaults to a dedicated manager** instead of `null` (the default manager). Declare it
+   now ([To 1.5.0](#to-150), step 2) or set `entity_manager: null` explicitly to keep the 1.x behaviour.
+3. **`FileDelivery::respond()` is removed** (deprecated in 1.5.0): use `FileDeliveryInterface` +
+   `FileDeliveryResponder`.
+4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0): use
+   `uploadImage()`.
+
+## To 1.5.0
+
+Target **1.5.0**, from **1.4.x**: `composer update nowo-tech/storage-kit-bundle`. Architecture bar W3 (REQ-ARCH-001
+rules 1, 3 and 6): no schema change, no dependency removed, same routes, same responses.
+
+1. **GDPR erasure and the `storage` settings listener do not flush any more.** `StoredFilesPersonalData::erase()` /
+   `eraseUser()` and the `SettingsChangedEvent` listener now write their rows with DBAL `UPDATE` statements: the rows
+   end exactly as before (same columns, same values), but whatever **your** code left pending in the entity manager is
+   no longer committed by them. If some code relied on an erasure or a settings save to flush its own changes, flush
+   them yourself. Inside your transaction the statements join it, as before.
+2. **Recommended for new installs: a dedicated entity manager.** `doctrine.entity_manager` is supported now. Point it
+   at a manager on the **same connection** as your default one:
+
+   ```yaml
+   # config/packages/doctrine.yaml
+   doctrine:
+       orm:
+           default_entity_manager: default
+           entity_managers:
+               default:
+                   connection: default
+                   # your mappings / auto_mapping as before
+               storage_kit:
+                   connection: default
+   # config/packages/nowo_storage_kit.yaml (the Flex recipe ships this line commented out)
+   nowo_storage_kit:
+       doctrine:
+           entity_manager: storage_kit
+   ```
+
+   The bundle entities are then mapped on that manager only (also removed from `auto_mapping`), the admin and CLI
+   writes that still flush (profile save and test, bucket moves, purge, retired-profile cleanup, adoption) flush that
+   manager only, and the bundle clears it at the end of every request, Messenger message and console command.
+   Existing installs keep `null` (the default manager) unchanged — it stays the default in 1.x, and 2.0 changes the
+   default to a dedicated manager ([Planned for 2.0](#planned-for-20)); switching later needs no migration (same tables), but
+   your own code must not hold Doctrine relations to the bundle entities (reference files by `uuid`, as documented)
+   and must read them through the bundle's repositories or `doctrine.orm.storage_kit_entity_manager`.
+3. **Deprecated: `FileDelivery::respond()`** (removed in 2.0). Call the port and the adapter instead; the response is
+   the same (status, headers, bytes):
+
+   ```php
+   // before
+   $response = $fileDelivery->respond($file, 'preview');
+   // after: FileDeliveryInterface (by public id, framework-free) + the HttpFoundation adapter
+   $response = $responder->toResponse($delivery->deliver($file->getUuid(), 'preview'));
+   ```
+
+   `deliver()` throws `Download\FileNotDeliverable` where `respond()` threw a `NotFoundHttpException`. The download
+   controller now calls `FileDeliveryInterface`: alias or decorate that interface to change how files are served. A
+   decorator of the `FileDelivery` service id keeps decorating that id for code that calls it, but the controller no
+   longer goes through it (in 1.4 it required the final class, so no decorator could run there).
+4. **New ports (optional).** Type-hint `Reference\FileReferencesInterface`, `Download\StoredImageResolverInterface`,
+   `PersonalData\StoredFilesPersonalDataInterface` and `Download\FileDeliveryInterface` instead of the concrete
+   classes; all four are public service aliases.
+5. **Worker mode.** The request memos are now also cleared at `console.terminate`; nothing to configure.
 
 ## To 1.4.0
 

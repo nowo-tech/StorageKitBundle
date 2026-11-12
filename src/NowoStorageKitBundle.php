@@ -6,8 +6,10 @@ namespace Nowo\StorageKitBundle;
 
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\CsrfProtectionPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\DebugOnlySwitchesPass;
+use Nowo\StorageKitBundle\DependencyInjection\Compiler\FileDeliveryPortsPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\InstanceSettingsPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\MessengerIntegrationPass;
+use Nowo\StorageKitBundle\DependencyInjection\Compiler\StorageEntityManagerPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\TwigPathsPass;
 use Nowo\StorageKitBundle\DependencyInjection\NowoStorageKitExtension;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
@@ -31,8 +33,8 @@ final class NowoStorageKitBundle extends Bundle
     public const FORM_KIT_PROFILE = 'storage_kit';
 
     /**
-     * Registers the compiler passes: Twig paths, Messenger integration, CSRF fail-closed guard and the debug-only
-     * switches guard.
+     * Registers the compiler passes: Twig paths, Messenger integration, CSRF fail-closed guard, the debug-only switches
+     * guard, Instance Settings, the bundle entity manager and the download ports.
      */
     public function build(ContainerBuilder $container): void
     {
@@ -43,6 +45,11 @@ final class NowoStorageKitBundle extends Bundle
         $container->addCompilerPass(new CsrfProtectionPass());
         $container->addCompilerPass(new DebugOnlySwitchesPass());
         $container->addCompilerPass(new InstanceSettingsPass());
+        // 1.5: doctrine.entity_manager — fail fast on an unknown manager, then keep the mapping on it only.
+        $container->addCompilerPass(new StorageEntityManagerPass(checkOnly: true), PassConfig::TYPE_BEFORE_OPTIMIZATION, 10);
+        $container->addCompilerPass(new StorageEntityManagerPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION, -10);
+        // 1.5: which download path the controller calls (the host's port wins; a decorated FileDelivery keeps it).
+        $container->addCompilerPass(new FileDeliveryPortsPass(), PassConfig::TYPE_BEFORE_REMOVING);
     }
 
     /**

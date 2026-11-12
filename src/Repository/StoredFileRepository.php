@@ -126,6 +126,38 @@ final readonly class StoredFileRepository
     }
 
     /**
+     * The same page as {@see self::uploadedBy()} (same match, keyset and order), as identifiers only (1.5): no entity is
+     * loaded into the entity manager, for the DBAL erasure.
+     *
+     * @return list<array{id: int, referenced: bool}>
+     */
+    public function uploadedIdsBy(string $userIdentifier, int $afterId, int $limit, ?string $userKey = null): array
+    {
+        $query = $this->entityManager->manager()->createQueryBuilder()
+            ->select('f.id AS id')
+            ->addSelect('(SELECT COUNT(r.id) FROM ' . StoredFileReference::class . ' r WHERE r.file = f) AS refs')
+            ->from(StoredFile::class, 'f')
+            ->andWhere('f.id > :after')
+            ->setParameter('user', $userIdentifier)
+            ->setParameter('after', $afterId)
+            ->orderBy('f.id', 'ASC')
+            ->setMaxResults($limit);
+        if ($userKey === null || $userKey === '') {
+            $query->andWhere('f.uploadedBy = :user');
+        } else {
+            $query->andWhere('f.uploadedByKey = :key OR (f.uploadedByKey IS NULL AND f.uploadedBy = :user)')
+                ->setParameter('key', $userKey);
+        }
+        $files = [];
+        foreach ($query->getQuery()->getScalarResult() as $row) {
+            assert(is_array($row));
+            $files[] = ['id' => (int) $row['id'], 'referenced' => (int) $row['refs'] > 0];
+        }
+
+        return $files;
+    }
+
+    /**
      * What a profile holds (Storage page usage).
      *
      * @return array{files: int, bytes: int}

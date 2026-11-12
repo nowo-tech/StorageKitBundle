@@ -28,8 +28,11 @@ use Nowo\StorageKitBundle\DependencyInjection\Compiler\InstanceSettingsPass;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Doctrine\TablePrefixListener;
 use Nowo\StorageKitBundle\Download\FileDelivery;
+use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
+use Nowo\StorageKitBundle\Download\FileDeliveryResponder;
 use Nowo\StorageKitBundle\Download\FileUrls;
 use Nowo\StorageKitBundle\Download\StoredImageResolver;
+use Nowo\StorageKitBundle\Download\StoredImageResolverInterface;
 use Nowo\StorageKitBundle\EventListener\InstanceSettingsListener;
 use Nowo\StorageKitBundle\EventListener\RequestBoundaryListener;
 use Nowo\StorageKitBundle\EventListener\StorageKitAccessListener;
@@ -42,6 +45,7 @@ use Nowo\StorageKitBundle\Message\RunStorageSyncMessage;
 use Nowo\StorageKitBundle\MessageHandler\RunStorageSyncHandler;
 use Nowo\StorageKitBundle\NowoStorageKitBundle;
 use Nowo\StorageKitBundle\PersonalData\StoredFilesPersonalData;
+use Nowo\StorageKitBundle\PersonalData\StoredFilesPersonalDataInterface;
 use Nowo\StorageKitBundle\PersonalData\UploaderKeyResolverInterface;
 use Nowo\StorageKitBundle\PersonalData\UserIdUploaderKeyResolver;
 use Nowo\StorageKitBundle\Profile\ConfigProfileProviderInterface;
@@ -49,6 +53,7 @@ use Nowo\StorageKitBundle\Profile\ConfigProfiles;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Reference\FileReferenceListener;
 use Nowo\StorageKitBundle\Reference\FileReferences;
+use Nowo\StorageKitBundle\Reference\FileReferencesInterface;
 use Nowo\StorageKitBundle\Reference\FileReferenceSourceInterface;
 use Nowo\StorageKitBundle\Reference\FileUris;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
@@ -81,6 +86,7 @@ use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
+use Symfony\Component\Console\ConsoleEvents;
 use Symfony\Component\DependencyInjection\Argument\IteratorArgument;
 use Symfony\Component\DependencyInjection\Argument\TaggedIteratorArgument;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -94,6 +100,7 @@ use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\RateLimiter\Storage\CacheStorage;
 
 use function array_key_exists;
+use function array_key_first;
 use function interface_exists;
 use function is_array;
 use function is_bool;
@@ -128,6 +135,12 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
     /** Messenger's `WorkerMessageFailedEvent` (by name; audit LR-S-L2: a failed message is a boundary too). */
     public const WORKER_MESSAGE_FAILED = 'Symfony\\Component\\Messenger\\Event\\WorkerMessageFailedEvent';
 
+    /** Service id of the bundle's own download delivery (1.5; `FileDelivery` and `FileDeliveryInterface` are aliases). */
+    public const FILE_DELIVERY_ID = 'nowo_storage_kit.file_delivery';
+
+    /** Container parameter: `doctrine.entity_manager` (null = the default manager). */
+    public const ENTITY_MANAGER_PARAMETER = 'nowo_storage_kit.doctrine.entity_manager';
+
     /** Service id of the bounded DNS lookup of the SSRF guard. */
     public const DNS_LOOKUP_ID = 'nowo_storage_kit.dns_lookup';
 
@@ -145,19 +158,29 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
     public function prepend(ContainerBuilder $container): void
     {
         if ($container->hasExtension('doctrine')) {
-            $container->prependExtensionConfig('doctrine', [
-                'orm' => [
-                    'mappings' => [
-                        'NowoStorageKitBundle' => [
-                            'type'      => 'attribute',
-                            'dir'       => __DIR__ . '/../Entity',
-                            'prefix'    => 'Nowo\StorageKitBundle\Entity',
-                            'alias'     => 'NowoStorageKit',
-                            'is_bundle' => false,
-                        ],
+            $mappings = [
+                'mappings' => [
+                    'NowoStorageKitBundle' => [
+                        'type'      => 'attribute',
+                        'dir'       => __DIR__ . '/../Entity',
+                        'prefix'    => 'Nowo\StorageKitBundle\Entity',
+                        'alias'     => 'NowoStorageKit',
+                        'is_bundle' => false,
                     ],
                 ],
-            ]);
+            ];
+            // 1.5: on doctrine.entity_manager when the host declares it (pinning the host's own default so the
+            // prepended entry never becomes the default manager); StorageEntityManagerPass keeps it there only and
+            // fails on an undeclared manager. Null (default) or the single-manager shorthand: as before.
+            $entityManager = $this->rawEntityManager($container);
+            if ($entityManager === null || ($entityManager === 'default' && !$this->hostDeclaresEntityManagers($container))) {
+                $container->prependExtensionConfig('doctrine', ['orm' => $mappings]);
+            } elseif (($hostDefault = $this->hostDefaultEntityManager($container, $entityManager)) !== null) {
+                $container->prependExtensionConfig('doctrine', ['orm' => [
+                    'default_entity_manager' => $hostDefault,
+                    'entity_managers'        => [$entityManager => $mappings],
+                ]]);
+            }
         }
         $this->prependFormKitProfile($container);
     }
@@ -179,6 +202,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         }
 
         $container->setParameter('nowo_storage_kit.doctrine.table_prefix', $config['doctrine']['table_prefix']);
+        $container->setParameter(self::ENTITY_MANAGER_PARAMETER, $config['doctrine']['entity_manager']);
         $container->setParameter('nowo_storage_kit.web_ui.enabled', $config['web_ui']['enabled']);
         $container->setParameter('nowo_storage_kit.upload.enabled', $config['upload']['enabled']);
         $container->setParameter('nowo_storage_kit.scopes.enabled', $config['scopes']['enabled']);
@@ -208,7 +232,10 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             ->addTag('kernel.event_listener', ['event' => KernelEvents::REQUEST, 'method' => 'onKernelRequest', 'priority' => 4096])
             ->addTag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onBoundary'])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_HANDLED, 'method' => 'onBoundary'])
-            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_FAILED, 'method' => 'onBoundary']));
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_FAILED, 'method' => 'onBoundary'])
+            // 1.5: the end of the outermost console command is a boundary too (a long command calls reset() per item itself).
+            ->addTag('kernel.event_listener', ['event' => ConsoleEvents::COMMAND, 'method' => 'onConsoleCommand'])
+            ->addTag('kernel.event_listener', ['event' => ConsoleEvents::TERMINATE, 'method' => 'onConsoleTerminate']));
     }
 
     /**
@@ -340,6 +367,8 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             ->setPublic(true)->addTag('kernel.reset', ['method' => 'reset']));
         $container->setDefinition(FileUris::class, (new Definition(FileUris::class, [$config['uri_scheme'], $config['upload']['path_prefix']]))->setPublic(true));
         $container->setDefinition(FileReferences::class, (new Definition(FileReferences::class, [new Reference(StorageEntityManager::class), new Reference(FileUris::class)]))->setPublic(true));
+        // 1.5 (rule 1): the reference port.
+        $container->setAlias(FileReferencesInterface::class, FileReferences::class)->setPublic(true);
         $container->setDefinition(FileReferenceListener::class, (new Definition(FileReferenceListener::class, [
             new Reference(FileReferences::class),
             new Reference(FileUris::class),
@@ -368,18 +397,26 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         // 1.3 (rule 1): the upload port (DTO return, after-commit audit).
         $container->setAlias(ImageUploaderInterface::class, ImageUploader::class)->setPublic(true);
         $container->setDefinition(FileUrls::class, (new Definition(FileUrls::class, [new Reference('router')]))->setPublic(true));
-        $container->setDefinition(FileDelivery::class, (new Definition(FileDelivery::class, [
+        $container->setDefinition(self::FILE_DELIVERY_ID, new Definition(FileDelivery::class, [
             new Reference(StorageProfiles::class),
             new Reference(FileStorage::class),
             $config['download']['url_ttl'],
             $config['download']['disposition'],
-        ]))->setPublic(true));
+            new Reference(StoredFileRepository::class),
+        ]));
+        $container->setAlias(FileDelivery::class, self::FILE_DELIVERY_ID)->setPublic(true);
+        // 1.5 (rule 3): the framework-free download port and its HttpFoundation adapter. A host alias of the port wins
+        // (FileDeliveryPortsPass checks the service behind it).
+        $container->setAlias(FileDeliveryInterface::class, self::FILE_DELIVERY_ID)->setPublic(true);
+        $container->setDefinition(FileDeliveryResponder::class, (new Definition(FileDeliveryResponder::class))->setPublic(true));
         $container->setDefinition(StoredImageResolver::class, (new Definition(StoredImageResolver::class, [
             new Reference(StoredFileRepository::class),
             new Reference(FileContexts::class),
             new Reference(FileUrls::class),
             new Reference(FileUris::class),
         ]))->setPublic(true));
+        // 1.5 (rule 1): the renderer port.
+        $container->setAlias(StoredImageResolverInterface::class, StoredImageResolver::class)->setPublic(true);
         $container->setDefinition(StoredFilesPersonalData::class, (new Definition(StoredFilesPersonalData::class, [
             new Reference(StoredFileRepository::class),
             new Reference(StorageEntityManager::class),
@@ -387,6 +424,8 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             new Reference(AuditRecorder::class),
             new Reference(UploaderKeyResolverInterface::class),
         ]))->setPublic(true));
+        // 1.5 (rule 1): the GDPR port (strings in, scalars out; the erasure never flushes).
+        $container->setAlias(StoredFilesPersonalDataInterface::class, StoredFilesPersonalData::class)->setPublic(true);
         $container->setDefinition(StorageCspSources::class, (new Definition(StorageCspSources::class, [new Reference(ConfigProfileProviderInterface::class)]))->setPublic(true));
         if (interface_exists(CspSourceProviderInterface::class)) {
             $container->setDefinition(StorageCspSourceProvider::class, (new Definition(StorageCspSourceProvider::class, [new Reference(StorageCspSources::class)]))
@@ -557,7 +596,8 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
                 new Reference(AccessGuard::class),
                 new Reference(StoredFileRepository::class),
                 new Reference(FileContexts::class),
-                new Reference(FileDelivery::class),
+                new Reference(FileDeliveryInterface::class),
+                new Reference(FileDeliveryResponder::class),
             ]))->setAutoconfigured(false)->setPublic(true)->addTag('controller.service_arguments'));
         }
 
@@ -657,6 +697,61 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
                 throw new InvalidConfigurationException(sprintf('nowo_storage_kit.%s must be a literal boolean (true or false); environment placeholders such as %%env(bool:...)%% are not supported for these switches.', $path));
             }
         }
+    }
+
+    /**
+     * `doctrine.entity_manager` from the raw configs (prepend runs before the configuration is processed).
+     */
+    private function rawEntityManager(ContainerBuilder $container): ?string
+    {
+        $name = null;
+        foreach ($container->getExtensionConfig(Configuration::ALIAS) as $config) {
+            if (isset($config['doctrine']) && is_array($config['doctrine']) && array_key_exists('entity_manager', $config['doctrine'])) {
+                $value = $config['doctrine']['entity_manager'];
+                $name  = is_string($value) && $value !== '' ? $value : null;
+            }
+        }
+
+        return $name;
+    }
+
+    /**
+     * Whether the host declares `doctrine.orm.entity_managers` (else it uses the single-manager shorthand).
+     */
+    private function hostDeclaresEntityManagers(ContainerBuilder $container): bool
+    {
+        foreach ($container->getExtensionConfig('doctrine') as $config) {
+            $orm = is_array($config['orm'] ?? null) ? $config['orm'] : [];
+            if (is_array($orm['entity_managers'] ?? null) && $orm['entity_managers'] !== []) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The host's default entity manager (its `default_entity_manager`, else the first declared one) when the host
+     * declares `$name` under `doctrine.orm.entity_managers`; null otherwise (the pass then reports the unknown name).
+     */
+    private function hostDefaultEntityManager(ContainerBuilder $container, string $name): ?string
+    {
+        $declared = false;
+        $default  = null;
+        $first    = null;
+        foreach ($container->getExtensionConfig('doctrine') as $config) {
+            $orm = is_array($config['orm'] ?? null) ? $config['orm'] : [];
+            if (is_string($orm['default_entity_manager'] ?? null)) {
+                $default = $orm['default_entity_manager'];
+            }
+            $managers = $orm['entity_managers'] ?? null;
+            if (is_array($managers) && $managers !== []) {
+                $first ??= (string) array_key_first($managers);
+                $declared = $declared || isset($managers[$name]);
+            }
+        }
+
+        return $declared ? ($default ?? $first) : null;
     }
 
     private function hasBundle(ContainerBuilder $container, string $name): bool

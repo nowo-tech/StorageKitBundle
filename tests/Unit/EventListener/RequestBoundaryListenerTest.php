@@ -33,4 +33,26 @@ final class RequestBoundaryListenerTest extends TestCase
         $listener->onBoundary();
         self::assertSame(2, $memo->resets);
     }
+
+    public function testOnlyTheOutermostConsoleCommandEndIsABoundary(): void
+    {
+        $memo = new class implements ResetInterface {
+            public int $resets = 0;
+
+            public function reset(): void
+            {
+                ++$this->resets;
+            }
+        };
+        $listener = new RequestBoundaryListener([$memo]);
+
+        $listener->onConsoleCommand();
+        $listener->onConsoleCommand();
+        $listener->onConsoleTerminate();
+        self::assertSame(0, $memo->resets, 'a command run in-process by another one keeps the outer memos');
+        $listener->onConsoleTerminate();
+        self::assertSame(1, $memo->resets);
+        $listener->onConsoleTerminate();
+        self::assertSame(2, $memo->resets, 'an unmatched terminate never goes below zero');
+    }
 }

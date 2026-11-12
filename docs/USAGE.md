@@ -3,7 +3,10 @@
 ## Table of contents
 
 - [How it fits together](#how-it-fits-together)
-- [Using it from a DDD / hexagonal application](#using-it-from-a-ddd--hexagonal-application)
+- [Standard Symfony host](#standard-symfony-host)
+- [DDD / hexagonal host](#ddd--hexagonal-host)
+  - [The ports (1.5)](#the-ports-15)
+  - [A dedicated entity manager (1.5)](#a-dedicated-entity-manager-15)
 - [The instance bucket](#the-instance-bucket)
   - [The `storage` settings section](#the-storage-settings-section)
   - [A bucket from the configuration](#a-bucket-from-the-configuration)
@@ -49,7 +52,22 @@
 - **References** (`StoredFileReference` rows) record which text points at which file; a file no text points at is an
   orphan, deleted by `nowo:storage-kit:purge` after `purge.retention_days`.
 
-## Using it from a DDD / hexagonal application
+## Standard Symfony host
+
+Nothing to configure beyond the [installation](INSTALLATION.md): register `NowoInstanceSettingsBundle` (installed with
+this package until 2.0, which moves it to `suggest`: require `nowo-tech/instance-settings-bundle` yourself) and the
+instance bucket is the
+`storage` settings section; the bundle entities are attribute-mapped on your default entity manager; your texts are
+Doctrine entities whose `FileReferenceSourceInterface` makes the references automatic; downloads, rendering and GDPR
+hooks are services you inject (`StoredImageResolver`, `StoredFilesPersonalData::exportUser()` / `eraseUser()`).
+
+Host-called writes never flush your entity manager: uploads (1.3) and profile rows (1.4) are DBAL inserts, references
+are DBAL statements, and since 1.5 the GDPR erasure and the settings listener are DBAL updates. The admin pages and the
+console commands (profile save and test, bucket moves, purge) still flush the bundle's manager; with the default
+`doctrine.entity_manager: null` that is your default one, so for **new installs** give the bundle its own manager
+([below](#a-dedicated-entity-manager-15)); existing installs can keep `null`, the 1.x default (2.0 changes it).
+
+## DDD / hexagonal host
 
 StorageKitBundle is a **bounded context with its own persistence**: it owns `StorageProfile`, `StoredFile`,
 `StoredFileReference` and `StorageSync` (in the entity manager set by `doctrine.entity_manager`) and talks to S3
@@ -110,16 +128,61 @@ worker mode); a name must keep meaning the same bucket, because files point at i
 bundle's own persistence (files, references, profiles), not configuration. The first upload creates the bucket's
 profile row with a DBAL insert, without flushing your unit of work.
 
+### The ports (1.5)
+
+Your application services can depend on interfaces only (strings, value objects and DTOs in and out; no entity, no
+HttpFoundation type). All are public service aliases:
+
+| Port | Use |
+|---|---|
+| `Upload\ImageUploaderInterface` (1.3) | `uploadImage()` → `StoredFileView`; `afterCommit()` inside your transaction |
+| `Reference\FileReferencesInterface` | `sync($type, $id, $text, [$contextType, $contextId])`, `forget($type, $ids)` for texts that are not Doctrine entities |
+| `Download\StoredImageResolverInterface` | `resolve($uuids, $viewer)` / `resolveText($text, $viewer)` → `StoredImage` VOs for your renderer |
+| `Download\FileDeliveryInterface` | `deliver($uuid, $variant)` → `DeliverableFile` (redirect URL or byte stream, headers); `FileDeliveryResponder` turns it into an HttpFoundation response, or write your own adapter (PSR-7, …). Call it only after your access check |
+| `PersonalData\StoredFilesPersonalDataInterface` | `export($identifier, $key)` / `erase($identifier, $key)` by plain strings; the erasure never flushes |
+
+`DeliverableFile` keeps the pre-signed URL and the bucket stream out of its properties (dumps, logs, JSON and
+serialization never show them). Never log `location()`: it grants access to the object until it expires.
+
+### A dedicated entity manager (1.5)
+
+Map the bundle entities on their own manager, on the same connection as yours, so no bundle write — admin and CLI
+included — ever flushes your unit of work:
+
+```yaml
+doctrine:
+    orm:
+        default_entity_manager: default
+        entity_managers:
+            default:
+                connection: default
+                # your mappings (XML for a DDD domain) / auto_mapping
+            storage_kit:
+                connection: default
+nowo_storage_kit:
+    doctrine:
+        entity_manager: storage_kit
+```
+
+The bundle prepends its mapping to that manager only and removes it from the others (`auto_mapping` included); the
+build fails when the manager is not declared. The bundle recovers the manager when a failed write closed it and clears
+it at the start and at the end of every request, Messenger message and outermost console command (FrankenPHP worker
+mode with kernel reset false); it never clears or resets yours. Keep the same connection: uploads, references, the
+erasure and the settings writes then share your transaction (each as a savepoint, so a failing bundle statement never
+spoils it); another connection is reported at build time.
+Reference the files by `uuid` (`storage-file:<uuid>`), never with a Doctrine relation to `StoredFile`: entities of two
+managers cannot be related.
+
 ### Texts that are not Doctrine entities
 
 `FileReferenceListener` records references automatically only for Doctrine entities of a registered source class.
 If your texts are written another way (DBAL, an event-sourced aggregate, another entity manager), call
-`Nowo\StorageKitBundle\Reference\FileReferences` yourself, for example from a domain-event handler:
+`Nowo\StorageKitBundle\Reference\FileReferencesInterface` yourself, for example from a domain-event handler:
 
 ```php
 final readonly class SyncCommentFileReferences
 {
-    public function __construct(private FileReferences $references) {}
+    public function __construct(private FileReferencesInterface $references) {}
 
     public function __invoke(CommentSaved $event): void
     {
@@ -128,7 +191,7 @@ final readonly class SyncCommentFileReferences
 }
 ```
 
-Use `FileReferences::forget('comment', [$id])` when a text is deleted.
+Use `forget('comment', [$id])` when a text is deleted.
 
 ### Uploading from your code (1.3)
 
@@ -155,25 +218,27 @@ scalar data only, so it maps directly to your audit log or domain events.
 
 ### Personal data
 
-Call `StoredFilesPersonalData::exportUser()` / `eraseUser()` from your own GDPR use case; they match the stable
+Call `StoredFilesPersonalDataInterface::export()` / `erase()` (plain strings: identifier and stable key) or
+`StoredFilesPersonalData::exportUser()` / `eraseUser()` from your own GDPR use case; they match the stable
 uploader key (`<user class>:<id>` by default), so an e-mail change does not orphan the person's files (see
 [Personal data](#personal-data)). If class and id are not what identifies a person (tenants sharing a user class with
 overlapping ids, re-created users), implement `UploaderKeyResolverInterface`.
 
 ### Known limitations
 
-- The explicit `FileReferences::sync()` path is not a published interface yet, and `FileReferenceSourceInterface`
-  still asks for `entityClass()` / `field()`.
+- `FileReferenceSourceInterface` still asks for `entityClass()` / `field()` (use `FileReferencesInterface` for texts
+  that are not Doctrine entities).
 - Files uploaded before 1.2.0 carry no uploader key until you run `nowo:storage-kit:backfill-uploader-keys`
   ([UPGRADING](UPGRADING.md#to-120)); until then they are matched by identifier as in 1.1.
-- `ImageUploader::upload()` still returns the `StoredFile` entity (deprecated since 1.3; use `uploadImage()`).
+- `ImageUploader::upload()` still returns the `StoredFile` entity (deprecated since 1.3; use `uploadImage()`), and
+  `FileDelivery::respond()` still returns an HttpFoundation response (deprecated since 1.5; use
+  `FileDeliveryInterface`).
+- With `doctrine.entity_manager: null` (the 1.x default, kept for existing installs; 2.0 changes it) the admin and CLI
+  writes flush your default manager; set a dedicated one ([above](#a-dedicated-entity-manager-15)).
 - `nowo-tech/instance-settings-bundle` is still installed through this package's `require` (it moves to `suggest` in
   2.0), although only the settings-backed instance bucket (`instance_profile: null`) needs it registered; a
   config-pinned bucket (from `profiles` or `config_profile_provider`) works without it. Relying on the implicit install
   is deprecated: require it yourself.
-- Admin writes (profiles, move, sync, purge, settings, GDPR erase) still flush the bundle's entity manager, which is
-  your default one. A dedicated manager is **not supported yet**: `doctrine.entity_manager` does not move the entity
-  mapping (it stays on the default manager), so do not set it; real support is planned for 2.x.
 
 ## The instance bucket
 
@@ -362,7 +427,8 @@ replaces inline images with `[image]` for texts sent outside the application (e-
 
 `GET <upload.path_prefix>/files/{uuid}/{original|preview|thumb}` answers **404** unless the viewer may read the file's
 context — the same answer for a missing and a forbidden file; anonymous viewers are asked to the context too. A missing
-variant falls back to the original. Then:
+variant falls back to the original. Then the controller asks the download port (`FileDeliveryInterface`, 1.5; alias or
+decorate it to serve files your way) and `FileDeliveryResponder` builds the response:
 
 - **proxy** (every database / settings bucket, and config profiles with `delivery: proxy`): the application streams the
   object as it arrives from a ranged `GetObject` (`Range: bytes=0-<stored size − 1>`; `Content-Length` = the size
@@ -587,8 +653,9 @@ final class TenantUploaderKeys implements UploaderKeyResolverInterface
   still shows it, created at and an absolute link to the original (it answers while the user may still read the
   context);
 - `eraseUser(UserInterface $user): int` — files a kept text still shows lose their name, uploader and key; files no
-  text shows are expired for the next purge. No bucket call (erasers usually run in one transaction). Audited as
-  `files_erased`.
+  text shows are expired for the next purge. No bucket call (erasers usually run in one transaction) and, since 1.5, no
+  flush: the rows are changed with DBAL `UPDATE` statements, so nothing your code left pending is committed. Audited
+  as `files_erased`.
 
 Both match the files stored with the user's key, plus the files stored **without** a key (before 1.2.0, or by a user
 without id) under the user's current identifier. A file stored with another key is never matched by identifier, so a

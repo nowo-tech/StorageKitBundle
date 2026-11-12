@@ -6,6 +6,9 @@ namespace Nowo\StorageKitBundle\Controller;
 
 use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Download\FileDelivery;
+use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
+use Nowo\StorageKitBundle\Download\FileDeliveryResponder;
+use Nowo\StorageKitBundle\Download\FileNotDeliverable;
 use Nowo\StorageKitBundle\Download\FileUrls;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Repository\StoredFileRepository;
@@ -20,8 +23,9 @@ use function strtolower;
 /**
  * `GET <upload.path_prefix>/files/{uuid}/{variant}` — 404 unless the viewer may read the context the file belongs to
  * (no difference between missing and forbidden; anonymous viewers are asked to the context too), then
- * {@see FileDelivery}: a pre-signed redirect for redirect-delivered config profiles, the bytes otherwise (sandboxed,
- * `nosniff`, configured disposition).
+ * the download port ({@see FileDeliveryInterface}, {@see FileDelivery} unless the host aliases its own): a pre-signed
+ * redirect for redirect-delivered config profiles, the bytes otherwise (sandboxed, `nosniff`, configured disposition),
+ * turned into a response by {@see FileDeliveryResponder} (1.5).
  */
 final class FileDownloadController
 {
@@ -32,7 +36,8 @@ final class FileDownloadController
         private readonly AccessGuard $guard,
         private readonly StoredFileRepository $files,
         private readonly FileContexts $contexts,
-        private readonly FileDelivery $delivery,
+        private readonly FileDeliveryInterface $delivery,
+        private readonly FileDeliveryResponder $responder = new FileDeliveryResponder(),
     ) {
     }
 
@@ -48,6 +53,10 @@ final class FileDownloadController
             throw new NotFoundHttpException();
         }
 
-        return $this->delivery->respond($file, $variant);
+        try {
+            return $this->responder->toResponse($this->delivery->deliver($uuid, $variant));
+        } catch (FileNotDeliverable $e) {
+            throw new NotFoundHttpException('', $e); // no message: the same 404 as 1.4
+        }
     }
 }
