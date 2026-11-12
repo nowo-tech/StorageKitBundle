@@ -242,6 +242,17 @@ backfill).
 Orphans are deleted after `purge.retention_days`. GIF and animated WebP keep their embedded metadata (see residual
 risks).
 
+**Exact uploader matching (house rule LQ, 1.5.2).** The export, the erasure and the backfill compare the uploader
+identifier and key byte for byte: every row the SQL returns is matched again with `===`
+(`UploaderIdentity::matches()`), uploads never store an identifier or key with leading / trailing white space, control,
+format or separator characters, invalid UTF-8 or more than 180 characters, and on MySQL / MariaDB both columns use a
+binary NO PAD collation (`utf8mb4_0900_bin`, MariaDB `utf8mb4_nopad_bin`; `utf8mb4_bin` on MySQL 5.7, covered by the
+re-check). The backfill ignores a user the provider returns under another identifier.
+
+| Affected | Fixed | Conditions |
+| --- | --- | --- |
+| 1.0.0 – 1.5.1 | 1.5.2 | MySQL or MariaDB with a case- / accent-insensitive default collation for `storage_kit_file` (every stock default: MySQL `utf8mb4_0900_ai_ci`, `utf8mb4_unicode_ci`, `utf8mb4_general_ci`; MariaDB `utf8mb4_uca1400_ai_ci`, `utf8mb4_general_ci`) **and** user identifiers (or custom uploader keys) that differ only by case, accents or — on PAD SPACE collations (all of these except `utf8mb4_0900_ai_ci`) — trailing spaces, for example a provider whose identifiers are case-sensitive. Impact: the GDPR export of one such user listed the others' files (name, size, context, a download link the context still checks), and the erasure anonymised them and handed the unreferenced ones to the purge. From 1.2.0 the default uploader key (`<class>:<id>`) narrows this to files stored without a key, unless ids are strings that differ by case; the backfill (1.2.0+) could also skip a user's files or stamp a look-alike's files with that user's key. PostgreSQL and SQLite are not affected. |
+
 ## Logging and audit
 
 - `warning` on a failed upload or test (scrubbed message), `info` audit lines (`StorageAuditEvent`: action, scope,

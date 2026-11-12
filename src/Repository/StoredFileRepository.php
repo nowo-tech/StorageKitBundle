@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Repository;
 
+use Doctrine\ORM\QueryBuilder;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
+use Nowo\StorageKitBundle\PersonalData\UploaderIdentity;
 
 use function array_slice;
 use function array_unique;
 use function array_values;
 use function assert;
+use function count;
 use function is_array;
+use function is_scalar;
 
 /**
  * Queries of {@see StoredFile}. Every list is bounded.
@@ -96,45 +100,61 @@ final readonly class StoredFileRepository
      * `$userIdentifier`; a file stored with another key is never matched by identifier (the identifier may have been
      * given to someone else since).
      *
+     * Since 1.5.2 every row the SQL returns is matched again with `===` ({@see UploaderIdentity::matches()}): on a
+     * case-, accent- or trailing-space-insensitive collation `Alice`, `álice` and `alice ` are not `alice`. A page may
+     * then hold fewer than `$limit` files; it is empty only when no file after `$afterId` matches.
+     *
      * @return list<array{file: StoredFile, referenced: bool}>
      */
     public function uploadedBy(string $userIdentifier, int $afterId, int $limit, ?string $userKey = null): array
     {
-        $query = $this->entityManager->manager()->createQueryBuilder()
-            ->select('f')
-            ->addSelect('(SELECT COUNT(r.id) FROM ' . StoredFileReference::class . ' r WHERE r.file = f) AS refs')
-            ->from(StoredFile::class, 'f')
-            ->andWhere('f.id > :after')
-            ->setParameter('user', $userIdentifier)
-            ->setParameter('after', $afterId)
-            ->orderBy('f.id', 'ASC')
-            ->setMaxResults($limit);
-        if ($userKey === null || $userKey === '') {
-            $query->andWhere('f.uploadedBy = :user');
-        } else {
-            $query->andWhere('f.uploadedByKey = :key OR (f.uploadedByKey IS NULL AND f.uploadedBy = :user)')
-                ->setParameter('key', $userKey);
-        }
-        $rows  = $query->getQuery()->getResult();
         $files = [];
-        foreach ($rows as $row) {
-            assert(is_array($row) && $row[0] instanceof StoredFile);
-            $files[] = ['file' => $row[0], 'referenced' => (int) $row['refs'] > 0];
-        }
+        do {
+            $rows = $this->uploaderQuery('f', $userIdentifier, $afterId, $limit, $userKey)->getQuery()->getResult();
+            foreach ($rows as $row) {
+                assert(is_array($row) && $row[0] instanceof StoredFile);
+                $file    = $row[0];
+                $afterId = (int) $file->getId();
+                if (UploaderIdentity::matches($file->getUploadedBy(), $file->getUploadedByKey(), $userIdentifier, $userKey)) {
+                    $files[] = ['file' => $file, 'referenced' => (int) $row['refs'] > 0];
+                }
+            }
+            // A full page of look-alikes only: read on, an empty page would end the caller's walk.
+        } while ($files === [] && count($rows) === $limit);
 
         return $files;
     }
 
     /**
-     * The same page as {@see self::uploadedBy()} (same match, keyset and order), as identifiers only (1.5): no entity is
-     * loaded into the entity manager, for the DBAL erasure.
+     * The same page as {@see self::uploadedBy()} (same match, keyset, order and `===` re-check), as identifiers only
+     * (1.5): no entity is loaded into the entity manager, for the DBAL erasure.
      *
      * @return list<array{id: int, referenced: bool}>
      */
     public function uploadedIdsBy(string $userIdentifier, int $afterId, int $limit, ?string $userKey = null): array
     {
+        $files = [];
+        do {
+            $rows = $this->uploaderQuery('f.id AS id, f.uploadedBy AS uploadedBy, f.uploadedByKey AS uploadedByKey', $userIdentifier, $afterId, $limit, $userKey)->getQuery()->getScalarResult();
+            foreach ($rows as $row) {
+                assert(is_array($row));
+                $afterId = (int) $row['id'];
+                if (UploaderIdentity::matches($this->nullableString($row['uploadedBy']), $this->nullableString($row['uploadedByKey']), $userIdentifier, $userKey)) {
+                    $files[] = ['id' => $afterId, 'referenced' => (int) $row['refs'] > 0];
+                }
+            }
+        } while ($files === [] && count($rows) === $limit);
+
+        return $files;
+    }
+
+    /**
+     * The SQL pre-filter of {@see self::uploadedBy()} / {@see self::uploadedIdsBy()} (re-checked in PHP).
+     */
+    private function uploaderQuery(string $select, string $userIdentifier, int $afterId, int $limit, ?string $userKey): QueryBuilder
+    {
         $query = $this->entityManager->manager()->createQueryBuilder()
-            ->select('f.id AS id')
+            ->select($select)
             ->addSelect('(SELECT COUNT(r.id) FROM ' . StoredFileReference::class . ' r WHERE r.file = f) AS refs')
             ->from(StoredFile::class, 'f')
             ->andWhere('f.id > :after')
@@ -148,13 +168,13 @@ final readonly class StoredFileRepository
             $query->andWhere('f.uploadedByKey = :key OR (f.uploadedByKey IS NULL AND f.uploadedBy = :user)')
                 ->setParameter('key', $userKey);
         }
-        $files = [];
-        foreach ($query->getQuery()->getScalarResult() as $row) {
-            assert(is_array($row));
-            $files[] = ['id' => (int) $row['id'], 'referenced' => (int) $row['refs'] > 0];
-        }
 
-        return $files;
+        return $query;
+    }
+
+    private function nullableString(mixed $value): ?string
+    {
+        return is_scalar($value) ? (string) $value : null;
     }
 
     /**

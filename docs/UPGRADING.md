@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Planned for 2.0](#planned-for-20)
+- [To 1.5.2](#to-152)
 - [To 1.5.1](#to-151)
 - [To 1.5.0](#to-150)
 - [To 1.4.0](#to-140)
@@ -29,6 +30,63 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
    `FileDeliveryResponder`.
 4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0): use
    `uploadImage()`.
+
+## To 1.5.2
+
+Target **1.5.2**, from **1.5.1** (or any 1.x): `composer update nowo-tech/storage-kit-bundle`. Security fix for
+look-alike uploader identifiers on MySQL / MariaDB (see the CHANGELOG): the GDPR export / erasure and the backfill now
+match `uploaded_by` / `uploaded_by_key` byte for byte. No configuration change, no code change. PostgreSQL and SQLite
+hosts: nothing to do (the new collation listener does not touch them).
+
+1. **Schema (MySQL / MariaDB).** The bundle now generates a binary NO PAD collation for `storage_kit_file.uploaded_by`
+   and `uploaded_by_key`, so `doctrine:migrations:diff` (or `doctrine:schema:update`) produces this change. Run it, or
+   write the migration yourself (add your `doctrine.table_prefix` to the table name):
+
+   ```sql
+   -- MySQL 8.0 / 8.4
+   ALTER TABLE storage_kit_file
+     MODIFY uploaded_by VARCHAR(180) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin DEFAULT NULL,
+     MODIFY uploaded_by_key VARCHAR(180) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin DEFAULT NULL;
+   -- MariaDB: COLLATE utf8mb4_nopad_bin; MySQL 5.7: COLLATE utf8mb4_bin
+   ```
+
+   The statement rewrites the table and its `idx_storage_kit_file_uploader*` indexes (no unique key is involved, so it
+   cannot fail on duplicates); on a large table run it in a maintenance window or with an online schema tool. Until it
+   runs, the PHP re-check alone keeps the export and the erasure exact (the SQL pre-filter just reads look-alike rows
+   and drops them).
+2. **Existing look-alike rows.** The `ALTER` changes no data. Rows that collide only under the old collation become
+   distinct, which is what you want: each person's export and erasure now finds only their own files. Find the families
+   that were affected:
+
+   ```sql
+   SELECT uploaded_by COLLATE utf8mb4_0900_ai_ci AS family,
+          COUNT(DISTINCT CAST(uploaded_by AS BINARY)) AS identifiers,
+          COUNT(DISTINCT uploaded_by_key) AS keys_used
+   FROM storage_kit_file
+   WHERE uploaded_by IS NOT NULL
+   GROUP BY family
+   HAVING identifiers > 1;
+   -- MariaDB: COLLATE utf8mb4_uca1400_ai_ci (or your old collation)
+   ```
+
+   - **If you ran `nowo:storage-kit:backfill-uploader-keys` before 1.5.2**, a family may hold rows of one identifier
+     stamped with another identifier's key (for example `Alice`'s files with `alice`'s key): the keyed export and
+     erasure of `alice` would keep including them. Check the families above: for each identifier whose rows carry a
+     key that is not its own user's key, reset those rows and run the backfill again (it now keys each exact
+     identifier with its own user, and skips a user the provider loads under another identifier):
+
+     ```sql
+     UPDATE storage_kit_file SET uploaded_by_key = NULL
+     WHERE CAST(uploaded_by AS BINARY) = CAST('Alice' AS BINARY) AND uploaded_by_key = 'App\\Entity\\User:7';
+     ```
+   - **If an erasure ran for a member of a family before 1.5.2**, the other members' files may already be anonymised
+     (`original_name` set to the anonymous name, uploader cleared) and, when no text showed them, purged. That cannot
+     be undone from the bundle; the `files_erased` audit events tell you when erasures ran.
+3. **Uploads with an unusual identifier.** An uploader identifier (or key) with leading / trailing white space, a
+   control, zero-width or bidi character, invalid UTF-8 or more than 180 characters is no longer stored (the column
+   stays `NULL`); before, a long identifier was cut to 180 characters. Such files are found by the uploader key when
+   there is one, otherwise not at all by the GDPR export / erasure: give such users a usable `getId()` (or your own
+   `personal_data.uploader_key_resolver`).
 
 ## To 1.5.1
 
@@ -206,7 +264,9 @@ the former owner's files. Each upload now also stores a stable **uploader key** 
    Do **not** use SQL for UUID / ULID ids: they are stored as `BINARY(16)` / BLOB (MySQL, MariaDB, SQLite) or as
    RFC 4122 text for a ULID (PostgreSQL), never the string `getId()` returns, so every backfilled row would get a key
    that never matches and would leave the export / erasure entirely. The join column must be unique; its collation
-   decides case sensitivity. Identifiers longer than 180 characters were cut at upload and never match.
+   decides case sensitivity: on MySQL / MariaDB a `*_ci` (or PAD SPACE) comparison stamps `Alice`'s files with
+   `alice`'s key, so compare `CAST(u.email AS BINARY) = CAST(f.uploaded_by AS BINARY)` (see [To 1.5.2](#to-152)).
+   Identifiers longer than 180 characters were cut at upload and never match.
 
    Files whose uploader already changed identifier before the backfill cannot be matched: run `export()` / `erase()`
    once per past identifier of the person. Rows left without a key keep working as in 1.1 (matched by identifier).

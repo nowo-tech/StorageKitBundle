@@ -11,6 +11,7 @@ use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StoredFile;
+use Nowo\StorageKitBundle\PersonalData\UploaderIdentity;
 use Nowo\StorageKitBundle\PersonalData\UploaderKeyResolverInterface;
 use Nowo\StorageKitBundle\PersonalData\UserIdUploaderKeyResolver;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
@@ -156,7 +157,8 @@ final readonly class ImageUploader implements ImageUploaderInterface
                 $written[] = $variantKey;
                 $file->addVariant($name, ['key' => $variantKey, 'size' => strlen($variant['bytes']), 'width' => $variant['width'], 'height' => $variant['height'], 'mime' => $variant['mime']]);
             }
-            $file->setUploadedBy($user instanceof UserInterface ? mb_substr($user->getUserIdentifier(), 0, 180) : null);
+            // House rule LQ (1.5.2): a padded, control-character or over-long identifier is not stored (never trimmed or cut).
+            $file->setUploadedBy($user instanceof UserInterface ? UploaderIdentity::storable($user->getUserIdentifier()) : null);
             $file->setUploadedByKey($this->validKey($this->uploaderKeys->keyOf($user)));
             $file->setOwner($target->owner);
             $file->markOrphaned(new DateTimeImmutable());
@@ -194,11 +196,12 @@ final readonly class ImageUploader implements ImageUploaderInterface
     }
 
     /**
-     * A resolver's key, or null when it is empty or too long (never cut: a cut key could match another person).
+     * A resolver's key, or null when it is empty, too long (never cut: a cut key could match another person), padded or
+     * holds control / format characters (1.5.2, {@see UploaderIdentity::storable()}).
      */
     private function validKey(?string $key): ?string
     {
-        return $key === null || $key === '' || strlen($key) > UploaderKeyResolverInterface::MAX_LENGTH ? null : $key;
+        return $key === null || strlen($key) > UploaderKeyResolverInterface::MAX_LENGTH ? null : UploaderIdentity::storable($key);
     }
 
     /**
