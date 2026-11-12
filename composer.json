@@ -144,8 +144,8 @@
     "minimum-stability": "stable",
     "prefer-stable": true,
     "scripts": {
-        "test": "php -d memory_limit=512M vendor/bin/phpunit --color=always",
-        "test-coverage": "php -d memory_limit=512M vendor/bin/phpunit --color=always --coverage-html coverage --coverage-clover coverage.xml --coverage-text",
+        "test": "php -d memory_limit=1024M vendor/bin/phpunit --color=always",
+        "test-coverage": "php -d memory_limit=1024M vendor/bin/phpunit --color=always --coverage-html coverage --coverage-clover coverage.xml --coverage-text",
         "test-coverage-100": [
             "@test-coverage",
             "php .scripts/check-coverage.php coverage.xml --min-percent=100"
@@ -165,8 +165,8 @@
         "igor": "igor-php --no-agent ."
     },
     "scripts-descriptions": {
-        "test": "Run PHPUnit tests (memory_limit 512M)",
-        "test-coverage": "Run PHPUnit tests with code coverage (memory_limit 512M)",
+        "test": "Run PHPUnit tests (memory_limit 1024M)",
+        "test-coverage": "Run PHPUnit tests with code coverage (memory_limit 1024M)",
         "test-coverage-100": "Run test-coverage and fail if statement or element coverage is below 100% (REQ-TEST-003)",
         "validate-phpdoc": "Fail when a class or public method in src/ has no PHPDoc (REQ-CS-001)",
         "cs-check": "Check code style with PHP-CS-Fixer",

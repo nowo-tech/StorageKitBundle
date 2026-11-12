@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Tests\Integration\Equivalence;
 
 use Nowo\StorageKitBundle\Context\FileContexts;
+use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Download\FileDelivery;
 use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
 use Nowo\StorageKitBundle\Download\FileDeliveryResponder;
@@ -41,7 +42,10 @@ use function time;
  * same status, same headers (the `Date` header aside), same bytes — through the HTTP kernel (both controllers, same
  * viewer, same session) and at the service level — for streamed and redirect-delivered buckets, database and
  * configuration profiles, every variant, both dispositions, short and long URL lifetimes, hostile and empty names,
- * unreadable contexts and buckets that are not connectable any more.
+ * a stored type outside the image allowlist, unreadable contexts and buckets that are not connectable any more.
+ *
+ * Mutation-checked: changing a header, the max age, the URL lifetime, the stream size or the policy headers makes it
+ * fail. (Dropping `setPrivate()` alone does not: HttpFoundation already adds `private` to a bare `max-age`.)
  */
 final class DownloadEquivalenceTest extends KernelTestCase
 {
@@ -197,6 +201,11 @@ final class DownloadEquivalenceTest extends KernelTestCase
                 default => Images::webp(10, 10),
             };
             $view = $uploader->uploadImage(new InMemoryUser($board === 'b1' ? 'alice' : 'bob', null), 'board', $board, $bytes, $name);
+            if ($i === 3) {
+                // A stored type outside the image allowlist (an older row, a hand-edited one): streamed as
+                // application/octet-stream with a .bin name.
+                $this->service($kernel, StorageEntityManager::class)->connection()->executeStatement("UPDATE storage_kit_file SET mime_type = 'image/svg+xml' WHERE uuid = ?", [$view->uuid]);
+            }
             $file = $this->service($kernel, StoredFileRepository::class)->findOneByUuid($view->uuid);
             self::assertInstanceOf(StoredFile::class, $file);
             $files[] = $file;
