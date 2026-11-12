@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.5.0] - 2026-11-12](#150---2026-11-12)
   - [Added](#added)
   - [Changed](#changed)
   - [Deprecated](#deprecated)
@@ -32,6 +33,8 @@ All notable changes to this project are documented here. The format follows
   - [Security](#security-2)
 
 ## [Unreleased]
+
+## [1.5.0] - 2026-11-12
 
 Architecture bar W3 (REQ-ARCH-001 rules 1, 3 and 6; REQ-RUNTIME-002). Instance Settings stays in `require` until 2.0
 (rule 8, announced in 1.3.0); `doctrine.entity_manager` keeps its `null` default in 1.x. See [UPGRADING](UPGRADING.md#to-150).
