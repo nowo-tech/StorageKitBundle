@@ -34,6 +34,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Console boundary counter could leak in a long-lived process (audit NM / NL2-v, REQ-RUNTIME-002).**
+  `OwnEntityManagerSubscriber` (dedicated `doctrine.entity_manager`) and `RequestBoundaryListener` (request memos)
+  counted running console commands with `++` on `console.command` and `--` on a late `console.terminate`. A
+  terminate listener in between that threw or stopped the propagation, or a `console.error` listener that threw
+  (Symfony then skips `console.terminate`), left the count above zero forever. In a kept-alive worker that ran a
+  command in-process, the dedicated manager was then never recovered nor cleared again at the main request boundaries
+  (managed rows and unflushed changes kept across requests and tenants), and no command end reset the memos any more.
+  A `console.command` listener above the counter that stopped the propagation skipped the `++` while the `--` still
+  ran, so a nested command cleared the outer unit mid-run.
+  Every unit-of-work state change now happens at `PHP_INT_MAX` (new internal `UnitOfWorkFrames`): each console run is
+  a frame keyed by its command and its input, saving the message flag and the main-request depth when pushed and
+  restoring them when removed; `console.terminate` removes only its own frame (and the frames above it); `console.error`
+  marks the frame, and a marked frame whose terminate never came is dropped at the next main request, received
+  message, command or worker stop; the end of a main request or a message drops the frames started inside it. Main
+  requests are counted and Messenger messages tracked, so the outermost unit is the one started while nothing else
+  runs: a command run by a controller or a message handler, or a main request handled in-process inside another
+  request or a message, no longer clears the outer unit (before, a command run by a controller cleared the dedicated
+  manager mid-request). A top-level `kernel.terminate` (nothing else running) resets the main-request count, so a request whose `kernel.finish_request` never came (a throwing `kernel.exception` listener) does not stop the next clears (audit NR-b M1). The clears keep their priorities. `WorkerMessageSkipEvent` (dispatched by
+  `messenger:failed:retry`) and `WorkerStoppedEvent` end the in-flight message.
+
+### Tests
+
+- `tests/Integration/Persistence/ConsoleBoundaryCounterKernelTest.php`: a real console `Application` on the kernel's
+  own event dispatcher and the same kernel's `http_kernel`, no services resetter: throwing `console.terminate` /
+  `console.error` listeners (also at `PHP_INT_MIN`), a self-recursive command whose inner run fails with a throwing
+  error listener, an unknown nested command, a nested command whose `console.command` propagation is stopped above
+  4096, a throwing `WorkerMessageReceivedEvent` listener inside an in-process consume command, a nested main request,
+  a failed command inside a failed message followed by a worker stop, and the request-memo listener wired exactly as
+  the kernel wires it. `tests/Support/BoundaryDriver.php` drives the unit tests through a real event dispatcher.
+
 ## [1.5.0] - 2026-11-12
 
 Architecture bar W3 (REQ-ARCH-001 rules 1, 3 and 6; REQ-RUNTIME-002). Instance Settings stays in `require` until 2.0

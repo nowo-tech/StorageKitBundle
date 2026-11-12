@@ -108,6 +108,8 @@ use function is_string;
 use function sprintf;
 use function trim;
 
+use const PHP_INT_MAX;
+
 /**
  * Loads `nowo_storage_kit`: storage, SSRF guard, profiles, contexts and references, uploads and downloads, purge,
  * moves, the PHP API, and (when enabled) the Storage / Move pages and the file endpoints. Controllers are not
@@ -134,6 +136,15 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
 
     /** Messenger's `WorkerMessageFailedEvent` (by name; audit LR-S-L2: a failed message is a boundary too). */
     public const WORKER_MESSAGE_FAILED = 'Symfony\\Component\\Messenger\\Event\\WorkerMessageFailedEvent';
+
+    /** Messenger's `WorkerMessageReceivedEvent` (by name; 1.5.1 audit NM: a message is a unit of work in flight). */
+    public const WORKER_MESSAGE_RECEIVED = 'Symfony\\Component\\Messenger\\Event\\WorkerMessageReceivedEvent';
+
+    /** Messenger's `WorkerMessageSkipEvent` (by name; dispatched by `messenger:failed:retry` only, 1.5.1 audit NM). */
+    public const WORKER_MESSAGE_SKIPPED = 'Symfony\\Component\\Messenger\\Event\\WorkerMessageSkipEvent';
+
+    /** Messenger's `WorkerStoppedEvent` (by name; 1.5.1 audit NM). */
+    public const WORKER_STOPPED = 'Symfony\\Component\\Messenger\\Event\\WorkerStoppedEvent';
 
     /** Service id of the bundle's own download delivery (1.5; `FileDelivery` and `FileDeliveryInterface` are aliases). */
     public const FILE_DELIVERY_ID = 'nowo_storage_kit.file_delivery';
@@ -229,12 +240,23 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             ]),
         ]))
             ->setPublic(true)
-            ->addTag('kernel.event_listener', ['event' => KernelEvents::REQUEST, 'method' => 'onKernelRequest', 'priority' => 4096])
+            ->addTag('kernel.event_listener', ['event' => KernelEvents::REQUEST, 'method' => 'onKernelRequest', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => KernelEvents::FINISH_REQUEST, 'method' => 'onKernelFinishRequest', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onKernelTerminateStarted', 'priority' => PHP_INT_MAX])
             ->addTag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onBoundary'])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_HANDLED, 'method' => 'onBoundary'])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_FAILED, 'method' => 'onBoundary'])
+            // 1.5.1 (audit NM / NL2-v): every unit-of-work state change at PHP_INT_MAX, before any listener that could
+            // throw or stop the propagation.
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_RECEIVED, 'method' => 'onMessageReceived', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_HANDLED, 'method' => 'onMessageEnded', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_FAILED, 'method' => 'onMessageEnded', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_SKIPPED, 'method' => 'onMessageEnded', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_STOPPED, 'method' => 'onWorkerStopped', 'priority' => PHP_INT_MAX])
             // 1.5: the end of the outermost console command is a boundary too (a long command calls reset() per item itself).
-            ->addTag('kernel.event_listener', ['event' => ConsoleEvents::COMMAND, 'method' => 'onConsoleCommand'])
+            ->addTag('kernel.event_listener', ['event' => ConsoleEvents::COMMAND, 'method' => 'onConsoleCommand', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => ConsoleEvents::ERROR, 'method' => 'onConsoleError', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => ConsoleEvents::TERMINATE, 'method' => 'onConsoleCommandEnded', 'priority' => PHP_INT_MAX])
             ->addTag('kernel.event_listener', ['event' => ConsoleEvents::TERMINATE, 'method' => 'onConsoleTerminate']));
     }
 

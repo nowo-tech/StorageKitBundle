@@ -21,6 +21,7 @@ use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
+use Nowo\StorageKitBundle\Tests\Support\BoundaryDriver;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Ui\ProfileTester;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
@@ -116,7 +117,8 @@ final class DedicatedEntityManagerKernelTest extends KernelTestCase
             $profile = $this->profile($kernel);
             $bundle  = $this->service($kernel, StorageEntityManager::class)->manager();
             self::assertTrue($bundle->contains($profile));
-            self::assertCount(1, array_filter($dispatcher->getListeners($event), static fn (mixed $listener): bool => is_array($listener) && $listener[0] === $subscriber), $event);
+            // Plus the PHP_INT_MAX bookkeeping (1.5.1, audit NM).
+            self::assertCount(2, array_filter($dispatcher->getListeners($event), static fn (mixed $listener): bool => is_array($listener) && $listener[0] === $subscriber), $event);
             $subscriber->clear();
             self::assertFalse($bundle->contains($profile), $event);
             self::assertTrue($host->contains($note), $event . ': the host manager is never cleared');
@@ -168,17 +170,20 @@ final class DedicatedEntityManagerKernelTest extends KernelTestCase
 
         // Nested console commands (audit NH-4): only the outermost start and end act; a request handled in-process by
         // a command does not clear the command's unit.
-        $subscriber->onConsoleCommand();
+        $units = new BoundaryDriver($dispatcher, $http);
+        $units->handled();
+        $units->commandStarts();
         $profile = $this->profile($kernel);
-        $subscriber->onConsoleCommand();
+        $units->commandStarts();
         $http->handle($request);
-        $subscriber->onTerminate();
-        $subscriber->onConsoleTerminate();
+        $units->terminate();
+        $units->commandEnds();
         self::assertTrue($bundle()->contains($profile), 'the inner command and the in-process request keep the outer unit');
-        $subscriber->onConsoleTerminate();
+        $units->commandEnds();
         self::assertFalse($bundle()->contains($profile), 'the outermost command end clears');
-        $subscriber->onConsoleTerminate();
         $profile = $this->profile($kernel);
+        $units->commandEnds();
+        self::assertTrue($bundle()->contains($profile), 'a run that never started ends nothing (audit NM)');
         $subscriber->onTerminate();
         self::assertFalse($bundle()->contains($profile), 'outside a command, kernel.terminate clears');
     }
