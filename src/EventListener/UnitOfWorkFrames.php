@@ -59,6 +59,9 @@ final class UnitOfWorkFrames
     /** @var WeakMap<ConsoleTerminateEvent, bool> outermost verdict per terminate event */
     private WeakMap $verdicts;
 
+    /**
+     * Starts with nothing running.
+     */
     public function __construct()
     {
         $this->verdicts = new WeakMap();
@@ -107,6 +110,9 @@ final class UnitOfWorkFrames
         return $this->frames === [] && !$this->messageInFlight && $this->requests === 0;
     }
 
+    /**
+     * `WorkerMessageReceivedEvent`: a message is in flight.
+     */
     public function messageReceived(): void
     {
         $this->dropFailingFrames();
@@ -133,6 +139,9 @@ final class UnitOfWorkFrames
         }
     }
 
+    /**
+     * `WorkerStoppedEvent`: no message is in flight any more.
+     */
     public function workerStopped(): void
     {
         $this->messageFinished();

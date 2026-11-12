@@ -88,6 +88,9 @@ final class OwnEntityManagerSubscriber
         }
     }
 
+    /**
+     * End of a main request (`kernel.finish_request`, PHP_INT_MAX).
+     */
     public function onFinishRequest(FinishRequestEvent $event): void
     {
         if ($event->isMainRequest()) {
@@ -122,6 +125,9 @@ final class OwnEntityManagerSubscriber
         $this->units->messageFinished();
     }
 
+    /**
+     * The worker stopped: no message is in flight any more.
+     */
     public function onWorkerStopped(): void
     {
         $this->units->workerStopped();
