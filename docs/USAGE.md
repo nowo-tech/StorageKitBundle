@@ -166,8 +166,10 @@ nowo_storage_kit:
 
 The bundle prepends its mapping to that manager only and removes it from the others (`auto_mapping` included); the
 build fails when the manager is not declared. The bundle recovers the manager when a failed write closed it and clears
-it at the end of every request, Messenger message and console command (FrankenPHP worker mode with kernel reset
-false); it never clears or resets yours. Keep the same connection: references and uploads then share your transaction.
+it at the start and at the end of every request, Messenger message and outermost console command (FrankenPHP worker
+mode with kernel reset false); it never clears or resets yours. Keep the same connection: uploads, references, the
+erasure and the settings writes then share your transaction (each as a savepoint, so a failing bundle statement never
+spoils it); another connection is reported at build time.
 Reference the files by `uuid` (`storage-file:<uuid>`), never with a Doctrine relation to `StoredFile`: entities of two
 managers cannot be related.
 

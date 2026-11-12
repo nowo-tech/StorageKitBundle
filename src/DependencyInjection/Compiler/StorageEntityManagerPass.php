@@ -18,6 +18,7 @@ use function is_array;
 use function is_string;
 use function sprintf;
 use function str_starts_with;
+use function trigger_deprecation;
 
 /**
  * Keeps the bundle entities on `doctrine.entity_manager` only (1.5, architecture bar rule 6).
@@ -88,12 +89,50 @@ final readonly class StorageEntityManagerPass implements CompilerPassInterface
             }
         }
 
+        $default = $container->hasParameter('doctrine.default_entity_manager') ? $container->getParameter('doctrine.default_entity_manager') : null;
+        $this->warnOnAnotherConnection($container, $name, $default);
         // A dedicated manager belongs to the bundle: cleared at every boundary, reset when closed. Never the host's.
-        if (!$container->hasParameter('doctrine.default_entity_manager') || $container->getParameter('doctrine.default_entity_manager') !== $name) {
+        if ($default !== $name) {
             $definition = $container->setDefinition(OwnEntityManagerSubscriber::class, (new Definition(OwnEntityManagerSubscriber::class, [new Reference('doctrine'), $name]))->setPublic(true));
             foreach (OwnEntityManagerSubscriber::LISTENERS as [$event, $method, $priority]) {
                 $definition->addTag('kernel.event_listener', ['event' => $event, 'method' => $method, 'priority' => $priority]);
             }
         }
+    }
+
+    /**
+     * Audit NH-6: a dedicated manager on another DBAL connection than the host's default manager cannot share the
+     * host's transactions, so the GDPR erasure, the settings listener, uploads and references are not atomic with them.
+     * Reported at build time (a deprecation, so it reaches the deprecation log / profiler / PHPUnit bridge, plus the
+     * compiler log), not refused: a separate database is a valid choice.
+     */
+    private function warnOnAnotherConnection(ContainerBuilder $container, string $name, mixed $default): void
+    {
+        if (!is_string($default) || $default === $name) {
+            return;
+        }
+        $bundle = $this->connectionOf($container, $name);
+        $host   = $this->connectionOf($container, $default);
+        if ($bundle === null || $host === null || $bundle === $host) {
+            return;
+        }
+        $message = sprintf('nowo_storage_kit.doctrine.entity_manager "%s" uses the DBAL connection "%s", the default entity manager "%s" uses "%s": the GDPR erasure, the settings listener, uploads and file references are then not atomic with your transactions. Put the bundle manager on the same connection.', $name, $bundle, $default, $host);
+        $container->log($this, $message);
+        trigger_deprecation('nowo-tech/storage-kit-bundle', '1.5', $message);
+    }
+
+    /**
+     * The connection service id an entity manager definition is built with (null when it cannot be known).
+     */
+    private function connectionOf(ContainerBuilder $container, string $manager): ?string
+    {
+        $id = sprintf('doctrine.orm.%s_entity_manager', $manager);
+        if (!$container->hasDefinition($id)) {
+            return null;
+        }
+        $arguments = $container->getDefinition($id)->getArguments();
+        $first     = $arguments[0] ?? null;
+
+        return $first instanceof Reference ? (string) $first : null;
     }
 }

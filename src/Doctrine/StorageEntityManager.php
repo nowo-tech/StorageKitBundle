@@ -12,8 +12,12 @@ use Doctrine\ORM\Mapping\ToOneOwningSideMapping;
 use Doctrine\Persistence\ManagerRegistry;
 use LogicException;
 use Nowo\DoctrineEncryptBundle\Configuration\Encrypted;
+use ReflectionException;
+use ReflectionProperty;
 use Throwable;
 
+use function array_chunk;
+use function bin2hex;
 use function implode;
 use function in_array;
 use function is_array;
@@ -21,6 +25,7 @@ use function is_int;
 use function is_numeric;
 use function is_object;
 use function is_string;
+use function random_bytes;
 use function spl_object_id;
 use function sprintf;
 
@@ -32,6 +37,9 @@ use function sprintf;
  */
 final readonly class StorageEntityManager
 {
+    /** Identifiers per `UPDATE … IN (…)` statement of {@see self::updateRows()} (bound-parameter limits). */
+    public const UPDATE_CHUNK = 1000;
+
     /**
      * @param string|null $name entity manager name
      */
@@ -173,7 +181,13 @@ final readonly class StorageEntityManager
      * number of rows the database reports as changed.
      *
      * Encrypted fields (`#[Encrypted]`) are refused: a DBAL statement would bypass the encryption listener and store
-     * the plain value.
+     * the plain value. The check reads the property where the mapping declares it (a mapped superclass included) and
+     * fails closed when it cannot be read.
+     *
+     * The ids are written {@see self::UPDATE_CHUNK} per statement, all chunks in one unit ({@see self::atomically()}):
+     * inside the host's transaction a savepoint, so a failing statement rolls back only the bundle's change and the
+     * host's transaction stays usable (PostgreSQL aborts a whole transaction on a failed statement); otherwise a
+     * transaction of its own.
      *
      * @param class-string $class bundle entity class
      * @param list<int|string> $ids identifiers
@@ -198,7 +212,7 @@ final readonly class StorageEntityManager
             if (!$metadata->hasField($field) || $metadata->isIdentifier($field)) {
                 throw new LogicException(sprintf('%s::$%s is not a writable mapped field.', $class, $field));
             }
-            if ($metadata->getReflectionClass()->getProperty($field)->getAttributes(Encrypted::class) !== []) {
+            if ($this->isEncrypted($metadata->fieldMappings[$field]->declared ?? $metadata->getName(), $field)) {
                 throw new LogicException(sprintf('%s::$%s is encrypted: it is never written with a DBAL statement.', $class, $field));
             }
             $set[]        = $quoteStrategy->getColumnName($field, $metadata, $platform) . ' = ?';
@@ -207,12 +221,17 @@ final readonly class StorageEntityManager
         }
         $idField = $metadata->getSingleIdentifierFieldName();
         $idType  = (string) $metadata->getTypeOfField($idField);
-        $changed = (int) $connection->executeStatement(
-            'UPDATE ' . $quoteStrategy->getTableName($metadata, $platform) . ' SET ' . implode(', ', $set)
-            . ' WHERE ' . $quoteStrategy->getColumnName($idField, $metadata, $platform) . ' IN (?)',
-            [...$parameters, $ids],
-            [...$types, in_array($idType, [Types::INTEGER, Types::BIGINT, Types::SMALLINT], true) ? ArrayParameterType::INTEGER : ArrayParameterType::STRING],
-        );
+        $sql     = 'UPDATE ' . $quoteStrategy->getTableName($metadata, $platform) . ' SET ' . implode(', ', $set)
+            . ' WHERE ' . $quoteStrategy->getColumnName($idField, $metadata, $platform) . ' IN (?)';
+        $idsType = in_array($idType, [Types::INTEGER, Types::BIGINT, Types::SMALLINT], true) ? ArrayParameterType::INTEGER : ArrayParameterType::STRING;
+        $changed = $this->atomically(static function (Connection $connection) use ($sql, $ids, $parameters, $types, $idsType): int {
+            $changed = 0;
+            foreach (array_chunk($ids, self::UPDATE_CHUNK) as $chunk) {
+                $changed += (int) $connection->executeStatement($sql, [...$parameters, $chunk], [...$types, $idsType]);
+            }
+
+            return $changed;
+        }, 'update');
         $unitOfWork = $manager->getUnitOfWork();
         foreach ($ids as $id) {
             $managed = $unitOfWork->tryGetById($id, $metadata->rootEntityName);
@@ -228,6 +247,59 @@ final readonly class StorageEntityManager
         }
 
         return $changed;
+    }
+
+    /**
+     * Runs `$work` with the bundle connection as one unit (1.5, audit NH-1 / NH-2): inside an open transaction (the
+     * host's) in a savepoint of its own, released on success and rolled back on failure, so the host's transaction
+     * stays usable and its own work can still be committed; otherwise in a transaction of its own. The original error
+     * is rethrown, even when the rollback fails too.
+     *
+     * @template T
+     *
+     * @param callable(Connection): T $work
+     * @param string $label savepoint label (letters and underscores)
+     *
+     * @return T
+     */
+    public function atomically(callable $work, string $label = 'unit'): mixed
+    {
+        $connection = $this->connection();
+        if (!$connection->isTransactionActive()) {
+            return $connection->transactional(static fn (Connection $connection): mixed => $work($connection));
+        }
+        // A unique name: a nested unit never releases or reuses the savepoint of the unit around it.
+        $savepoint = 'nowo_storage_kit_' . $label . '_' . bin2hex(random_bytes(6));
+        $connection->createSavepoint($savepoint);
+        try {
+            $result = $work($connection);
+            $connection->releaseSavepoint($savepoint);
+        } catch (Throwable $e) {
+            try {
+                $connection->rollbackSavepoint($savepoint);
+            } catch (Throwable) {
+                // The savepoint is gone too: the original error explains what happened, so it is the one rethrown.
+            }
+
+            throw $e;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Whether `$class::$field` (where the mapping declares it) carries `#[Encrypted]`; true when it cannot be read
+     * (fail closed: never write an unknown property with a DBAL statement).
+     *
+     * @param class-string $class declaring class
+     */
+    private function isEncrypted(string $class, string $field): bool
+    {
+        try {
+            return (new ReflectionProperty($class, $field))->getAttributes(Encrypted::class) !== [];
+        } catch (ReflectionException) {
+            return true;
+        }
     }
 
     /**

@@ -14,14 +14,20 @@ use Nowo\StorageKitBundle\Doctrine\OwnEntityManagerSubscriber;
 use Nowo\StorageKitBundle\Download\FileDelivery;
 use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
 use Nowo\StorageKitBundle\Tests\Fixtures\Ports\NotADelivery;
+use PHPUnit\Framework\Attributes\IgnoreDeprecations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Extension\Extension;
+use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
+
+use function array_keys;
+use function implode;
+use function str_contains;
 
 /**
  * 1.5 compile-time wiring: the dedicated entity manager pass, the download port pass, the Doctrine mapping prepend for
@@ -62,6 +68,36 @@ final class ArchitecturePassesTest extends TestCase
         $this->expectException(InvalidConfigurationException::class);
         $this->expectExceptionMessage('The Doctrine entity manager "storage_kit" (nowo_storage_kit.doctrine.entity_manager) does not map Nowo\StorageKitBundle\Entity.');
         (new StorageEntityManagerPass())->process($container);
+    }
+
+    /**
+     * Audit NH-6: a bundle manager on another connection than the host's default one is reported at build time.
+     */
+    #[IgnoreDeprecations]
+    public function testAnotherConnectionIsReported(): void
+    {
+        foreach (['other' => true, 'default' => false] as $connection => $reported) {
+            $container = new ContainerBuilder();
+            $container->setParameter(NowoStorageKitExtension::ENTITY_MANAGER_PARAMETER, 'storage_kit');
+            $container->setParameter('doctrine.entity_managers', ['default' => 'x', 'storage_kit' => 'y', 'factory' => 'z']);
+            $container->setParameter('doctrine.default_entity_manager', 'default');
+            $container->setDefinition('doctrine.orm.default_entity_manager', new Definition('EM', [new Reference('doctrine.dbal.default_connection')]));
+            $container->setDefinition('doctrine.orm.storage_kit_entity_manager', new Definition('EM', [new Reference('doctrine.dbal.' . $connection . '_connection')]));
+            $container->setDefinition('doctrine.orm.storage_kit_metadata_driver', (new Definition('Chain'))->setMethodCalls([['addDriver', [new Definition('Driver'), StorageEntityManagerPass::ENTITY_NAMESPACE]]]));
+            if ($reported) {
+                $this->expectUserDeprecationMessage('Since nowo-tech/storage-kit-bundle 1.5: nowo_storage_kit.doctrine.entity_manager "storage_kit" uses the DBAL connection "doctrine.dbal.other_connection", the default entity manager "default" uses "doctrine.dbal.default_connection": the GDPR erasure, the settings listener, uploads and file references are then not atomic with your transactions. Put the bundle manager on the same connection.');
+            }
+            (new StorageEntityManagerPass())->process($container);
+            self::assertSame($reported, str_contains(implode("\n", $container->getCompiler()->getLog()), 'not atomic'), $connection);
+        }
+        // Unknown definitions (another manager kind) are not reported.
+        $container = new ContainerBuilder();
+        $container->setParameter(NowoStorageKitExtension::ENTITY_MANAGER_PARAMETER, 'storage_kit');
+        $container->setParameter('doctrine.entity_managers', ['default' => 'x', 'storage_kit' => 'y']);
+        $container->setParameter('doctrine.default_entity_manager', 'default');
+        $container->setDefinition('doctrine.orm.storage_kit_entity_manager', new Definition('EM', ['not a reference']));
+        (new StorageEntityManagerPass())->process($container);
+        self::assertSame([], $container->getCompiler()->getLog());
     }
 
     public function testTheHostDefaultManagerGetsNoBoundarySubscriber(): void

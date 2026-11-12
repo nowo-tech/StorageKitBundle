@@ -16,6 +16,7 @@ use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 
 use function array_flip;
 use function array_intersect_key;
+use function range;
 
 /**
  * 1.5 DBAL writes of {@see StorageEntityManager} (no flush): the guards (no identifier yet, unknown, identifier and
@@ -69,6 +70,30 @@ final class DbalWritesTest extends KernelTestCase
         self::assertSame(['1', 'after'], [(string) $connection->fetchOne('SELECT test_ok FROM storage_kit_profile'), $connection->fetchOne('SELECT body FROM test_note')]);
         $manager->clear();
         self::assertTrue($manager->find(StorageProfile::class, $profile->getId())?->getTestOk());
+    }
+
+    public function testIdsAreWrittenInChunksAndAnUnreadablePropertyFailsClosed(): void
+    {
+        $kernel  = $this->bootKernel();
+        $writes  = $this->service($kernel, StorageEntityManager::class);
+        $profile = $this->profile($kernel);
+        $ids     = range(100000, 100000 + 2 * StorageEntityManager::UPDATE_CHUNK + 5);
+        $ids[]   = (int) $profile->getId();
+
+        self::assertSame(1, $writes->updateRows(StorageProfile::class, $ids, ['testOk' => true]), 'three statements, one row');
+
+        $metadata          = $writes->manager()->getClassMetadata(StorageProfile::class);
+        $mapping           = $metadata->fieldMappings['testOk'];
+        $declared          = $mapping->declared;
+        $mapping->declared = 'Nowo\\StorageKitBundle\\Tests\\Missing\\Superclass'; // @phpstan-ignore assign.propertyType (no such class: the guard must fail closed)
+        try {
+            $writes->updateRows(StorageProfile::class, [(int) $profile->getId()], ['testOk' => false]);
+            self::fail('fail closed');
+        } catch (LogicException $e) {
+            self::assertStringContainsString('is encrypted', $e->getMessage());
+        } finally {
+            $mapping->declared = $declared;
+        }
     }
 
     public function testTheDownloadPortNeedsItsRepository(): void

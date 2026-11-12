@@ -233,8 +233,9 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             ->addTag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onBoundary'])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_HANDLED, 'method' => 'onBoundary'])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_FAILED, 'method' => 'onBoundary'])
-            // 1.5: the end of a console command is a boundary too (a long command calls reset() per item itself).
-            ->addTag('kernel.event_listener', ['event' => ConsoleEvents::TERMINATE, 'method' => 'onBoundary']));
+            // 1.5: the end of the outermost console command is a boundary too (a long command calls reset() per item itself).
+            ->addTag('kernel.event_listener', ['event' => ConsoleEvents::COMMAND, 'method' => 'onConsoleCommand'])
+            ->addTag('kernel.event_listener', ['event' => ConsoleEvents::TERMINATE, 'method' => 'onConsoleTerminate']));
     }
 
     /**

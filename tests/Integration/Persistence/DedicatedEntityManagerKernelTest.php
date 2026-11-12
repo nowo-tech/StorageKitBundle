@@ -24,11 +24,14 @@ use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Ui\ProfileTester;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
+use stdClass;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Console\ConsoleEvents;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\HttpKernel;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Event\WorkerMessageReceivedEvent;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 
 use function array_filter;
@@ -139,6 +142,45 @@ final class DedicatedEntityManagerKernelTest extends KernelTestCase
         $manager = $registry->getManager('storage_kit');
         self::assertInstanceOf(EntityManagerInterface::class, $manager);
         self::assertTrue($manager->isOpen());
+    }
+
+    public function testEveryUnitStartsWithAnEmptyBundleManagerEvenWhenTheLastOneNeverEnded(): void
+    {
+        $kernel     = $this->bootDedicated();
+        $subscriber = $this->service($kernel, OwnEntityManagerSubscriber::class);
+        $http       = $kernel->getContainer()->get('http_kernel');
+        self::assertInstanceOf(HttpKernel::class, $http);
+        $dispatcher = $this->service($kernel, 'event_dispatcher');
+        self::assertInstanceOf(EventDispatcherInterface::class, $dispatcher);
+        $bundle = fn (): EntityManagerInterface => $this->service($kernel, StorageEntityManager::class)->manager();
+
+        // A request whose kernel.terminate never ran (fatal error, worker killed mid-response): the next main request
+        // starts empty anyway (audit NH-3).
+        $profile = $this->profile($kernel);
+        $request = Request::create('/storage/files/00000000-0000-4000-8000-000000000000/original', server: ['REMOTE_ADDR' => '203.0.113.9']);
+        self::assertSame(404, $http->handle($request)->getStatusCode());
+        self::assertFalse($bundle()->contains($profile), 'cleared at the start of the main request');
+
+        // A Messenger message starts empty too.
+        $profile = $this->profile($kernel);
+        $dispatcher->dispatch(new WorkerMessageReceivedEvent(new Envelope(new stdClass()), 'async'));
+        self::assertFalse($bundle()->contains($profile), 'cleared when a message is received');
+
+        // Nested console commands (audit NH-4): only the outermost start and end act; a request handled in-process by
+        // a command does not clear the command's unit.
+        $subscriber->onConsoleCommand();
+        $profile = $this->profile($kernel);
+        $subscriber->onConsoleCommand();
+        $http->handle($request);
+        $subscriber->onTerminate();
+        $subscriber->onConsoleTerminate();
+        self::assertTrue($bundle()->contains($profile), 'the inner command and the in-process request keep the outer unit');
+        $subscriber->onConsoleTerminate();
+        self::assertFalse($bundle()->contains($profile), 'the outermost command end clears');
+        $subscriber->onConsoleTerminate();
+        $profile = $this->profile($kernel);
+        $subscriber->onTerminate();
+        self::assertFalse($bundle()->contains($profile), 'outside a command, kernel.terminate clears');
     }
 
     public function testAnUnknownManagerFailsTheBuild(): void

@@ -42,9 +42,12 @@ Architecture bar W3 (REQ-ARCH-001 rules 1, 3 and 6; REQ-RUNTIME-002). Instance S
   connection recommended, for example `storage_kit`): the bundle entities are mapped on it **only** (removed from the
   other managers' drivers, `auto_mapping` included; `StorageEntityManagerPass` fails the build on an unknown manager or
   one that does not map them), every bundle read and write uses it, and `Doctrine\OwnEntityManagerSubscriber` recovers
-  it when a failed write closed it (main `kernel.request`, `WorkerMessageReceivedEvent`) and clears it at
-  `kernel.terminate`, `console.terminate` and after every Messenger message, handled or failed. The host's managers are
-  never cleared. `null` (default) keeps the default manager in 1.x (2.0 changes the default). Recommended for new
+  it when a failed write closed it and clears it at the START of every unit (main `kernel.request`,
+  `WorkerMessageReceivedEvent`, outermost `console.command`: nothing an abandoned unit left behind survives) and at
+  its end (`kernel.terminate`, after every Messenger message, outermost `console.terminate`). Nested commands and
+  requests handled in-process by a command do not clear the outer unit. The host's managers are never cleared. A
+  bundle manager on another DBAL connection than the host's default one is reported at build time (a deprecation:
+  the GDPR erasure, settings, uploads and references are then not atomic with the host's transactions). `null` (default) keeps the default manager in 1.x (2.0 changes the default). Recommended for new
   installs; the Flex recipe ships the line commented out.
 - **Download port** (rule 3): `Download\FileDeliveryInterface::deliver(string $uuid, string $variant): DeliverableFile`,
   a framework-free VO (`redirect` / `stream`, status, headers, private max age, policy headers; the pre-signed URL and
@@ -57,7 +60,12 @@ Architecture bar W3 (REQ-ARCH-001 rules 1, 3 and 6; REQ-RUNTIME-002). Instance S
   `PersonalData\StoredFilesPersonalDataInterface` (`export()`, `erase()` by plain strings), public aliases of
   `FileReferences`, `StoredImageResolver` and `StoredFilesPersonalData`.
 - `StorageEntityManager::update()` / `updateRows()`: DBAL `UPDATE` of bundle rows that also aligns the instances the
-  entity manager holds (no later flush rewrites them); encrypted (`#[Encrypted]`) fields are refused.
+  entity manager holds (no later flush rewrites them); encrypted (`#[Encrypted]`) fields are refused, read where the
+  mapping declares the property, failing closed; ids are written 1,000 per statement (`UPDATE_CHUNK`).
+- `StorageEntityManager::atomically()`: the bundle's DBAL writes run as one unit — a savepoint inside the host's
+  transaction (a failing statement rolls back only the bundle's change, so the host can still commit its own work,
+  PostgreSQL included), a transaction of its own otherwise. Each erasure page (anonymise + hand to the purge) is one
+  unit.
 - Tests: v1.4.0 equivalence (downloads through both controllers and services: status, headers, bytes; erasure and
   settings listener: every column of the tables) against literal copies under `tests/Support/Legacy/`; dedicated-manager
   kernel test (no admin or CLI write flushes the host manager); DDD host on the ports only; kept-alive worker test
@@ -70,7 +78,8 @@ Architecture bar W3 (REQ-ARCH-001 rules 1, 3 and 6; REQ-RUNTIME-002). Instance S
   pages the matching ids (same match and keyset as before, no entity loaded) and updates them; the listener forgets
   the instance profile's test result with an `UPDATE` of its three columns. Same rows as 1.4; what the host left
   pending is not committed any more.
-- `RequestBoundaryListener` also clears the request memos at `console.terminate`.
+- `RequestBoundaryListener` also clears the request memos at the end of the outermost console command (a console
+  depth counter: a command run in-process by another one is not a boundary).
 - `symfony/deprecation-contracts` is required explicitly.
 
 ### Deprecated

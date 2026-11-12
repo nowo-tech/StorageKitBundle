@@ -104,7 +104,8 @@ final readonly class StoredFilesPersonalData implements StoredFilesPersonalDataI
      *
      * Since 1.5 (architecture bar rule 6) the rows are changed with DBAL `UPDATE` statements, page by page: no entity
      * manager is flushed, so nothing the application left pending in it is written (an eraser may run in the middle of
-     * the host's own unit of work). Inside the host's transaction the statements are part of it. Files the entity
+     * the host's own unit of work). Each page is one unit: a transaction of its own, or a savepoint inside the host's
+     * transaction (a failure rolls back that page only and leaves the host's transaction usable). Files the entity
      * manager already holds show the erased values too.
      */
     public function erase(string $userIdentifier, ?string $userKey = null): int
@@ -125,8 +126,13 @@ final readonly class StoredFilesPersonalData implements StoredFilesPersonalDataI
                     $orphans[] = $id;
                 }
             }
-            $this->entityManager->updateRows(StoredFile::class, $ids, ['originalName' => StoredFile::ANONYMOUS_NAME, 'uploadedBy' => null, 'uploadedByKey' => null]);
-            $this->entityManager->updateRows(StoredFile::class, $orphans, ['orphanedSince' => $longAgo]);
+            // One unit per page (audit NH-2): a file is never anonymised without being handed to the purge.
+            $writes = $this->entityManager;
+            // @igor-ignore - The closure runs synchronously inside this call (one erase page); it is not stored.
+            $writes->atomically(static function () use ($writes, $ids, $orphans, $longAgo): void {
+                $writes->updateRows(StoredFile::class, $ids, ['originalName' => StoredFile::ANONYMOUS_NAME, 'uploadedBy' => null, 'uploadedByKey' => null]);
+                $writes->updateRows(StoredFile::class, $orphans, ['orphanedSince' => $longAgo]);
+            }, 'erase');
             $count += count($page);
             $after = $page[count($page) - 1]['id'];
         }
