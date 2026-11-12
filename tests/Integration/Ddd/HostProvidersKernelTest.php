@@ -81,7 +81,8 @@ final class HostProvidersKernelTest extends KernelTestCase
         self::assertInstanceOf(EventDispatcherInterface::class, $dispatcher);
         foreach ([NowoStorageKitExtension::WORKER_MESSAGE_HANDLED, NowoStorageKitExtension::WORKER_MESSAGE_FAILED] as $event) {
             $boundary = array_filter($dispatcher->getListeners($event), static fn (mixed $listener): bool => is_array($listener) && $listener[0] instanceof RequestBoundaryListener);
-            self::assertCount(1, $boundary, $event);
+            // The PHP_INT_MAX bookkeeping and the boundary itself (1.5.1, audit NM).
+            self::assertCount(2, $boundary, $event);
         }
 
         // Redirect-delivered host buckets open the CSP; streamed ones do not.

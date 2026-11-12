@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Planned for 2.0](#planned-for-20)
+- [To 1.5.1](#to-151)
 - [To 1.5.0](#to-150)
 - [To 1.4.0](#to-140)
 - [To 1.3.0](#to-130)
@@ -28,6 +29,16 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
    `FileDeliveryResponder`.
 4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0): use
    `uploadImage()`.
+
+## To 1.5.1
+
+Target **1.5.1**, from **1.5.0**: `composer update nowo-tech/storage-kit-bundle`. Patch release, no configuration
+change, no migration. The bundle's boundary listeners now track every console run, Messenger message and main request
+at `PHP_INT_MAX` (audit NM / NL2-v), so a host `console.terminate` / `console.error` listener that throws or stops the
+propagation can no longer stop the dedicated entity manager and the request memos from being cleared. Edge-case
+behaviour change: a command run in-process by a controller or a message handler, or a main request handled inside
+another request or a message, no longer clears the outer unit's dedicated manager (it is cleared when the outer unit
+ends). `RequestBoundaryListener::reset()` stays the public API for long-running commands. Nothing to do in host code.
 
 ## To 1.5.0
 
