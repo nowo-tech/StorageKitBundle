@@ -242,6 +242,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             ->setPublic(true)
             ->addTag('kernel.event_listener', ['event' => KernelEvents::REQUEST, 'method' => 'onKernelRequest', 'priority' => PHP_INT_MAX])
             ->addTag('kernel.event_listener', ['event' => KernelEvents::FINISH_REQUEST, 'method' => 'onKernelFinishRequest', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onKernelTerminateStarted', 'priority' => PHP_INT_MAX])
             ->addTag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onBoundary'])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_HANDLED, 'method' => 'onBoundary'])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_FAILED, 'method' => 'onBoundary'])

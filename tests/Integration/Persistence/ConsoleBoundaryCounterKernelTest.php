@@ -214,7 +214,8 @@ final class ConsoleBoundaryCounterKernelTest extends KernelTestCase
             $dispatcher->removeListener(KernelEvents::CONTROLLER, $nested);
             $profile = $this->profile($kernel);
             $inner   = Request::create(self::REQUEST_PATH, server: ['REMOTE_ADDR' => '203.0.113.9']);
-            $http->terminate($inner, $http->handle($inner));
+            // In-process handle() only: the front controller terminates the outer request.
+            $http->handle($inner);
             $kept = $this->bundle($kernel)->contains($profile);
         });
         $http->terminate($outer, $http->handle($outer));
@@ -242,6 +243,37 @@ final class ConsoleBoundaryCounterKernelTest extends KernelTestCase
         $dispatcher->removeListener(ConsoleEvents::ERROR, $throw);
         $dispatcher->dispatch(new WorkerMessageFailedEvent($envelope, 'async', new RuntimeException('handler failed')));
         $dispatcher->dispatch(new WorkerStoppedEvent((new ReflectionClass(Worker::class))->newInstanceWithoutConstructor()));
+        $this->assertNextUnitsClear($kernel, $application);
+    }
+
+    /**
+     * Audit NR-b M1: a kernel.exception listener throws, so the request's kernel.finish_request never comes; the
+     * request is still terminated. The next main requests clear the dedicated manager again, and so does the next
+     * command.
+     */
+    public function testAMainRequestWithoutFinishRequestDoesNotStopTheNextClears(): void
+    {
+        [$kernel, $dispatcher, $application] = $this->dedicated();
+        $http                                = $kernel->getContainer()->get('http_kernel');
+        self::assertInstanceOf(HttpKernel::class, $http);
+        $throw = static function (): never {
+            throw new RuntimeException('exception listener failed');
+        };
+        $dispatcher->addListener(KernelEvents::EXCEPTION, $throw, PHP_INT_MAX);
+        $dispatcher->addListener(KernelEvents::CONTROLLER, $fail = static function (): never {
+            throw new RuntimeException('controller failed');
+        });
+        $request = Request::create(self::REQUEST_PATH, server: ['REMOTE_ADDR' => '203.0.113.9']);
+        try {
+            $http->handle($request);
+        } catch (RuntimeException) {
+            // The throwing exception listener: no kernel.finish_request.
+        }
+        $dispatcher->removeListener(KernelEvents::EXCEPTION, $throw);
+        $dispatcher->removeListener(KernelEvents::CONTROLLER, $fail);
+        $http->terminate($request, new Response('', 500));
+
+        $this->assertNextUnitsClear($kernel, $application);
         $this->assertNextUnitsClear($kernel, $application);
     }
 

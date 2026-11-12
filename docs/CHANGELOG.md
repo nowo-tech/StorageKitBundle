@@ -53,7 +53,7 @@ All notable changes to this project are documented here. The format follows
   requests are counted and Messenger messages tracked, so the outermost unit is the one started while nothing else
   runs: a command run by a controller or a message handler, or a main request handled in-process inside another
   request or a message, no longer clears the outer unit (before, a command run by a controller cleared the dedicated
-  manager mid-request). The clears keep their priorities. `WorkerMessageSkipEvent` (dispatched by
+  manager mid-request). A top-level `kernel.terminate` (nothing else running) resets the main-request count, so a request whose `kernel.finish_request` never came (a throwing `kernel.exception` listener) does not stop the next clears (audit NR-b M1). The clears keep their priorities. `WorkerMessageSkipEvent` (dispatched by
   `messenger:failed:retry`) and `WorkerStoppedEvent` end the in-flight message.
 
 ### Tests

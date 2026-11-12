@@ -97,6 +97,15 @@ final class RequestBoundaryListener
     }
 
     /**
+     * `kernel.terminate` (PHP_INT_MAX): a top-level request boundary resets the main-request counter, even when the
+     * request's `kernel.finish_request` never came (audit NR-b M1).
+     */
+    public function onKernelTerminateStarted(): void
+    {
+        $this->units->requestBoundaryEnded();
+    }
+
+    /**
      * A Messenger message was received (`WorkerMessageReceivedEvent`, PHP_INT_MAX).
      */
     public function onMessageReceived(): void

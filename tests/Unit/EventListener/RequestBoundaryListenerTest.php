@@ -129,6 +129,7 @@ final class RequestBoundaryListenerTest extends TestCase
         foreach ([
             [KernelEvents::REQUEST, 'onKernelRequest', PHP_INT_MAX],
             [KernelEvents::FINISH_REQUEST, 'onKernelFinishRequest', PHP_INT_MAX],
+            [KernelEvents::TERMINATE, 'onKernelTerminateStarted', PHP_INT_MAX],
             [KernelEvents::TERMINATE, 'onBoundary', 0],
             [NowoStorageKitExtension::WORKER_MESSAGE_RECEIVED, 'onMessageReceived', PHP_INT_MAX],
             [NowoStorageKitExtension::WORKER_MESSAGE_HANDLED, 'onMessageEnded', PHP_INT_MAX],

@@ -118,7 +118,7 @@ final class DedicatedEntityManagerKernelTest extends KernelTestCase
             $bundle  = $this->service($kernel, StorageEntityManager::class)->manager();
             self::assertTrue($bundle->contains($profile));
             // Plus the PHP_INT_MAX bookkeeping (1.5.1, audit NM).
-            self::assertCount($event === 'kernel.terminate' ? 1 : 2, array_filter($dispatcher->getListeners($event), static fn (mixed $listener): bool => is_array($listener) && $listener[0] === $subscriber), $event);
+            self::assertCount(2, array_filter($dispatcher->getListeners($event), static fn (mixed $listener): bool => is_array($listener) && $listener[0] === $subscriber), $event);
             $subscriber->clear();
             self::assertFalse($bundle->contains($profile), $event);
             self::assertTrue($host->contains($note), $event . ': the host manager is never cleared');

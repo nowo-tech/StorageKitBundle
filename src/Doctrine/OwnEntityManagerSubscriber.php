@@ -50,6 +50,7 @@ final class OwnEntityManagerSubscriber
     public const LISTENERS = [
         [KernelEvents::REQUEST, 'onRequest', PHP_INT_MAX],
         [KernelEvents::FINISH_REQUEST, 'onFinishRequest', PHP_INT_MAX],
+        [KernelEvents::TERMINATE, 'onRequestBoundaryEnded', PHP_INT_MAX],
         ['Symfony\\Component\\Messenger\\Event\\WorkerMessageReceivedEvent', 'onMessageReceived', PHP_INT_MAX],
         [ConsoleEvents::COMMAND, 'onConsoleCommand', PHP_INT_MAX],
         [ConsoleEvents::ERROR, 'onConsoleError', PHP_INT_MAX],
@@ -96,6 +97,15 @@ final class OwnEntityManagerSubscriber
         if ($event->isMainRequest()) {
             $this->units->requestFinished();
         }
+    }
+
+    /**
+     * `kernel.terminate` (PHP_INT_MAX): a top-level request boundary resets the main-request counter, even when the
+     * request's `kernel.finish_request` never came (audit NR-b M1).
+     */
+    public function onRequestBoundaryEnded(): void
+    {
+        $this->units->requestBoundaryEnded();
     }
 
     /**

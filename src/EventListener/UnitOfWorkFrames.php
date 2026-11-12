@@ -103,6 +103,20 @@ final class UnitOfWorkFrames
     }
 
     /**
+     * `kernel.terminate` (PHP_INT_MAX, audit NR-b M1): a top-level request boundary. When no command and no message
+     * runs, no main request is in flight any more either, even one whose `kernel.finish_request` never came (a
+     * throwing `kernel.exception` listener, an `\Error` with `handleAllThrowables` off): the counter starts again at 0.
+     */
+    public function requestBoundaryEnded(): void
+    {
+        $this->dropFailingFrames();
+        if ($this->frames === [] && !$this->messageInFlight) {
+            // @igor-ignore - Unit-of-work counter of the main requests in flight (no request data).
+            $this->requests = 0;
+        }
+    }
+
+    /**
      * Whether nothing runs (`kernel.terminate` of the outermost request: its finish_request already ran).
      */
     public function isIdle(): bool
