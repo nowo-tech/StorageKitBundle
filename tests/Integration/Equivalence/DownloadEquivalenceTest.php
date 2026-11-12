@@ -105,7 +105,11 @@ final class DownloadEquivalenceTest extends KernelTestCase
         self::assertSame($profile === 'cdn' ? 302 : 200, $this->http($alice, '/storage/files/' . $files[0]->getUuid() . '/original')['status']);
 
         // A context the viewer may not read: 404 on both, identical.
-        self::assertSame($this->http($alice, '/legacy/files/' . $other->getUuid() . '/original'), $this->http($alice, '/storage/files/' . $other->getUuid() . '/original'));
+        [$old, $cur] = $this->sameSecond(fn (): array => [
+            $this->http($alice, '/legacy/files/' . $other->getUuid() . '/original'),
+            $this->http($alice, '/storage/files/' . $other->getUuid() . '/original'),
+        ]);
+        self::assertSame($old, $cur);
         self::assertSame(404, $this->http($alice, '/storage/files/' . $other->getUuid() . '/original')['status']);
     }
 
@@ -119,9 +123,13 @@ final class DownloadEquivalenceTest extends KernelTestCase
         $alice = $this->client($kernel, 'alice');
         $this->http($alice, '/storage/files/00000000-0000-4000-8000-000000000000/original'); // session cookie set once
 
-        $old = $this->http($alice, '/legacy/files/' . $file->getUuid() . '/original');
+        // Error pages carry an `Expires` header of the current second: both sides within one second.
+        [$old, $cur] = $this->sameSecond(fn (): array => [
+            $this->http($alice, '/legacy/files/' . $file->getUuid() . '/original'),
+            $this->http($alice, '/storage/files/' . $file->getUuid() . '/original'),
+        ]);
         self::assertSame(404, $old['status']);
-        self::assertSame($old, $this->http($alice, '/storage/files/' . $file->getUuid() . '/original'));
+        self::assertSame($old, $cur);
 
         $this->entityManager($kernel)->clear();
         $file = $this->service($kernel, StoredFileRepository::class)->findOneByUuid($file->getUuid());
