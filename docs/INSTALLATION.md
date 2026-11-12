@@ -19,9 +19,9 @@
   PHP 8.4+).
 - Doctrine ORM 3.3+ with DoctrineBundle; `nowo-tech/doctrine-encrypt-bundle` ^2.10 **registered and configured** (the
   container refuses to compile without it: scope / move-target bucket secrets are encrypted at rest).
-- `nowo-tech/instance-settings-bundle` **^1.3.1** required and registered when the instance bucket is the `storage`
-  section (default, `instance_profile: null`). Since 1.5 it is a `suggest`, not a dependency: require it yourself
-  (below). A config-pinned instance bucket (`instance_profile: <name>`) does not need it.
+- `nowo-tech/instance-settings-bundle` **^1.3.1** registered when the instance bucket is the `storage` section
+  (default, `instance_profile: null`). It is installed as a dependency until 2.0, which moves it to `suggest`: require
+  it yourself now. A config-pinned instance bucket (`instance_profile: <name>`) does not need it.
 - `nowo-tech/ui-kit-bundle` **^2.23** and `nowo-tech/form-kit-bundle` ^2.17 (admin pages, bucket form, `visible-when`
   peer).
 - `async-aws/s3` ^2.8 || ^3.0 with `league/flysystem` / `league/flysystem-async-aws-s3` ^3.29 (installed as
@@ -38,7 +38,7 @@
 
 ```bash
 composer require nowo-tech/storage-kit-bundle
-# default settings-backed instance bucket (instance_profile: null):
+# default settings-backed instance bucket (instance_profile: null); a suggest from 2.0:
 composer require nowo-tech/instance-settings-bundle
 ```
 

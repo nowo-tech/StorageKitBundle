@@ -56,6 +56,7 @@
         "symfony/config": "^7.4 || ^8.0",
         "symfony/console": "^7.4 || ^8.0",
         "symfony/dependency-injection": "^7.4 || ^8.0",
+        "symfony/deprecation-contracts": "^3.5",
         "symfony/event-dispatcher": "^7.4 || ^8.0",
         "symfony/event-dispatcher-contracts": "^3.5",
         "symfony/form": "^7.4 || ^8.0",

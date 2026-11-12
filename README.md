@@ -163,7 +163,7 @@ final class IssueContext implements FileContextInterface   // autoconfigured
 - Symfony **7.4**, **8.0** or **8.1** (FrameworkBundle with CSRF, Form, Validator, RateLimiter, HttpClient, Lock,
   TwigBundle; SecurityBundle for the admin pages)
 - Doctrine ORM **3.3+**; `nowo-tech/doctrine-encrypt-bundle` **^2.10** (registered); `nowo-tech/instance-settings-bundle`
-  **^1.3.1** for the default settings-backed instance bucket (a `suggest` since 1.5: require it yourself);
+  **^1.3.1** for the default settings-backed instance bucket (moves to `suggest` in 2.0: require it yourself);
   `nowo-tech/ui-kit-bundle` **^2.23**; `nowo-tech/form-kit-bundle` **^2.17**;
   `nowo-tech/outbound-url-guard-bundle` **^1.3**; `async-aws/s3` **^2.8 || ^3.0**; `league/flysystem` **^3.29**;
   `twig/extra-bundle`

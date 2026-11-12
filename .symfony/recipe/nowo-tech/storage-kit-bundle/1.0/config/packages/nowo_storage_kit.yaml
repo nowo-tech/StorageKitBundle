@@ -20,6 +20,11 @@ nowo_storage_kit:
         access_roles: [ROLE_ADMIN]
         # DEV/DEMO only — never enable in production (refused without kernel.debug):
         allow_unauthenticated: false
+    # Recommended (1.5; the 2.0 default): the bundle entities on their own entity manager, so no bundle write flushes
+    # yours. Declare it first in config/packages/doctrine.yaml (same connection as your default manager):
+    #   doctrine: { orm: { default_entity_manager: default, entity_managers: { default: { connection: default, … }, storage_kit: { connection: default } } } }
+    # doctrine:
+    #     entity_manager: storage_kit
 
 # Protect the prefixes in config/packages/security.yaml:
 #   access_control:

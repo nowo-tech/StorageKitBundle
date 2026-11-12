@@ -54,8 +54,9 @@
 
 ## Standard Symfony host
 
-Nothing to configure beyond the [installation](INSTALLATION.md): register `NowoInstanceSettingsBundle` (since 1.5 it is
-a `suggest`ed package, so require `nowo-tech/instance-settings-bundle` yourself) and the instance bucket is the
+Nothing to configure beyond the [installation](INSTALLATION.md): register `NowoInstanceSettingsBundle` (installed with
+this package until 2.0, which moves it to `suggest`: require `nowo-tech/instance-settings-bundle` yourself) and the
+instance bucket is the
 `storage` settings section; the bundle entities are attribute-mapped on your default entity manager; your texts are
 Doctrine entities whose `FileReferenceSourceInterface` makes the references automatic; downloads, rendering and GDPR
 hooks are services you inject (`StoredImageResolver`, `StoredFilesPersonalData::exportUser()` / `eraseUser()`).
@@ -64,7 +65,7 @@ Host-called writes never flush your entity manager: uploads (1.3) and profile ro
 are DBAL statements, and since 1.5 the GDPR erasure and the settings listener are DBAL updates. The admin pages and the
 console commands (profile save and test, bucket moves, purge) still flush the bundle's manager; with the default
 `doctrine.entity_manager: null` that is your default one, so for **new installs** give the bundle its own manager
-([below](#a-dedicated-entity-manager-15)); existing installs can keep `null`.
+([below](#a-dedicated-entity-manager-15)); existing installs can keep `null`, the 1.x default (2.0 changes it).
 
 ## DDD / hexagonal host
 
@@ -230,8 +231,12 @@ overlapping ids, re-created users), implement `UploaderKeyResolverInterface`.
 - `ImageUploader::upload()` still returns the `StoredFile` entity (deprecated since 1.3; use `uploadImage()`), and
   `FileDelivery::respond()` still returns an HttpFoundation response (deprecated since 1.5; use
   `FileDeliveryInterface`).
-- With `doctrine.entity_manager: null` (the default, kept for existing installs) the admin and CLI writes flush your
-  default manager; set a dedicated one ([above](#a-dedicated-entity-manager-15)).
+- With `doctrine.entity_manager: null` (the 1.x default, kept for existing installs; 2.0 changes it) the admin and CLI
+  writes flush your default manager; set a dedicated one ([above](#a-dedicated-entity-manager-15)).
+- `nowo-tech/instance-settings-bundle` is still installed through this package's `require` (it moves to `suggest` in
+  2.0), although only the settings-backed instance bucket (`instance_profile: null`) needs it registered; a
+  config-pinned bucket (from `profiles` or `config_profile_provider`) works without it. Relying on the implicit install
+  is deprecated: require it yourself.
 
 ## The instance bucket
 

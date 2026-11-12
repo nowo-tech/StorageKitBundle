@@ -315,8 +315,8 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         ]))->setPublic(true)->addTag('kernel.reset', ['method' => 'reset']));
         $container->setParameter(InstanceSettingsPass::PARAMETER, $settingsBacked);
         if ($settingsBacked && !($this->instanceSettingsInstalled ?? interface_exists(InstanceSettingsInterface::class))) {
-            // 1.3 (rule 8): InstanceSettings is only needed for the settings-backed instance bucket (1.5: in suggest, an optional bridge).
-            throw new LogicException('NowoStorageKitBundle: the instance bucket is edited in Instance Settings (nowo_storage_kit.instance_profile is null), which needs nowo-tech/instance-settings-bundle (1.5 moved it from require to suggest): run `composer require nowo-tech/instance-settings-bundle`, or manage the instance bucket in the configuration (nowo_storage_kit.instance_profile).');
+            // 1.3 (rule 8): InstanceSettings is only needed for the settings-backed instance bucket (2.0 moves it to suggest).
+            throw new LogicException('NowoStorageKitBundle: the instance bucket is edited in Instance Settings (nowo_storage_kit.instance_profile is null), which needs nowo-tech/instance-settings-bundle: require it, or manage the instance bucket in the configuration (nowo_storage_kit.instance_profile).');
         }
         if ($settingsBacked) {
             $container->setDefinition(InstanceStorageSettings::class, (new Definition(InstanceStorageSettings::class, [

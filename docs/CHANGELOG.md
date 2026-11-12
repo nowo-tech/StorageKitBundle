@@ -33,7 +33,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Architecture bar W3 (REQ-ARCH-001 rules 1, 3, 6 and 8; REQ-RUNTIME-002). See [UPGRADING](UPGRADING.md#to-150).
+Architecture bar W3 (REQ-ARCH-001 rules 1, 3 and 6; REQ-RUNTIME-002). Instance Settings stays in `require` until 2.0
+(rule 8, announced in 1.3.0); `doctrine.entity_manager` keeps its `null` default in 1.x. See [UPGRADING](UPGRADING.md#to-150).
 
 ### Added
 
@@ -43,7 +44,8 @@ Architecture bar W3 (REQ-ARCH-001 rules 1, 3, 6 and 8; REQ-RUNTIME-002). See [UP
   one that does not map them), every bundle read and write uses it, and `Doctrine\OwnEntityManagerSubscriber` recovers
   it when a failed write closed it (main `kernel.request`, `WorkerMessageReceivedEvent`) and clears it at
   `kernel.terminate`, `console.terminate` and after every Messenger message, handled or failed. The host's managers are
-  never cleared. `null` (default) keeps the default manager. Recommended for new installs.
+  never cleared. `null` (default) keeps the default manager in 1.x (2.0 changes the default). Recommended for new
+  installs; the Flex recipe ships the line commented out.
 - **Download port** (rule 3): `Download\FileDeliveryInterface::deliver(string $uuid, string $variant): DeliverableFile`,
   a framework-free VO (`redirect` / `stream`, status, headers, private max age, policy headers; the pre-signed URL and
   the bucket stream are kept in an internal `WeakMap`, out of every dump, cast, JSON and serialization; not cloneable
@@ -68,9 +70,6 @@ Architecture bar W3 (REQ-ARCH-001 rules 1, 3, 6 and 8; REQ-RUNTIME-002). See [UP
   pages the matching ids (same match and keyset as before, no entity loaded) and updates them; the listener forgets
   the instance profile's test result with an `UPDATE` of its three columns. Same rows as 1.4; what the host left
   pending is not committed any more.
-- **`nowo-tech/instance-settings-bundle` moved from `require` to `suggest`** (rule 8; deprecated implicit install since
-  1.3.0). The settings-backed instance bucket (default `instance_profile: null`) still needs it: require it in your
-  application. It stays in `require-dev` for the tests.
 - `RequestBoundaryListener` also clears the request memos at `console.terminate`.
 - `symfony/deprecation-contracts` is required explicitly.
 
