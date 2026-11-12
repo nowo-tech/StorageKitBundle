@@ -43,6 +43,11 @@ final class BoundaryDriver
     /** @var list<array{Command, InputInterface}> */
     private array $running = [];
 
+    /** @var list<Request> main requests started and not finished yet (Symfony passes the same Request to every event) */
+    private array $openRequests = [];
+
+    private ?Request $lastRequest = null;
+
     public function __construct(
         private readonly EventDispatcherInterface $dispatcher,
         private readonly HttpKernelInterface $kernel,
@@ -51,17 +56,30 @@ final class BoundaryDriver
 
     public function request(int $type = HttpKernelInterface::MAIN_REQUEST): void
     {
-        $this->dispatcher->dispatch(new RequestEvent($this->kernel, new Request(), $type), KernelEvents::REQUEST);
+        $request = new Request();
+        if ($type === HttpKernelInterface::MAIN_REQUEST) {
+            $this->openRequests[] = $request;
+            $this->lastRequest    = $request;
+        }
+
+        $this->dispatcher->dispatch(new RequestEvent($this->kernel, $request, $type), KernelEvents::REQUEST);
     }
 
+    /**
+     * Finishes the innermost main request still open (a sub-request or no open request: a new Request).
+     */
     public function finishRequest(int $type = HttpKernelInterface::MAIN_REQUEST): void
     {
-        $this->dispatcher->dispatch(new FinishRequestEvent($this->kernel, new Request(), $type), KernelEvents::FINISH_REQUEST);
+        $request = $type === HttpKernelInterface::MAIN_REQUEST ? array_pop($this->openRequests) : null;
+        $this->dispatcher->dispatch(new FinishRequestEvent($this->kernel, $request ?? new Request(), $type), KernelEvents::FINISH_REQUEST);
     }
 
+    /**
+     * `kernel.terminate` of the last main request started.
+     */
     public function terminate(): void
     {
-        $this->dispatcher->dispatch(new TerminateEvent($this->kernel, new Request(), new Response()), KernelEvents::TERMINATE);
+        $this->dispatcher->dispatch(new TerminateEvent($this->kernel, $this->lastRequest ?? new Request(), new Response()), KernelEvents::TERMINATE);
     }
 
     public function received(): void

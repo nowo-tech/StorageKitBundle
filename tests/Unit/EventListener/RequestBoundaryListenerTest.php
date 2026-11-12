@@ -10,11 +10,23 @@ use Nowo\StorageKitBundle\EventListener\UnitOfWorkFrames;
 use Nowo\StorageKitBundle\Tests\Support\BoundaryDriver;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use ReflectionClass;
+use stdClass;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\ConsoleEvents;
+use Symfony\Component\Console\Event\ConsoleCommandEvent;
+use Symfony\Component\Console\Event\ConsoleTerminateEvent;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Component\HttpKernel\KernelEvents;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Event\WorkerMessageReceivedEvent;
+use Symfony\Component\Messenger\Event\WorkerRunningEvent;
+use Symfony\Component\Messenger\Event\WorkerStartedEvent;
+use Symfony\Component\Messenger\Event\WorkerStoppedEvent;
+use Symfony\Component\Messenger\Worker;
 use Symfony\Contracts\Service\ResetInterface;
 
 use const PHP_INT_MAX;
@@ -120,6 +132,31 @@ final class RequestBoundaryListenerTest extends TestCase
         $listener->onBoundary();
         $listener->reset();
         self::assertSame(2, $this->resets);
+    }
+
+    /**
+     * Audit NX: the worker events keep each worker's own message state; a skipped message ends, so the next command is
+     * the outermost unit again.
+     */
+    public function testWorkerEventsTrackTheMessageOfEachWorker(): void
+    {
+        $listener = new RequestBoundaryListener([$this->memo()]);
+        $worker   = (new ReflectionClass(Worker::class))->newInstanceWithoutConstructor();
+        $received = new WorkerMessageReceivedEvent(new Envelope(new stdClass()), 'async');
+
+        $listener->onWorkerStarted(new WorkerStartedEvent($worker));
+        $listener->onMessageReceived($received);
+        $received->shouldHandle(false);
+        $listener->onMessageReceivedDecided($received);
+        $listener->onWorkerRunning(new WorkerRunningEvent($worker, true));
+        $listener->onWorkerStopped(new WorkerStoppedEvent($worker));
+        $after = new Command('app:after');
+        $input = new ArrayInput([]);
+        $listener->onConsoleCommand(new ConsoleCommandEvent($after, $input, new NullOutput()));
+        $terminate = new ConsoleTerminateEvent($after, $input, new NullOutput(), 0);
+        $listener->onConsoleCommandEnded($terminate);
+        $listener->onConsoleTerminate($terminate);
+        self::assertSame(1, $this->resets, 'the command after the skipped message is the outermost unit');
     }
 
     private function driver(): BoundaryDriver

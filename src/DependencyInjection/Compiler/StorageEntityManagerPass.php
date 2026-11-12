@@ -9,6 +9,7 @@ use Nowo\StorageKitBundle\Doctrine\OwnEntityManagerSubscriber;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
 
@@ -93,7 +94,7 @@ final readonly class StorageEntityManagerPass implements CompilerPassInterface
         $this->warnOnAnotherConnection($container, $name, $default);
         // A dedicated manager belongs to the bundle: cleared at every boundary, reset when closed. Never the host's.
         if ($default !== $name) {
-            $definition = $container->setDefinition(OwnEntityManagerSubscriber::class, (new Definition(OwnEntityManagerSubscriber::class, [new Reference('doctrine'), $name]))->setPublic(true));
+            $definition = $container->setDefinition(OwnEntityManagerSubscriber::class, (new Definition(OwnEntityManagerSubscriber::class, [new Reference('doctrine'), $name, new Reference('request_stack', ContainerInterface::NULL_ON_INVALID_REFERENCE)]))->setPublic(true));
             foreach (OwnEntityManagerSubscriber::LISTENERS as [$event, $method, $priority]) {
                 $definition->addTag('kernel.event_listener', ['event' => $event, 'method' => $method, 'priority' => $priority]);
             }
