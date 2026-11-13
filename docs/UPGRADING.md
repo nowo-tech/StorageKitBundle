@@ -56,18 +56,26 @@ hosts: nothing to do (the new collation listener does not touch them).
    and drops them).
 2. **Existing look-alike rows.** The `ALTER` changes no data. Rows that collide only under the old collation become
    distinct, which is what you want: each person's export and erasure now finds only their own files. Find the families
-   that were affected:
+   that were affected, **before the `ALTER`**:
 
    ```sql
-   SELECT uploaded_by COLLATE utf8mb4_0900_ai_ci AS family,
+   SELECT MIN(uploaded_by) AS family,
+          GROUP_CONCAT(DISTINCT CONCAT('[', uploaded_by, '] ', HEX(uploaded_by)) SEPARATOR ', ') AS spellings,
           COUNT(DISTINCT CAST(uploaded_by AS BINARY)) AS identifiers,
-          COUNT(DISTINCT uploaded_by_key) AS keys_used
+          COUNT(DISTINCT CAST(uploaded_by_key AS BINARY)) AS keys_used
    FROM storage_kit_file
    WHERE uploaded_by IS NOT NULL
-   GROUP BY family
+   GROUP BY uploaded_by
    HAVING identifiers > 1;
-   -- MariaDB: COLLATE utf8mb4_uca1400_ai_ci (or your old collation)
    ```
+
+   It groups by the column's own collation on purpose: that is the comparison the pre-1.5.2 lookups and backfill used,
+   so each group is exactly a set of identifiers they treated as one person, and it surfaces the rows the backfill may
+   have keyed with another member's key. A fixed collation would not: `utf8mb4_0900_ai_ci` is NO PAD and misses the
+   `bob` / `bob ` families of a PAD SPACE column (MariaDB's default `utf8mb4_uca1400_ai_ci`, `utf8mb4_unicode_ci`,
+   `utf8mb4_general_ci`). The hex in `spellings` shows trailing spaces and keeps `DISTINCT` from folding them. If the
+   `ALTER` already ran, write the old collation after `GROUP BY uploaded_by` (for example
+   `GROUP BY uploaded_by COLLATE utf8mb4_unicode_ci`, MariaDB `COLLATE utf8mb4_uca1400_ai_ci`).
 
    - **If you ran `nowo:storage-kit:backfill-uploader-keys` before 1.5.2**, a family may hold rows of one identifier
      stamped with another identifier's key (for example `Alice`'s files with `alice`'s key): the keyed export and
