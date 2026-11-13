@@ -7,8 +7,10 @@ namespace Nowo\StorageKitBundle\EventListener;
 use Symfony\Component\Console\Event\ConsoleCommandEvent;
 use Symfony\Component\Console\Event\ConsoleErrorEvent;
 use Symfony\Component\Console\Event\ConsoleTerminateEvent;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpKernel\Event\FinishRequestEvent;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
+use Symfony\Component\HttpKernel\Event\TerminateEvent;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
@@ -33,11 +35,13 @@ final class RequestBoundaryListener
 
     /**
      * @param iterable<ResetInterface> $memos the bundle services that memoise per request
+     * @param RequestStack|null $requestStack the HTTP kernel's request stack (read only, see {@see UnitOfWorkFrames})
      */
     public function __construct(
         private readonly iterable $memos,
+        ?RequestStack $requestStack = null,
     ) {
-        $this->units = new UnitOfWorkFrames();
+        $this->units = new UnitOfWorkFrames($requestStack);
     }
 
     /**
@@ -81,7 +85,7 @@ final class RequestBoundaryListener
     public function onKernelRequest(RequestEvent $event): void
     {
         if ($event->isMainRequest()) {
-            $this->units->requestStarted();
+            $this->units->requestStarted($event->getRequest());
             $this->reset();
         }
     }
@@ -92,7 +96,7 @@ final class RequestBoundaryListener
     public function onKernelFinishRequest(FinishRequestEvent $event): void
     {
         if ($event->isMainRequest()) {
-            $this->units->requestFinished();
+            $this->units->requestFinished($event->getRequest());
         }
     }
 
@@ -100,33 +104,57 @@ final class RequestBoundaryListener
      * `kernel.terminate` (PHP_INT_MAX): a top-level request boundary resets the main-request counter, even when the
      * request's `kernel.finish_request` never came (audit NR-b M1).
      */
-    public function onKernelTerminateStarted(): void
+    public function onKernelTerminateStarted(TerminateEvent $event): void
     {
-        $this->units->requestBoundaryEnded();
+        $this->units->requestBoundaryEnded($event);
     }
 
     /**
      * A Messenger message was received (`WorkerMessageReceivedEvent`, PHP_INT_MAX).
      */
-    public function onMessageReceived(): void
+    public function onMessageReceived(object $event): void
     {
-        $this->units->messageReceived();
+        $this->units->messageReceived($event);
+    }
+
+    /**
+     * A Messenger worker starts (`WorkerStartedEvent`, PHP_INT_MAX; its own message state, audit NX CR1).
+     */
+    public function onWorkerStarted(object $event): void
+    {
+        $this->units->workerStarted($event);
+    }
+
+    /**
+     * End of the received event (PHP_INT_MIN): a message skipped with `shouldHandle(false)` ends (audit NX CR3).
+     */
+    public function onMessageReceivedDecided(object $event): void
+    {
+        $this->units->messageReceivedDecided($event);
+    }
+
+    /**
+     * The worker finished a message or is idle (`WorkerRunningEvent`, PHP_INT_MAX).
+     */
+    public function onWorkerRunning(object $event): void
+    {
+        $this->units->workerRunning($event);
     }
 
     /**
      * A message was handled, failed or skipped (PHP_INT_MAX): no message is in flight any more.
      */
-    public function onMessageEnded(): void
+    public function onMessageEnded(object $event): void
     {
-        $this->units->messageFinished();
+        $this->units->messageFinished($event);
     }
 
     /**
      * The worker stopped (`WorkerStoppedEvent`, PHP_INT_MAX).
      */
-    public function onWorkerStopped(): void
+    public function onWorkerStopped(object $event): void
     {
-        $this->units->workerStopped();
+        $this->units->workerStopped($event);
     }
 
     /**

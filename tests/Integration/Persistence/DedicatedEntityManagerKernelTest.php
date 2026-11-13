@@ -230,9 +230,9 @@ final class DedicatedEntityManagerKernelTest extends KernelTestCase
 
     public function testEveryUnitStartsWithAnEmptyBundleManagerEvenWhenTheLastOneNeverEnded(): void
     {
-        $kernel     = $this->bootDedicated();
-        $subscriber = $this->service($kernel, OwnEntityManagerSubscriber::class);
-        $http       = $kernel->getContainer()->get('http_kernel');
+        $kernel = $this->bootDedicated();
+        self::assertInstanceOf(OwnEntityManagerSubscriber::class, $this->service($kernel, OwnEntityManagerSubscriber::class));
+        $http = $kernel->getContainer()->get('http_kernel');
         self::assertInstanceOf(HttpKernel::class, $http);
         $dispatcher = $this->service($kernel, 'event_dispatcher');
         self::assertInstanceOf(EventDispatcherInterface::class, $dispatcher);
@@ -266,7 +266,7 @@ final class DedicatedEntityManagerKernelTest extends KernelTestCase
         $profile = $this->profile($kernel);
         $units->commandEnds();
         self::assertTrue($bundle()->contains($profile), 'a run that never started ends nothing (audit NM)');
-        $subscriber->onTerminate();
+        $units->terminate();
         self::assertFalse($bundle()->contains($profile), 'outside a command, kernel.terminate clears');
     }
 

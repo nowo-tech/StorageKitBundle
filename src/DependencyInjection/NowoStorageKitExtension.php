@@ -27,6 +27,7 @@ use Nowo\StorageKitBundle\Controller\StorageSettingsController;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\InstanceSettingsPass;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Doctrine\TablePrefixListener;
+use Nowo\StorageKitBundle\Doctrine\UploaderCollationListener;
 use Nowo\StorageKitBundle\Download\FileDelivery;
 use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
 use Nowo\StorageKitBundle\Download\FileDeliveryResponder;
@@ -109,6 +110,7 @@ use function sprintf;
 use function trim;
 
 use const PHP_INT_MAX;
+use const PHP_INT_MIN;
 
 /**
  * Loads `nowo_storage_kit`: storage, SSRF guard, profiles, contexts and references, uploads and downloads, purge,
@@ -145,6 +147,12 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
 
     /** Messenger's `WorkerStoppedEvent` (by name; 1.5.1 audit NM). */
     public const WORKER_STOPPED = 'Symfony\\Component\\Messenger\\Event\\WorkerStoppedEvent';
+
+    /** Audit NX: a worker starts (its own message state). */
+    public const WORKER_STARTED = 'Symfony\\Component\\Messenger\\Event\\WorkerStartedEvent';
+
+    /** Audit NX: a worker finished a message (also a skipped one) or is idle. */
+    public const WORKER_RUNNING = 'Symfony\\Component\\Messenger\\Event\\WorkerRunningEvent';
 
     /** Service id of the bundle's own download delivery (1.5; `FileDelivery` and `FileDeliveryInterface` are aliases). */
     public const FILE_DELIVERY_ID = 'nowo_storage_kit.file_delivery';
@@ -238,6 +246,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
                 new Reference(FileContexts::class),
                 new Reference(FileReferenceListener::class),
             ]),
+            new Reference('request_stack', ContainerInterface::NULL_ON_INVALID_REFERENCE),
         ]))
             ->setPublic(true)
             ->addTag('kernel.event_listener', ['event' => KernelEvents::REQUEST, 'method' => 'onKernelRequest', 'priority' => PHP_INT_MAX])
@@ -248,7 +257,10 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_FAILED, 'method' => 'onBoundary'])
             // 1.5.1 (audit NM / NL2-v): every unit-of-work state change at PHP_INT_MAX, before any listener that could
             // throw or stop the propagation.
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_STARTED, 'method' => 'onWorkerStarted', 'priority' => PHP_INT_MAX])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_RECEIVED, 'method' => 'onMessageReceived', 'priority' => PHP_INT_MAX])
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_RECEIVED, 'method' => 'onMessageReceivedDecided', 'priority' => PHP_INT_MIN])
+            ->addTag('kernel.event_listener', ['event' => self::WORKER_RUNNING, 'method' => 'onWorkerRunning', 'priority' => PHP_INT_MAX])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_HANDLED, 'method' => 'onMessageEnded', 'priority' => PHP_INT_MAX])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_FAILED, 'method' => 'onMessageEnded', 'priority' => PHP_INT_MAX])
             ->addTag('kernel.event_listener', ['event' => self::WORKER_MESSAGE_SKIPPED, 'method' => 'onMessageEnded', 'priority' => PHP_INT_MAX])
@@ -292,6 +304,8 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $container->setDefinition(StorageEntityManager::class, new Definition(StorageEntityManager::class, [new Reference('doctrine'), $config['doctrine']['entity_manager']]));
         $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$config['doctrine']['table_prefix']]))
             ->addTag('doctrine.event_listener', ['event' => 'loadClassMetadata']));
+        $container->setDefinition(UploaderCollationListener::class, (new Definition(UploaderCollationListener::class, [new Reference(StorageEntityManager::class)]))
+            ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchemaTable']));
         foreach ([StorageProfileRepository::class, StoredFileRepository::class, StorageSyncRepository::class] as $repository) {
             $container->setDefinition($repository, (new Definition($repository, [new Reference(StorageEntityManager::class)]))->setPublic(true));
         }

@@ -6,18 +6,20 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Security](#security)
   - [Fixed](#fixed)
+  - [Tests](#tests)
 - [[1.5.1] - 2026-11-12](#151---2026-11-12)
   - [Fixed](#fixed-1)
-  - [Tests](#tests)
+  - [Tests](#tests-1)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
   - [Added](#added)
   - [Changed](#changed)
   - [Deprecated](#deprecated)
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Added](#added-1)
-  - [Security](#security)
-  - [Fixed](#fixed-2)
+  - [Security](#security-1)
+  - [Fixed](#fixed-1)
   - [Changed](#changed-1)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
   - [Fixed](#fixed-3)
@@ -25,7 +27,7 @@ All notable changes to this project are documented here. The format follows
   - [Changed](#changed-2)
   - [Deprecated](#deprecated-1)
 - [[1.2.0] - 2026-11-10](#120---2026-11-10)
-  - [Security](#security-1)
+  - [Security](#security-2)
   - [Added](#added-3)
   - [Changed](#changed-3)
 - [[1.1.0] - 2026-11-03](#110---2026-11-03)
@@ -34,12 +36,56 @@ All notable changes to this project are documented here. The format follows
   - [Fixed](#fixed-4)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
   - [Added](#added-5)
-  - [Security](#security-2)
+  - [Security](#security-3)
 
 ## [Unreleased]
 
+### Security
+
+- **Look-alike uploader identifiers reached another person's files (house rule LQ; affects 1.0.0 to 1.5.1 on MySQL /
+  MariaDB).** `storage_kit_file.uploaded_by` / `uploaded_by_key` had no collation of their own, so they used the
+  host default (`utf8mb4_0900_ai_ci`, `utf8mb4_unicode_ci`, `utf8mb4_general_ci`, MariaDB `utf8mb4_uca1400_ai_ci`),
+  which folds case and accents and, except `utf8mb4_0900_ai_ci`, ignores trailing spaces. The GDPR lookups compared
+  in SQL only: `export('alice')` also listed the files of `Alice`, `álice` (and `alice ` on a PAD SPACE collation),
+  `erase('alice')` anonymised them and handed the unreferenced ones to the purge, and a key such as `App\User:abc`
+  matched `App\User:ABC`. `nowo:storage-kit:backfill-uploader-keys` read one identifier per look-alike family: the
+  others were skipped, or stamped with that identifier's key when the provider loaded it (a later keyed export /
+  erasure of that user then included them). Now:
+  - `StoredFileRepository::uploadedBy()` / `uploadedIdsBy()` match every row again with `===` (new
+    `PersonalData\UploaderIdentity::matches()`); a page of look-alikes only no longer ends the walk early;
+  - the backfill groups rows by their exact identifier, keys them by id, and does not use a user the provider returns
+    under another identifier (counted as "loaded by the provider under another identifier");
+  - an upload stores no `uploaded_by` / `uploaded_by_key` with leading or trailing white space, a control, format or
+    line / paragraph separator character, invalid UTF-8 or more than 180 characters (`UploaderIdentity::storable()`;
+    refused, never trimmed; an over-long identifier used to be cut to 180 characters, which could name another person);
+  - new `Doctrine\UploaderCollationListener` gives both columns a binary NO PAD collation in the generated schema
+    (MariaDB `utf8mb4_nopad_bin`, MySQL 8.0+ `utf8mb4_0900_bin`, MySQL 5.7 `utf8mb4_bin`). Existing tables need an
+    `ALTER TABLE`: see [UPGRADING](UPGRADING.md#to-152). PostgreSQL and SQLite compare exactly and were not affected.
+
 ### Fixed
 
+- **Unit boundary tracker: per-worker message depth, request stack (audit NX CR1–CR3).** The tracker kept one
+  process-wide "message in flight" flag and judged a main request outermost without looking at other main requests.
+  A Messenger worker run in-process inside a message handler ended the outer message, so the inner worker's messages
+  and a main request handled later by the outer handler cleared the outer unit (CR1); a main request handled
+  in-process inside another main request cleared the outer one (CR2); a message skipped by a
+  `WorkerMessageReceivedEvent` listener (`shouldHandle(false)`) stayed in flight until the worker stopped (CR3). It now
+  keeps a stack of the running workers (`WorkerStartedEvent` / `WorkerRunningEvent` / `WorkerStoppedEvent`), each with
+  its own message, and a stack of the main requests in flight, popped by their own `kernel.finish_request` /
+  `kernel.terminate` (unbalanced events heal); a skipped message ends with its received event or at its worker's next
+  `WorkerRunningEvent`. Message boundaries clear only outside another message. No configuration change.
+- **Unit boundary tracker: aborted worker runs, skip read, nested terminate (audit OB).** A Messenger run aborted by an
+  exception thrown out of `Worker::run()` (a throwing received, handled or running listener) left its worker "in
+  flight", so inside a long-running command every later worker's messages stopped clearing (OB-M1) and the worker stack
+  grew with every aborted run (OB-L1); the tracker now holds weak references to the worker and to the received event of
+  the message in flight, and drops a run as soon as either is gone. The `shouldHandle(false)` read at the end of a
+  received event no longer ends an outer message when a listener already ended the skipped one (OB-L2). The
+  `kernel.terminate` of a main request handled in-process inside another one no longer clears the outer request nor
+  resets the tracker (OB-L3). Note: in hosts with Messenger, DoctrineBundle's own subscriber clears every manager after
+  each message, so a worker run inside a handler keeps the bundle's pending events and memos, not the identity map.
+  Audit OB2-L1: a main request also drops the requests left in flight when the oldest one is not the kernel's main
+  request (host code left the `RequestStack` unbalanced, then a request threw out of `HttpKernel::handle()`), so the
+  next requests keep clearing instead of never clearing again for the rest of the worker's life.
 - DoctrineBundle 3.4: bundle entities resolved to the default manager when a dedicated manager is configured.
   DoctrineBundle 3.4 `auto_discover_entities` (on by default for a manager without `mappings` and `auto_mapping`, with
   Symfony 7.3+ and doctrine/orm 3.6+) gives that manager's metadata driver chain a default attribute driver, which
@@ -52,6 +98,14 @@ All notable changes to this project are documented here. The format follows
   chain), so the entities resolve to the configured manager on DoctrineBundle 2.x, 3.3 and 3.4+. The bundle's own
   services already used the configured manager. Affected in practice: 1.5.0 to 1.5.1 (every release with
   `doctrine.entity_manager`; both allow `doctrine/doctrine-bundle` `^3.0`) with DoctrineBundle 3.4.0 or later.
+
+### Tests
+
+- `tests/Integration/Lifecycle/LookalikeUploaderTest.php` (runs on the MySQL 8.4, MariaDB 11 and PostgreSQL CI jobs and
+  on SQLite): export, erasure and backfill with `alice` / `Alice` / `alice ` / `álice` and look-alike keys, a page of
+  look-alikes before the real files, a case-insensitive user provider, uploads with padded / zero-width / over-long
+  identifiers, and the column collation on MySQL / MariaDB. Unit tests for `UploaderIdentity` and
+  `UploaderCollationListener`.
 
 ## [1.5.1] - 2026-11-12
 
