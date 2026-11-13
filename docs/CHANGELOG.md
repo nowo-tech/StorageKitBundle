@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.5.2] - 2026-11-13](#152---2026-11-13)
   - [Security](#security)
   - [Fixed](#fixed)
   - [Tests](#tests)
@@ -19,7 +20,7 @@ All notable changes to this project are documented here. The format follows
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Added](#added-1)
   - [Security](#security-1)
-  - [Fixed](#fixed-1)
+  - [Fixed](#fixed-2)
   - [Changed](#changed-1)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
   - [Fixed](#fixed-3)
@@ -39,6 +40,8 @@ All notable changes to this project are documented here. The format follows
   - [Security](#security-3)
 
 ## [Unreleased]
+
+## [1.5.2] - 2026-11-13
 
 ### Security
 
