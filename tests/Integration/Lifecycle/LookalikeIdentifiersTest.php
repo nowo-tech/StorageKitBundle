@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Lifecycle;
 
 use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\SQLitePlatform;
 use InvalidArgumentException;
@@ -33,6 +34,7 @@ use function array_keys;
 use function array_map;
 use function bin2hex;
 use function is_array;
+use function is_bool;
 use function preg_replace;
 use function sort;
 use function sprintf;
@@ -373,7 +375,10 @@ final class LookalikeIdentifiersTest extends KernelTestCase
         $row        = $connection->fetchAssociative('SELECT * FROM storage_kit_profile WHERE id = ?', [$profile->getId()]);
         self::assertIsArray($row);
         unset($row['id']);
-        $connection->insert('storage_kit_profile', ['uuid' => sprintf('00000000-0000-4000-9000-%012d', $n + 1), 'scope' => $scope, 'state' => StorageProfile::STATE_RETIRED] + $row);
+        $row = ['uuid' => sprintf('00000000-0000-4000-9000-%012d', $n + 1), 'scope' => $scope, 'state' => StorageProfile::STATE_RETIRED] + $row;
+        // PostgreSQL returns booleans as PHP booleans: bind them as such (a string `false` is "").
+        $types = array_map(static fn (mixed $value): ParameterType => is_bool($value) ? ParameterType::BOOLEAN : ParameterType::STRING, $row);
+        $connection->insert('storage_kit_profile', $row, $types);
     }
 
     /**
