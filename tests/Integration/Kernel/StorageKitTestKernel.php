@@ -17,6 +17,7 @@ use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
 use Symfony\Bundle\SecurityBundle\SecurityBundle;
 use Symfony\Bundle\TwigBundle\TwigBundle;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpKernel\Kernel;
 use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
@@ -45,6 +46,8 @@ final class StorageKitTestKernel extends Kernel
      *                              Instance Settings also needs encrypt)
      * @param array<string, mixed>|null $orm doctrine.orm configuration (null: the single-manager shorthand with the
      *                                       `Tests` mapping)
+     * @param array<string, mixed>|null $dbal doctrine.dbal configuration (null: one connection on {@see databaseUrl()})
+     * @param Closure(ContainerBuilder): void|null $build host build step (extra extensions, compiler passes)
      */
     public function __construct(
         private readonly string $id,
@@ -53,6 +56,8 @@ final class StorageKitTestKernel extends Kernel
         private readonly array $without = [],
         bool $debug = false,
         private readonly ?array $orm = null,
+        private readonly ?array $dbal = null,
+        private readonly ?Closure $build = null,
     ) {
         parent::__construct('test', $debug);
     }
@@ -127,6 +132,13 @@ final class StorageKitTestKernel extends Kernel
         return sys_get_temp_dir() . '/nowo-storage-kit-tests';
     }
 
+    protected function build(ContainerBuilder $container): void
+    {
+        if ($this->build instanceof Closure) {
+            ($this->build)($container);
+        }
+    }
+
     protected function configureContainer(ContainerConfigurator $container): void
     {
         $csrf      = !in_array('csrf', $this->without, true);
@@ -152,7 +164,7 @@ final class StorageKitTestKernel extends Kernel
         $container->extension('framework', $framework);
         $container->extension('twig', ['strict_variables' => true]);
         $container->extension('doctrine', [
-            'dbal' => ['url' => self::databaseUrl()],
+            'dbal' => $this->dbal ?? ['url' => self::databaseUrl()],
             'orm'  => $this->orm ?? ['mappings' => ['Tests' => self::testsMapping()]],
         ]);
         if (!in_array('encrypt', $this->without, true)) {

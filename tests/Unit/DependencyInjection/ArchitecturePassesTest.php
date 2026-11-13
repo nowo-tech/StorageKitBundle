@@ -10,6 +10,7 @@ use LogicException;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\FileDeliveryPortsPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\StorageEntityManagerPass;
 use Nowo\StorageKitBundle\DependencyInjection\NowoStorageKitExtension;
+use Nowo\StorageKitBundle\Doctrine\ExcludedEntityNamespaceDriver;
 use Nowo\StorageKitBundle\Doctrine\OwnEntityManagerSubscriber;
 use Nowo\StorageKitBundle\Download\FileDelivery;
 use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
@@ -26,6 +27,7 @@ use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 use function array_keys;
+use function array_map;
 use function implode;
 use function str_contains;
 
@@ -54,14 +56,29 @@ final class ArchitecturePassesTest extends TestCase
         (new StorageEntityManagerPass(checkOnly: true))->process($container);
         self::assertFalse($container->hasDefinition(OwnEntityManagerSubscriber::class), 'check only');
 
-        $bundleDriver = ['addDriver', [new Definition('Driver'), StorageEntityManagerPass::ENTITY_NAMESPACE]];
-        $appDriver    = ['addDriver', [new Definition('Driver'), 'App\\Entity']];
-        $container->setDefinition('doctrine.orm.default_metadata_driver', (new Definition('Chain'))->setMethodCalls([$appDriver, $bundleDriver]));
+        $bundleDriver  = ['addDriver', [new Definition('Driver'), StorageEntityManagerPass::ENTITY_NAMESPACE]];
+        $appDriver     = ['addDriver', [new Definition('Driver'), 'App\\Entity']];
+        $defaultDriver = ['setDefaultDriver', [new Reference('auto_discover')]];
+        $container->setDefinition('doctrine.orm.default_metadata_driver', (new Definition('Chain'))->setMethodCalls([$appDriver, $bundleDriver, $defaultDriver]));
         $container->setDefinition('doctrine.orm.storage_kit_metadata_driver', (new Definition('Chain'))->setMethodCalls([$bundleDriver]));
-        (new StorageEntityManagerPass())->process($container);
+        $container->setDefinition('doctrine.orm.reports_metadata_driver', new Definition('Chain'));
+        for ($run = 0; $run < 2; ++$run) {
+            (new StorageEntityManagerPass())->process($container);
 
-        self::assertSame([$appDriver], $container->getDefinition('doctrine.orm.default_metadata_driver')->getMethodCalls());
-        self::assertSame([$bundleDriver], $container->getDefinition('doctrine.orm.storage_kit_metadata_driver')->getMethodCalls());
+            // Other managers: the host's driver for the namespace is gone; a driver that maps nothing comes first,
+            // before the host's drivers and before any default driver (DoctrineBundle 3.4 auto_discover_entities).
+            $default = $container->getDefinition('doctrine.orm.default_metadata_driver')->getMethodCalls();
+            self::assertSame(
+                [['addDriver', StorageEntityManagerPass::ENTITY_NAMESPACE], ['addDriver', 'App\\Entity'], ['setDefaultDriver', null]],
+                array_map(static fn (array $call): array => [$call[0], $call[1][1] ?? null], $default),
+                'run ' . $run . ' (idempotent)',
+            );
+            self::assertInstanceOf(Definition::class, $default[0][1][0]);
+            self::assertSame(ExcludedEntityNamespaceDriver::class, $default[0][1][0]->getClass());
+            self::assertSame([$appDriver, $defaultDriver], [$default[1], $default[2]]);
+            self::assertSame([$bundleDriver], $container->getDefinition('doctrine.orm.storage_kit_metadata_driver')->getMethodCalls());
+            self::assertSame([['addDriver', StorageEntityManagerPass::ENTITY_NAMESPACE]], array_map(static fn (array $call): array => [$call[0], $call[1][1] ?? null], $container->getDefinition('doctrine.orm.reports_metadata_driver')->getMethodCalls()));
+        }
         self::assertTrue($container->hasDefinition(OwnEntityManagerSubscriber::class));
 
         $container->getDefinition('doctrine.orm.storage_kit_metadata_driver')->setMethodCalls([$appDriver]);
