@@ -7,6 +7,7 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Persistence;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
+use Doctrine\ORM\Mapping\Driver\AttributeDriver;
 use Doctrine\Persistence\ManagerRegistry;
 use Nowo\StorageKitBundle\Doctrine\OwnEntityManagerSubscriber;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
@@ -19,15 +20,21 @@ use Nowo\StorageKitBundle\Reference\FileReferencesInterface;
 use Nowo\StorageKitBundle\Sync\StorageMove;
 use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
+use Nowo\StorageKitBundle\Tests\Fixtures\HostDefaultManagerExtension;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\BoundaryDriver;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Ui\ProfileTester;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\IgnoreDeprecations;
 use stdClass;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Console\ConsoleEvents;
+use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\HttpKernel;
@@ -36,8 +43,10 @@ use Symfony\Component\Messenger\Event\WorkerMessageReceivedEvent;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 
 use function array_filter;
+use function array_keys;
 use function array_map;
 use function array_values;
+use function dirname;
 use function is_array;
 use function str_starts_with;
 
@@ -67,6 +76,79 @@ final class DedicatedEntityManagerKernelTest extends KernelTestCase
         self::assertSame([], $classes($default), 'auto_mapping and the default prepend are kept off the host manager');
         self::assertCount(4, $classes($bundle));
         self::assertTrue($this->container($kernel)->has(OwnEntityManagerSubscriber::class));
+    }
+
+    /**
+     * DoctrineBundle 3.4 regression: `auto_discover_entities` (on by default for a manager without `mappings` and
+     * `auto_mapping`) gives the host manager's chain a default attribute driver, which claims every `#[ORM\Entity]`
+     * class: the host manager mapped the bundle entities too, and once it came first in the registry (another bundle
+     * configuring it, the host's own order) `getManagerForClass()` answered it, so host-facing code (`doctrine`
+     * repositories, EntityType, UniqueEntity, MapEntity) queried its database. The explicit catch-all default driver
+     * reproduces it on every DoctrineBundle version. The bundle manager is on its own database here.
+     */
+    #[DataProvider('hostManagersWithADefaultDriver')]
+    #[IgnoreDeprecations]
+    public function testTheDedicatedManagerWinsOverADefaultDriverOfTheHostManager(bool $explicitDefaultDriver, bool $hostManagerFirst): void
+    {
+        $kernel = $this->bootKernel(
+            [
+                'doctrine'         => ['entity_manager' => 'storage_kit'],
+                'profiles'         => ['main' => ['dsn' => 's3://test-key:test-secret-not-real@minio:9000/main?tls=0&path_style=1']],
+                'instance_profile' => 'main',
+            ],
+            // Instance Settings maps its entities on the host manager, which turns DoctrineBundle 3.4 auto-discovery off.
+            without: ['settings'],
+            orm: ['default_entity_manager' => 'default', 'entity_managers' => ['default' => ['connection' => 'default'], 'storage_kit' => ['connection' => 'storage_kit']]],
+            dbal: ['default_connection' => 'default', 'connections' => ['default' => ['url' => 'sqlite:///:memory:'], 'storage_kit' => ['url' => 'sqlite:///:memory:']]],
+            build: static function (ContainerBuilder $container) use ($explicitDefaultDriver, $hostManagerFirst): void {
+                if ($hostManagerFirst) {
+                    $container->registerExtension(new HostDefaultManagerExtension());
+                }
+                if ($explicitDefaultDriver) {
+                    $container->addCompilerPass(new class implements CompilerPassInterface {
+                        public function process(ContainerBuilder $container): void
+                        {
+                            // An attribute driver answers "not transient" for any class carrying #[ORM\Entity],
+                            // whatever its paths.
+                            $container->getDefinition('doctrine.orm.default_metadata_driver')
+                                ->addMethodCall('setDefaultDriver', [new Definition(AttributeDriver::class, [[dirname(__DIR__, 2) . '/Fixtures/Entity'], true])]);
+                        }
+                    });
+                }
+            },
+            schema: false,
+        );
+        $registry = $this->registry($kernel);
+        self::assertSame($hostManagerFirst ? ['default', 'storage_kit'] : ['storage_kit', 'default'], array_keys($registry->getManagerNames()));
+        $bundle = $registry->getManager('storage_kit');
+
+        // Neither manager is initialized yet: DoctrineBundle 3.4 asks the metadata drivers.
+        foreach ([StoredFile::class, StorageProfile::class, StorageSync::class] as $class) {
+            self::assertSame($bundle, $registry->getManagerForClass($class), $class);
+        }
+
+        $this->createSchema($kernel);
+        $host = $this->hostManager($kernel);
+        self::assertTrue($host->getMetadataFactory()->isTransient(StoredFile::class), 'not mapped on the host manager');
+        self::assertSame($bundle, $registry->getManagerForClass(StoredFile::class));
+
+        // A bundle write lands in the bundle database, and the host-facing registry reads it back from there.
+        $profile = $this->profile($kernel);
+        self::assertSame($bundle, $this->service($kernel, StorageEntityManager::class)->manager());
+        $bundle->clear();
+        self::assertInstanceOf(StorageProfile::class, $registry->getRepository(StorageProfile::class)->find($profile->getId()), 'the registry repository reads the bundle database');
+        self::assertFalse($host->getConnection()->createSchemaManager()->tablesExist([$bundle->getClassMetadata(StorageProfile::class)->getTableName()]), 'nothing on the host database');
+    }
+
+    /**
+     * @return iterable<string, array{bool, bool}>
+     */
+    public static function hostManagersWithADefaultDriver(): iterable
+    {
+        yield 'host manager without mappings (DoctrineBundle 3.4 auto-discovery)' => [false, false];
+        yield 'host manager without mappings, first in the registry' => [false, true];
+        yield 'host manager with a catch-all default driver' => [true, false];
+        yield 'host manager with a catch-all default driver, first in the registry' => [true, true];
     }
 
     public function testNoBundleWriteFlushesTheHostManager(): void

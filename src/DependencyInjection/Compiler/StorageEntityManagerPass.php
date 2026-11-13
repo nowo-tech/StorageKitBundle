@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\DependencyInjection\Compiler;
 
 use Nowo\StorageKitBundle\DependencyInjection\NowoStorageKitExtension;
+use Nowo\StorageKitBundle\Doctrine\ExcludedEntityNamespaceDriver;
 use Nowo\StorageKitBundle\Doctrine\OwnEntityManagerSubscriber;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
@@ -14,6 +15,7 @@ use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
 
 use function array_keys;
+use function array_unshift;
 use function implode;
 use function is_array;
 use function is_string;
@@ -26,9 +28,12 @@ use function trigger_deprecation;
  *
  * DoctrineBundle's `auto_mapping` (the Flex default on the default manager) maps every bundle's `Entity` directory, so
  * with a dedicated manager the entities would be mapped twice and `getManagerForClass()` would return the default
- * manager. This pass removes the bundle namespace from the mapping driver chain of every other manager and fails the
- * build when the configured manager does not exist or does not map the entities. A dedicated manager (not the host
- * default) also gets {@see OwnEntityManagerSubscriber}: recovered when closed, cleared at every boundary.
+ * manager. This pass removes the bundle namespace from the mapping driver chain of every other manager, registers an
+ * {@see ExcludedEntityNamespaceDriver} for it first in those chains instead (so a default driver of the chain cannot
+ * claim the entities either: DoctrineBundle 3.4 `auto_discover_entities`; only the public `addDriver()` of the
+ * documented `doctrine.orm.<manager>_metadata_driver` chain is used) and fails the build when the configured manager
+ * does not exist or does not map the entities. A dedicated manager (not the host default) also gets
+ * {@see OwnEntityManagerSubscriber}: recovered when closed, cleared at every boundary.
  */
 final readonly class StorageEntityManagerPass implements CompilerPassInterface
 {
@@ -83,6 +88,10 @@ final readonly class StorageEntityManagerPass implements CompilerPassInterface
                 }
                 $maps    = $maps || $isBundleDriver;
                 $calls[] = $call;
+            }
+            if ($manager !== $name) {
+                // First in the chain: a chain asks its namespace drivers in order, then its default driver.
+                array_unshift($calls, ['addDriver', [new Definition(ExcludedEntityNamespaceDriver::class), self::ENTITY_NAMESPACE]]);
             }
             $chain->setMethodCalls($calls);
             if ($manager === $name && !$maps) {

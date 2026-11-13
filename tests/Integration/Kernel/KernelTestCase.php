@@ -23,6 +23,7 @@ use Nowo\StorageKitBundle\Tests\Support\InMemoryStorageConnectionFactory;
 use PHPUnit\Framework\TestCase;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\BrowserKit\Cookie;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\Filesystem\Filesystem;
@@ -59,8 +60,11 @@ abstract class KernelTestCase extends TestCase
      * @param Closure(RoutingConfigurator): void|null $routes routes (default: the bundle loader)
      * @param Closure(ContainerConfigurator): void|null $extra extra container configuration
      * @param array<string, mixed>|null $orm doctrine.orm configuration (null: single manager with the `Tests` mapping)
+     * @param array<string, mixed>|null $dbal doctrine.dbal configuration (null: one connection)
+     * @param Closure(ContainerBuilder): void|null $build host build step (extra extensions, compiler passes)
+     * @param bool $schema create every manager's tables (which initializes the managers)
      */
-    protected function bootKernel(array $config = [], array $without = [], ?Closure $routes = null, bool $debug = false, ?Closure $extra = null, bool $memory = true, ?array $orm = null): StorageKitTestKernel
+    protected function bootKernel(array $config = [], array $without = [], ?Closure $routes = null, bool $debug = false, ?Closure $extra = null, bool $memory = true, ?array $orm = null, ?array $dbal = null, ?Closure $build = null, bool $schema = true): StorageKitTestKernel
     {
         $config += [
             'scopes'    => ['enabled' => true, 'access_checker' => ScopeAccess::class],
@@ -99,13 +103,25 @@ abstract class KernelTestCase extends TestCase
             $without,
             $debug,
             $orm,
+            $dbal,
+            $build,
         );
         $this->kernels[] = $kernel;
         $kernel->boot();
+        if ($schema) {
+            $this->createSchema($kernel);
+        }
 
+        return $kernel;
+    }
+
+    /**
+     * Creates every manager's tables (a dedicated bundle manager maps the bundle entities only).
+     */
+    protected function createSchema(StorageKitTestKernel $kernel): void
+    {
         $doctrine = $kernel->getContainer()->get('doctrine');
         self::assertInstanceOf(ManagerRegistry::class, $doctrine);
-        // Every manager's tables (a dedicated bundle manager maps the bundle entities only).
         foreach ($doctrine->getManagers() as $entityManager) {
             if ($entityManager instanceof EntityManagerInterface) {
                 $metadata = $entityManager->getMetadataFactory()->getAllMetadata();
@@ -114,8 +130,6 @@ abstract class KernelTestCase extends TestCase
                 $tool->createSchema($metadata);
             }
         }
-
-        return $kernel;
     }
 
     protected function container(StorageKitTestKernel $kernel): ContainerInterface
