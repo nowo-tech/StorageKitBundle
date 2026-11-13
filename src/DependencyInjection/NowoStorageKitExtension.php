@@ -27,6 +27,7 @@ use Nowo\StorageKitBundle\Controller\StorageSettingsController;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\InstanceSettingsPass;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Doctrine\TablePrefixListener;
+use Nowo\StorageKitBundle\Doctrine\UploaderCollationListener;
 use Nowo\StorageKitBundle\Download\FileDelivery;
 use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
 use Nowo\StorageKitBundle\Download\FileDeliveryResponder;
@@ -303,6 +304,8 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $container->setDefinition(StorageEntityManager::class, new Definition(StorageEntityManager::class, [new Reference('doctrine'), $config['doctrine']['entity_manager']]));
         $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$config['doctrine']['table_prefix']]))
             ->addTag('doctrine.event_listener', ['event' => 'loadClassMetadata']));
+        $container->setDefinition(UploaderCollationListener::class, (new Definition(UploaderCollationListener::class, [new Reference(StorageEntityManager::class)]))
+            ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchemaTable']));
         foreach ([StorageProfileRepository::class, StoredFileRepository::class, StorageSyncRepository::class] as $repository) {
             $container->setDefinition($repository, (new Definition($repository, [new Reference(StorageEntityManager::class)]))->setPublic(true));
         }
