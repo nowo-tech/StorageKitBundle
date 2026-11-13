@@ -11,6 +11,7 @@ use function array_filter;
 use function array_map;
 use function array_values;
 use function in_array;
+use function preg_match;
 
 /**
  * Helper for {@see FileReferenceSourceInterface::existing()} and
@@ -29,7 +30,7 @@ final class ExistingIds
      */
     public static function of(EntityManagerInterface $entityManager, string $class, string $field, array $ids): array
     {
-        if ($ids === [] || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $field) !== 1) {
+        if ($ids === [] || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $field) !== 1) {
             return [];
         }
         $rows = $entityManager->createQueryBuilder()

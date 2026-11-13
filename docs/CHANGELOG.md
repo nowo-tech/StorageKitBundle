@@ -69,8 +69,9 @@ All notable changes to this project are documented here. The format follows
   `server_version` without the patch number). Unusable owner keys and source ids (empty, too long, invalid UTF-8,
   edge white space or NBSP, control / zero-width / BOM / bidi characters), malformed contexts from a reference source
   and resolver scope keys outside the scope syntax are refused, never trimmed. While `source_id` still folds, a
-  reference its folding unique key would reject is skipped and logged (never retried with the look-alike's row; no
-  entity manager is closed). See UPGRADING for the detection queries to run **before** the `ALTER`, and the `ALTER`
+  reference its folding unique key would reject is skipped with a logged warning naming the `ALTER` (never retried
+  with the look-alike's row; the insert runs in a savepoint inside a host transaction, so a unique violation neither
+  aborts that transaction on PostgreSQL nor closes an entity manager). See UPGRADING for the detection queries to run **before** the `ALTER`, and the `ALTER`
   (required for `storage_kit_file_reference`).
 
 ### Added

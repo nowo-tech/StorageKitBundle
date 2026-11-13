@@ -8,14 +8,17 @@ use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Platforms\SQLitePlatform;
 use InvalidArgumentException;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
+use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Lifecycle\FilePurger;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Reference\FileReferences;
 use Nowo\StorageKitBundle\Reference\FileReferencesInterface;
+use Nowo\StorageKitBundle\Reference\FileUris;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Nowo\StorageKitBundle\Repository\StoredFileRepository;
 use Nowo\StorageKitBundle\Scope\StorageScope;
@@ -29,6 +32,7 @@ use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+use Symfony\Component\ErrorHandler\BufferingLogger;
 
 use function array_keys;
 use function array_map;
@@ -237,24 +241,76 @@ final class LookalikeIdentifiersTest extends KernelTestCase
         }
     }
 
-    public function testAUniqueViolationOnAFoldingKeyIsDroppedAndLeavesTheEntityManagerOpen(): void
+    #[DataProvider('collations')]
+    public function testAReferenceTheFoldingKeySkipsIsLogged(?string $collation): void
+    {
+        $kernel = $this->bootKernel();
+        if (!$this->fold($kernel, $collation)) {
+            return;
+        }
+        // The look-alike that folds with `bob` under the collation (RTRIM ignores trailing spaces, not case).
+        $holder = $collation === 'RTRIM' ? 'bob ' : 'Bob';
+        $file   = $this->seedFile($kernel, 0, 'b1');
+        $this->seedReference($kernel, $file['id'], $holder);
+        $logger = new BufferingLogger();
+
+        $this->references($kernel, $logger)->sync('note', 'bob', sprintf('![a](storage-file:%s)', $file['uuid']), ['board', 'b1']);
+
+        $logs = $logger->cleanLogs();
+        if ($collation === null) {
+            self::assertSame([$file['id']], $this->filesOf($kernel, 'bob'), 'an exact column holds both texts');
+            self::assertSame([], $logs);
+
+            return;
+        }
+        self::assertSame([], $this->filesOf($kernel, 'bob'), 'never written over the look-alike\'s row');
+        self::assertSame([$file['id']], $this->filesOf($kernel, $holder));
+        self::assertCount(1, $logs);
+        self::assertSame('warning', $logs[0][0]);
+        self::assertStringContainsString('storage_kit_file_reference ALTER', $logs[0][1]);
+        self::assertSame(['skipped' => 1, 'type' => 'note'], $logs[0][2]);
+    }
+
+    /**
+     * A unique violation the `NOT EXISTS` cannot foresee (a race; simulated with a folding unique index next to an
+     * exact column) inside a host transaction: the insert's savepoint is rolled back, the host transaction stays usable
+     * (PostgreSQL aborts a transaction on a failed statement otherwise: 25P02) and the entity manager stays open.
+     */
+    public function testAUniqueViolationInsideAHostTransactionLeavesItUsable(): void
     {
         $kernel     = $this->bootKernel();
         $connection = $this->connection($kernel);
-        if (!$connection->getDatabasePlatform() instanceof SQLitePlatform) {
-            // MySQL / MariaDB cannot index a column with another collation than its own; SQLite stands in for a race.
+        $platform   = $connection->getDatabasePlatform();
+        if ($platform instanceof SQLitePlatform) {
+            $connection->executeStatement('CREATE UNIQUE INDEX test_folding_reference ON storage_kit_file_reference (file_id, source_type, source_id COLLATE NOCASE)');
+        } elseif ($platform instanceof PostgreSQLPlatform) {
+            $connection->executeStatement('CREATE UNIQUE INDEX test_folding_reference ON storage_kit_file_reference (file_id, source_type, lower(source_id))');
+        } else {
+            // MySQL / MariaDB cannot index a column with another collation than its own.
             $this->addToAssertionCount(1);
 
             return;
         }
-        $connection->executeStatement('CREATE UNIQUE INDEX test_folding_reference ON storage_kit_file_reference (file_id, source_type, source_id COLLATE NOCASE)');
-        $file = $this->seedFile($kernel, 0, 'b1');
+        $file  = $this->seedFile($kernel, 0, 'b1');
+        $other = $this->seedFile($kernel, 1, 'b1');
         $this->seedReference($kernel, $file['id'], 'Bob');
+        $logger = new BufferingLogger();
 
-        $this->service($kernel, FileReferences::class)->sync('note', 'bob', sprintf('![a](storage-file:%s)', $file['uuid']), ['board', 'b1']);
+        $connection->beginTransaction();
+        $this->references($kernel, $logger)->sync('note', 'bob', sprintf('![a](storage-file:%s)', $file['uuid']), ['board', 'b1']);
+        // The host keeps working in its transaction, then commits.
+        $connection->executeStatement('UPDATE storage_kit_file SET total_bytes = 7 WHERE id = ?', [$other['id']]);
+        $connection->commit();
 
         self::assertSame($this->hex(['Bob']), $this->sources($kernel));
+        self::assertSame(7, (int) $connection->fetchOne('SELECT total_bytes FROM storage_kit_file WHERE id = ?', [$other['id']]));
+        self::assertSame(['skipped' => 1, 'type' => 'note'], $logger->cleanLogs()[0][2]);
         self::assertTrue($this->entityManager($kernel)->isOpen());
+
+        // Outside a transaction the insert runs in one of its own: the same outcome.
+        $this->references($kernel, $logger)->sync('note', 'bob', sprintf('![a](storage-file:%s)', $file['uuid']), ['board', 'b1']);
+        self::assertSame($this->hex(['Bob']), $this->sources($kernel));
+        self::assertFalse($connection->isTransactionActive());
     }
 
     public function testTheIdentifierColumnsUseABinaryNoPadCollationOnMysqlAndMariadb(): void
@@ -423,6 +479,11 @@ final class LookalikeIdentifiersTest extends KernelTestCase
         sort($hex);
 
         return $hex;
+    }
+
+    private function references(StorageKitTestKernel $kernel, BufferingLogger $logger): FileReferences
+    {
+        return new FileReferences($this->service($kernel, StorageEntityManager::class), $this->service($kernel, FileUris::class), $logger);
     }
 
     private function connection(StorageKitTestKernel $kernel): Connection

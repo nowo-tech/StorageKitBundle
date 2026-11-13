@@ -120,7 +120,8 @@ nothing to do unless you declared those columns `COLLATE NOCASE` / `RTRIM` yours
    **The `storage_kit_file_reference` statement is required for safety**, not only for speed: its unique key
    `uniq_storage_kit_file_reference (file_id, source_type, source_id)` folds with the column, so while it does, two
    look-alike texts cannot both reference one file. The bundle then skips the second reference rather than fail
-   (logged; never retried with the look-alike's row), but that file is orphaned as soon as the first text drops it.
+   (a warning "file reference(s) … skipped … run the storage_kit_file_reference ALTER" is logged; never retried with
+   the look-alike's row), but that file is orphaned as soon as the first text drops it.
    The statements rewrite the tables and their indexes; going from a folding collation to a binary one cannot create
    duplicates, so none of them can fail on the unique key. On large tables run them in a maintenance window or with an
    online schema tool. Until they run, the exact SQL filters and the `===` re-checks keep every lookup exact.

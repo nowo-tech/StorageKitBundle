@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Reference;
 
 use DateTimeImmutable;
 use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\DBAL\Types\Types;
 use Nowo\StorageKitBundle\Context\FileContexts;
@@ -23,6 +24,7 @@ use function array_keys;
 use function array_map;
 use function array_unique;
 use function array_values;
+use function count;
 use function in_array;
 use function is_scalar;
 
@@ -40,7 +42,7 @@ use function is_scalar;
  * ({@see ExactIdentifier::usable()}, at most {@see self::SOURCE_ID_MAX} characters) or a context outside the context
  * syntax references nothing (logged). While `source_id` still has a folding collation (before the `ALTER` of
  * UPGRADING 1.5.3) its unique key cannot hold two look-alike texts on one file: the second reference is then not
- * written (fails closed, never retried with the look-alike's row).
+ * written and a warning is logged (fails closed, never retried with the look-alike's row).
  */
 final readonly class FileReferences implements FileReferencesInterface
 {
@@ -195,8 +197,11 @@ final readonly class FileReferences implements FileReferencesInterface
     /**
      * One statement: the files not referenced by this text yet (a concurrent save adds nothing twice). The `NOT EXISTS`
      * compares `source_id` with the column collation on purpose: while it still folds, it skips a file a look-alike text
-     * already holds instead of hitting the folding unique key. A unique violation all the same (two saves at once) is
-     * logged and dropped: no statement is retried, nothing reaches the look-alike's row, no entity manager is touched.
+     * already holds instead of hitting the folding unique key; fewer rows inserted than asked is logged. A unique
+     * violation all the same (two saves at once) is logged and dropped: no statement is retried, nothing reaches the
+     * look-alike's row, no entity manager is touched. The statement runs as its own unit
+     * ({@see StorageEntityManager::atomically()}): inside a host transaction a savepoint, rolled back on the violation,
+     * so the host transaction stays usable (PostgreSQL aborts the whole transaction on a failed statement otherwise).
      *
      * @param list<int> $fileIds
      */
@@ -205,15 +210,21 @@ final readonly class FileReferences implements FileReferencesInterface
         $files      = $this->entityManager->table(StoredFile::class);
         $references = $this->entityManager->table(StoredFileReference::class);
         try {
-            $this->entityManager->connection()->executeStatement(
+            $inserted = (int) $this->entityManager->atomically(static fn (Connection $connection): int|string => $connection->executeStatement(
                 'INSERT INTO ' . $references . ' (file_id, source_type, source_id, created_at)'
                 . ' SELECT f.id, ?, ?, ? FROM ' . $files . ' f WHERE f.id IN (?)'
                 . ' AND NOT EXISTS (SELECT 1 FROM ' . $references . ' r WHERE r.file_id = f.id AND r.source_type = ? AND r.source_id = ?)',
                 [$type, $id, new DateTimeImmutable(), $fileIds, $type, $id],
                 [Types::STRING, Types::STRING, Types::DATETIME_IMMUTABLE, ArrayParameterType::INTEGER, Types::STRING, Types::STRING],
-            );
+            ), 'reference');
         } catch (UniqueConstraintViolationException) {
-            $this->logger->warning('Storage kit: a {type} text could not reference a file another text with a look-alike id already holds; run the ALTER of UPGRADING 1.5.3.', ['type' => $type]);
+            $inserted = 0;
+        }
+        if ($inserted < count($fileIds)) {
+            $this->logger->warning('Storage kit: {skipped} file reference(s) of a {type} text skipped: another text with a look-alike id (or a concurrent save) already holds them; run the storage_kit_file_reference ALTER from UPGRADING 1.5.3.', [
+                'skipped' => count($fileIds) - $inserted,
+                'type'    => $type,
+            ]);
         }
     }
 }
