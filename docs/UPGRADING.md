@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Planned for 2.0](#planned-for-20)
+- [To 1.5.3](#to-153)
 - [To 1.5.2](#to-152)
 - [To 1.5.1](#to-151)
 - [To 1.5.0](#to-150)
@@ -30,6 +31,118 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
    `FileDeliveryResponder`.
 4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0): use
    `uploadImage()`.
+
+## To 1.5.3
+
+Target **1.5.3**, from **1.5.2** (or any 1.x): `composer update nowo-tech/storage-kit-bundle`. Security fix for
+look-alike context ids, source ids, owners and scopes on MySQL / MariaDB (REQ-SEC-006, see the CHANGELOG): every lookup,
+count, purge step and reference write now matches `context_id`, `owner`, `source_id` and `scope` byte for byte. No
+configuration change. PostgreSQL hosts: nothing to do (deterministic collations already compare exactly). SQLite hosts:
+nothing to do unless you declared those columns `COLLATE NOCASE` / `RTRIM` yourself (the bundle now compares with
+`COLLATE BINARY` anyway).
+
+1. **Find the look-alike families, before the `ALTER`.** Each query groups by the column's **own** collation on purpose:
+   that is the comparison the pre-1.5.3 code used, so each group is exactly a set of ids it treated as one. The hex in
+   `spellings` shows trailing spaces and invisible characters, and keeps `DISTINCT` from folding them. Add your
+   `doctrine.table_prefix` to the table names. If the `ALTER` already ran, write the old collation after the `GROUP BY`
+   column (for example `GROUP BY context_type, context_id COLLATE utf8mb4_unicode_ci`, MariaDB
+   `COLLATE utf8mb4_uca1400_ai_ci`).
+
+   ```sql
+   -- Contexts: files of one family were handled as one context by the purge (step 2) and by reference writes.
+   SELECT context_type, MIN(context_id) AS family,
+          GROUP_CONCAT(DISTINCT CONCAT('[', context_id, '] ', HEX(context_id)) SEPARATOR ', ') AS spellings,
+          COUNT(DISTINCT CAST(context_id AS BINARY)) AS ids, COUNT(*) AS files
+   FROM storage_kit_file
+   GROUP BY context_type, context_id
+   HAVING ids > 1;
+
+   -- Texts: references of one family were read, dropped and forgotten together.
+   SELECT source_type, MIN(source_id) AS family,
+          GROUP_CONCAT(DISTINCT CONCAT('[', source_id, '] ', HEX(source_id)) SEPARATOR ', ') AS spellings,
+          COUNT(DISTINCT CAST(source_id AS BINARY)) AS ids, COUNT(*) AS references_held
+   FROM storage_kit_file_reference
+   GROUP BY source_type, source_id
+   HAVING ids > 1;
+
+   -- Usage owners: StoredFileRepository::bytesFor() summed the family together (upload limits).
+   SELECT MIN(owner) AS family,
+          GROUP_CONCAT(DISTINCT CONCAT('[', owner, '] ', HEX(owner)) SEPARATOR ', ') AS spellings,
+          COUNT(DISTINCT CAST(owner AS BINARY)) AS owners, SUM(total_bytes) AS bytes
+   FROM storage_kit_file
+   WHERE owner IS NOT NULL
+   GROUP BY owner
+   HAVING owners > 1;
+
+   -- Scopes: the Storage / Move pages and the uploads of one member could use another member's profile.
+   SELECT MIN(scope) AS family,
+          GROUP_CONCAT(DISTINCT CONCAT('[', scope, '] ', HEX(scope), ' ', state, ' ', uuid) SEPARATOR ', ') AS profiles,
+          COUNT(DISTINCT CAST(scope AS BINARY)) AS scopes
+   FROM storage_kit_profile
+   WHERE scope IS NOT NULL
+   GROUP BY scope
+   HAVING scopes > 1;
+   ```
+
+   What a family means:
+
+   - **Contexts.** If one member of a family was deleted, the purge may have dropped the references of the other
+     members' files and, after `purge.retention_days`, deleted them (`files_purged` audit events give the runs). That
+     cannot be undone from the bundle. A text of one member could also reference (and so keep from the purge) a file
+     of another member; the next save of that text corrects it.
+   - **Texts.** Saving one member of a family could drop the references of the others, and a purge that found one
+     member gone forgot the references of all of them: their files may have been orphaned and purged. Save the
+     surviving texts again to rebuild their references (an image already purged stays missing).
+   - **Owners.** Nothing to repair: usage is exact from 1.5.3 on.
+   - **Scopes.** Every member of a family used the profile of whichever member had one: its uploads went to that
+     bucket, and a manager of one member could open, edit, test, move and switch the other member's bucket from its
+     Storage and Move pages. Check the `profile_saved`, `move_*` audit events of each member. Files keep their
+     profile, so after the upgrade they still download from the bucket they were written to; a member with no profile
+     of its own uploads to the instance bucket (or not at all) until its managers set one up. To move a member's files
+     to its own bucket, set its bucket up and run *Move to another bucket* from the member that owns the old profile.
+
+2. **Schema (MySQL / MariaDB).** The bundle now generates a binary NO PAD collation for these four columns too, so
+   `doctrine:migrations:diff` (or `doctrine:schema:update --dump-sql`) produces this change. Run it, or write the
+   migration yourself:
+
+   ```sql
+   -- MySQL 8.0.17+ / 8.4
+   ALTER TABLE storage_kit_file
+     MODIFY context_id VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
+     MODIFY owner VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin DEFAULT NULL;
+   ALTER TABLE storage_kit_file_reference
+     MODIFY source_id VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL;
+   ALTER TABLE storage_kit_profile
+     MODIFY scope VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin DEFAULT NULL;
+   -- MariaDB: COLLATE utf8mb4_nopad_bin; MySQL 5.7 or older than 8.0.17: COLLATE utf8mb4_bin (PAD SPACE)
+   ```
+
+   **The `storage_kit_file_reference` statement is required for safety**, not only for speed: its unique key
+   `uniq_storage_kit_file_reference (file_id, source_type, source_id)` folds with the column, so while it does, two
+   look-alike texts cannot both reference one file. The bundle then skips the second reference rather than fail
+   (logged; never retried with the look-alike's row), but that file is orphaned as soon as the first text drops it.
+   The statements rewrite the tables and their indexes; going from a folding collation to a binary one cannot create
+   duplicates, so none of them can fail on the unique key. On large tables run them in a maintenance window or with an
+   online schema tool. Until they run, the exact SQL filters and the `===` re-checks keep every lookup exact.
+
+   The bundle picks `utf8mb4_0900_bin` only when it knows the server is MySQL 8.0.17 or later: with a `server_version`
+   without the patch number (`8`, `8.0`) DBAL selects its MySQL 5.7 platform, the bundle falls back to `utf8mb4_bin`
+   and logs a warning when the schema is generated. Set the full `server_version` (for example `8.0.36`, `8.4.3`).
+
+3. **Refused values.** These ids are now refused where they enter, never trimmed or cut:
+   - an owner key (`FileContextTarget::$owner`) that is empty, longer than 64 characters, invalid UTF-8, padded with
+     white space (NBSP included) or holding a control, zero-width, BOM or bidi character: the constructor throws, as
+     it already did for an empty or too long key;
+   - a reference source id (`FileReferenceSourceInterface::id()`, `FileReferencesInterface::sync()`) with the same
+     defects: the text references nothing (logged), so its files become orphans; give such texts a plain id;
+   - a file context returned by `FileReferenceSourceInterface::context()` outside the context syntax: the text
+     references no new file (logged);
+   - a scope key returned by your `scopes.resolver` outside the scope syntax: uploads of that target are off.
+
+4. **Host extension points.** `FileContextInterface::readable()` / `existing()`, `FileReferenceSourceInterface::existing()`
+   and `ExistingIds::of()` must return ids exactly as asked: the bundle compares the answer with `===`, so an id your
+   lookup returns in another spelling (a folding host column answers `abc` for `ABC`) counts as not readable / gone.
+   `ExistingIds::of()` already filters its answer that way.
 
 ## To 1.5.2
 

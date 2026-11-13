@@ -6,40 +6,90 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
-- [[1.5.2] - 2026-11-13](#152---2026-11-13)
   - [Security](#security)
-  - [Fixed](#fixed)
-  - [Tests](#tests)
-- [[1.5.1] - 2026-11-12](#151---2026-11-12)
-  - [Fixed](#fixed-1)
-  - [Tests](#tests-1)
-- [[1.5.0] - 2026-11-12](#150---2026-11-12)
   - [Added](#added)
   - [Changed](#changed)
+  - [Tests](#tests)
+- [[1.5.2] - 2026-11-13](#152---2026-11-13)
+  - [Security](#security-1)
+  - [Fixed](#fixed)
+  - [Tests](#tests-1)
+- [[1.5.1] - 2026-11-12](#151---2026-11-12)
+  - [Fixed](#fixed-1)
+  - [Tests](#tests-2)
+- [[1.5.0] - 2026-11-12](#150---2026-11-12)
+  - [Added](#added-1)
+  - [Changed](#changed-1)
   - [Deprecated](#deprecated)
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
-  - [Added](#added-1)
-  - [Security](#security-1)
+  - [Added](#added-2)
+  - [Security](#security-2)
   - [Fixed](#fixed-2)
-  - [Changed](#changed-1)
+  - [Changed](#changed-2)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
   - [Fixed](#fixed-3)
-  - [Added](#added-2)
-  - [Changed](#changed-2)
-  - [Deprecated](#deprecated-1)
-- [[1.2.0] - 2026-11-10](#120---2026-11-10)
-  - [Security](#security-2)
   - [Added](#added-3)
   - [Changed](#changed-3)
-- [[1.1.0] - 2026-11-03](#110---2026-11-03)
+  - [Deprecated](#deprecated-1)
+- [[1.2.0] - 2026-11-10](#120---2026-11-10)
+  - [Security](#security-3)
   - [Added](#added-4)
   - [Changed](#changed-4)
+- [[1.1.0] - 2026-11-03](#110---2026-11-03)
+  - [Added](#added-5)
+  - [Changed](#changed-5)
   - [Fixed](#fixed-4)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
-  - [Added](#added-5)
-  - [Security](#security-3)
+  - [Added](#added-6)
+  - [Security](#security-4)
 
 ## [Unreleased]
+
+### Security
+
+- **Look-alike context ids, source ids, owners and scopes were matched by the database collation (REQ-SEC-006;
+  affects 1.0.0 to 1.5.2 on MySQL / MariaDB).** `storage_kit_file.context_id` / `owner`,
+  `storage_kit_file_reference.source_id` and `storage_kit_profile.scope` used the host default collation, which folds
+  case and accents and, on PAD SPACE collations, trailing spaces, and the bundle compared them in SQL only. With ids
+  that differ only that way:
+  - the scope `Acme` used the bucket profile of `acme`: its uploads went to that bucket, and its managers could open,
+    edit, test, move and switch it from their Storage and Move pages;
+  - saving or forgetting the text `abc` dropped the references of the text `ABC`, and the purge, finding one member
+    of a family gone, forgot the references of all of them (their files became orphans and were purged after the
+    retention);
+  - the purge, finding the context `ABC` gone, could orphan the files of the context `abc`; a text could reference a
+    file of a look-alike context;
+  - `StoredFileRepository::bytesFor()` summed the usage of look-alike owners together (upload limits).
+
+  Now every lookup, count, purge step and reference write filters with an exact SQL expression (`CAST(… AS BINARY)`
+  on MySQL / MariaDB, `COLLATE BINARY` on SQLite) before any `LIMIT` and re-checks the rows with `===`; deletes and
+  updates go by primary key; `ExistingIds::of()` returns only ids exactly among the asked ones; the four columns get
+  the binary NO PAD collation (`utf8mb4_0900_bin`, MariaDB `utf8mb4_nopad_bin`) from the collation listener, which
+  now logs a warning when it has to fall back to the PAD SPACE `utf8mb4_bin` (MySQL 5.7, MySQL older than 8.0.17, or a
+  `server_version` without the patch number). Unusable owner keys and source ids (empty, too long, invalid UTF-8,
+  edge white space or NBSP, control / zero-width / BOM / bidi characters), malformed contexts from a reference source
+  and resolver scope keys outside the scope syntax are refused, never trimmed. While `source_id` still folds, a
+  reference its folding unique key would reject is skipped and logged (never retried with the look-alike's row; no
+  entity manager is closed). See UPGRADING for the detection queries to run **before** the `ALTER`, and the `ALTER`
+  (required for `storage_kit_file_reference`).
+
+### Added
+
+- `Identifier\ExactIdentifier` (internal): the shared byte-for-byte rules (`usable()`, `sql()`, `same()`);
+  `PersonalData\UploaderIdentity::storable()` now delegates to it.
+
+### Changed
+
+- `RunStorageSyncHandler` carries `#[AsMessageHandler]` (REQ-MSG-001); the bundle keeps registering it with its
+  explicit `messenger.message_handler` tag, once. Its retry and failure policy is documented (CONFIGURATION,
+  Messenger).
+- Spec Kit code inventory maps every file of `src/` again (REQ-SPECKIT-001 / 003).
+
+### Tests
+
+- `LookalikeIdentifiersTest`: `bob`, `Bob`, `bób`, `bob `, `bob\n`, NBSP and ZWSP look-alikes for every scenario, on
+  the generated schema and on folding columns (SQLite `NOCASE` / `RTRIM`, MySQL / MariaDB `utf8mb4_unicode_ci` in the
+  database CI jobs); a unique violation on a folding key leaves the entity manager open.
 
 ## [1.5.2] - 2026-11-13
 

@@ -5,10 +5,7 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\PersonalData;
 
 use Nowo\StorageKitBundle\Doctrine\UploaderCollationListener;
-
-use function mb_check_encoding;
-use function mb_strlen;
-use function preg_match;
+use Nowo\StorageKitBundle\Identifier\ExactIdentifier;
 
 /**
  * Exact-match rules for the uploader identity stored on a file (`uploaded_by`, `uploaded_by_key`), house rule LQ
@@ -34,16 +31,7 @@ final class UploaderIdentity
      */
     public static function storable(?string $value): ?string
     {
-        if ($value === null || $value === '' || !mb_check_encoding($value, 'UTF-8') || mb_strlen($value, 'UTF-8') > UploaderKeyResolverInterface::MAX_LENGTH) {
-            return null;
-        }
-        // Controls, format characters (zero-width, bidi marks), line / paragraph separators anywhere; white space or any
-        // other separator at either end.
-        if (preg_match('/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|^[\s\p{Z}]|[\s\p{Z}]$/u', $value) === 1) {
-            return null;
-        }
-
-        return $value;
+        return ExactIdentifier::usable($value, UploaderKeyResolverInterface::MAX_LENGTH);
     }
 
     /**

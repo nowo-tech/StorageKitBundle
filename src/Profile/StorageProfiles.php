@@ -10,6 +10,7 @@ use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Nowo\StorageKitBundle\Scope\ScopeResolverInterface;
+use Nowo\StorageKitBundle\Scope\StorageScope;
 use Nowo\StorageKitBundle\Settings\InstanceStorageSettings;
 use Nowo\StorageKitBundle\Storage\S3Settings;
 use Symfony\Contracts\Service\ResetInterface;
@@ -111,6 +112,11 @@ final class StorageProfiles implements ResetInterface
     public function forTarget(FileContextTarget $target): ?StorageProfile
     {
         $scope = $this->scopesEnabled ? $this->scopes->scopeOf($target) : null;
+        // 1.5.3 (REQ-SEC-006): a resolver key outside the scope syntax (padded, another alphabet) turns uploads off
+        // instead of reaching another scope's bucket.
+        if ($scope !== null && !StorageScope::isValid($scope)) {
+            return null;
+        }
         if ($scope !== null) {
             $key = 's:' . $scope;
             // @igor-ignore - Request-scoped memo, cleared by reset() (kernel.reset).

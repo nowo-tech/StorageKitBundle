@@ -4,18 +4,22 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Repository;
 
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\ORM\QueryBuilder;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
+use Nowo\StorageKitBundle\Identifier\ExactIdentifier;
 use Nowo\StorageKitBundle\PersonalData\UploaderIdentity;
 
+use function array_map;
 use function array_slice;
 use function array_unique;
 use function array_values;
 use function assert;
 use function count;
+use function in_array;
 use function is_array;
 use function is_scalar;
 
@@ -75,21 +79,33 @@ final readonly class StoredFileRepository
     /**
      * Bytes stored (originals and variants) for usage owners.
      *
+     * Byte for byte since 1.5.3 (REQ-SEC-006): the rows are filtered and grouped with an exact SQL expression and each
+     * group is re-checked with `===`, so `Acme`, `acmé` or `acme ` never count against `acme` on a case-, accent- or
+     * trailing-space-insensitive collation.
+     *
      * @param list<string> $owners
      */
     public function bytesFor(array $owners): int
     {
+        $owners = array_values(array_unique(array_map(strval(...), $owners)));
         if ($owners === []) {
             return 0;
         }
+        $connection = $this->entityManager->connection();
+        $exact      = ExactIdentifier::sql($connection->getDatabasePlatform(), 'owner');
+        $bytes      = 0;
+        foreach ($connection->fetchAllAssociative(
+            'SELECT ' . $exact . ' AS owner_key, COALESCE(SUM(total_bytes), 0) AS bytes FROM ' . $this->entityManager->table(StoredFile::class)
+            . ' WHERE owner IN (?) AND ' . $exact . ' IN (?) GROUP BY ' . $exact,
+            [$owners, $owners],
+            [ArrayParameterType::STRING, ArrayParameterType::STRING],
+        ) as $row) {
+            if (is_scalar($row['owner_key']) && in_array((string) $row['owner_key'], $owners, true)) {
+                $bytes += (int) $row['bytes'];
+            }
+        }
 
-        return (int) $this->entityManager->manager()->createQueryBuilder()
-            ->select('COALESCE(SUM(f.totalBytes), 0)')
-            ->from(StoredFile::class, 'f')
-            ->andWhere('f.owner IN (:owners)')
-            ->setParameter('owners', array_values(array_unique($owners)))
-            ->getQuery()
-            ->getSingleScalarResult();
+        return $bytes;
     }
 
     /**

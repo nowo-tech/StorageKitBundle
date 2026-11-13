@@ -14,7 +14,8 @@ use Nowo\StorageKitBundle\Context\FileContextTarget;
 interface ScopeResolverInterface
 {
     /**
-     * The scope key of the target (a valid {@see StorageScope} key), or null for the instance.
+     * The scope key of the target (a valid {@see StorageScope} key), or null for the instance. Matched byte for byte
+     * (`Acme` is not `acme`); since 1.5.3 a key outside the syntax turns the target's uploads off.
      */
     public function scopeOf(FileContextTarget $target): ?string;
 }

@@ -14,6 +14,7 @@ use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
+use Nowo\StorageKitBundle\Identifier\ExactIdentifier;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Reference\FileReferences;
 use Nowo\StorageKitBundle\Reference\FileReferenceSourceInterface;
@@ -24,10 +25,14 @@ use Psr\Log\NullLogger;
 use Throwable;
 
 use function array_diff;
+use function array_filter;
 use function array_map;
+use function array_unique;
 use function array_values;
 use function count;
 use function end;
+use function in_array;
+use function is_scalar;
 use function max;
 
 /**
@@ -42,6 +47,8 @@ use function max;
  *    re-checks that no reference appeared in between.
  *
  * Every step is bounded: at most `purge.max_batches` batches per step and run, so a huge backlog is spread over runs.
+ * Steps 1 and 2 compare source / context ids byte for byte (REQ-SEC-006, 1.5.3): `abc` and `ABC` are two texts / two
+ * contexts even where the column still has a folding collation.
  */
 final readonly class FilePurger
 {
@@ -122,57 +129,78 @@ final readonly class FilePurger
         return $orphaned;
     }
 
+    /**
+     * Step 1. The keyset walks the column's own order (its index), one representative per look-alike family; every
+     * exact spelling of the batch's families is then read with an exact SQL expression (1.5.3), so `abc` and `ABC` are
+     * two texts even where `source_id` still has a folding collation (a `DISTINCT` alone would merge them, and the
+     * keyset would skip the second one).
+     */
     private function dropGoneSources(FileReferenceSourceInterface $source): int
     {
         $connection = $this->entityManager->connection();
         $references = $this->entityManager->table(StoredFileReference::class);
+        $type       = $source->type();
         $dropped    = 0;
         $after      = '';
         for ($round = 0; $round < $this->maxBatches; ++$round) {
-            /** @var list<string> $ids */
-            $ids = $connection->fetchFirstColumn(
+            /** @var list<string> $families */
+            $families = $connection->fetchFirstColumn(
                 'SELECT DISTINCT source_id FROM ' . $references . ' WHERE source_type = ? AND source_id > ? ORDER BY source_id LIMIT ' . $this->batch,
-                [$source->type(), $after],
+                [$type, $after],
             );
-            if ($ids === []) {
+            if ($families === []) {
                 break;
             }
-            $after = end($ids);
-            $gone  = array_values(array_diff($ids, $source->existing($ids)));
-            $this->references->forget($source->type(), $gone);
+            $after = end($families);
+            $ids   = $this->spellings($references, 'source_type', 'source_id', $type, $families);
+            $gone  = array_values(array_diff($ids, $this->exactly($ids, $source->existing($ids))));
+            $this->references->forget($type, $gone);
             $dropped += count($gone);
         }
 
         return $dropped;
     }
 
+    /**
+     * Step 2, walked like step 1 (1.5.3): the files of a gone context are read by its exact spelling, so deleting the
+     * context `ABC` never orphans the files of `abc` on a folding collation.
+     */
     private function dropGoneContexts(DateTimeImmutable $now): int
     {
         $connection = $this->entityManager->connection();
         $files      = $this->entityManager->table(StoredFile::class);
         $references = $this->entityManager->table(StoredFileReference::class);
+        $exact      = ExactIdentifier::sql($connection->getDatabasePlatform(), 'context_id');
         $dropped    = 0;
         // A context type this host does not register (any more) is left alone.
         foreach ($this->contexts->types() as $type) {
             $context = $this->contexts->get($type);
             $after   = '';
             for ($round = 0; $context instanceof FileContextInterface && $round < $this->maxBatches; ++$round) {
-                /** @var list<string> $ids */
-                $ids = $connection->fetchFirstColumn(
+                /** @var list<string> $families */
+                $families = $connection->fetchFirstColumn(
                     'SELECT DISTINCT context_id FROM ' . $files . ' WHERE context_type = ? AND context_id > ? ORDER BY context_id LIMIT ' . $this->batch,
                     [$type, $after],
                 );
-                if ($ids === []) {
+                if ($families === []) {
                     break;
                 }
-                $after = end($ids);
-                $gone  = array_values(array_diff($ids, $context->existing($ids)));
+                $after = end($families);
+                $ids   = $this->spellings($files, 'context_type', 'context_id', $type, $families);
+                $gone  = array_values(array_diff($ids, $this->exactly($ids, $context->existing($ids))));
                 if ($gone === []) {
                     continue;
                 }
-                /** @var list<int|string> $fileIds */
-                $fileIds = $connection->fetchFirstColumn('SELECT id FROM ' . $files . ' WHERE context_type = ? AND context_id IN (?)', [$type, $gone], [Types::STRING, ArrayParameterType::STRING]);
-                $fileIds = array_map(intval(...), $fileIds);
+                $fileIds = [];
+                foreach ($connection->fetchAllAssociative(
+                    'SELECT id, context_type, context_id FROM ' . $files . ' WHERE context_type = ? AND context_id IN (?) AND ' . $exact . ' IN (?)',
+                    [$type, $gone, $gone],
+                    [Types::STRING, ArrayParameterType::STRING, ArrayParameterType::STRING],
+                ) as $row) {
+                    if (ExactIdentifier::same($row['context_type'], $type) && is_scalar($row['context_id']) && in_array((string) $row['context_id'], $gone, true)) {
+                        $fileIds[] = (int) $row['id'];
+                    }
+                }
                 $connection->executeStatement('DELETE FROM ' . $references . ' WHERE file_id IN (?)', [$fileIds], [ArrayParameterType::INTEGER]);
                 $this->references->orphanUnreferenced($fileIds, $now);
                 $dropped += count($fileIds);
@@ -180,6 +208,45 @@ final readonly class FilePurger
         }
 
         return $dropped;
+    }
+
+    /**
+     * Every exact spelling stored for the given representatives (the column's collation matches the whole family).
+     *
+     * @param list<string> $families
+     *
+     * @return list<string>
+     */
+    private function spellings(string $table, string $typeColumn, string $idColumn, string $type, array $families): array
+    {
+        $connection = $this->entityManager->connection();
+        $exact      = ExactIdentifier::sql($connection->getDatabasePlatform(), $idColumn);
+        $ids        = [];
+        foreach ($connection->fetchFirstColumn(
+            'SELECT DISTINCT ' . $exact . ' FROM ' . $table . ' WHERE ' . $typeColumn . ' = ? AND ' . $idColumn . ' IN (?)',
+            [$type, $families],
+            [Types::STRING, ArrayParameterType::STRING],
+        ) as $id) {
+            if (is_scalar($id)) {
+                $ids[] = (string) $id;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * The ids a host `existing()` returned that are exactly among the asked ones (a host lookup on a folding collation
+     * may answer `abc` for `ABC`: that does not make `ABC` exist).
+     *
+     * @param list<string> $asked
+     * @param list<string> $existing
+     *
+     * @return list<string>
+     */
+    private function exactly(array $asked, array $existing): array
+    {
+        return array_values(array_filter(array_map(strval(...), $existing), static fn (string $id): bool => in_array($id, $asked, true)));
     }
 
     /**

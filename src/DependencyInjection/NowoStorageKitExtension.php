@@ -304,7 +304,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $container->setDefinition(StorageEntityManager::class, new Definition(StorageEntityManager::class, [new Reference('doctrine'), $config['doctrine']['entity_manager']]));
         $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$config['doctrine']['table_prefix']]))
             ->addTag('doctrine.event_listener', ['event' => 'loadClassMetadata']));
-        $container->setDefinition(UploaderCollationListener::class, (new Definition(UploaderCollationListener::class, [new Reference(StorageEntityManager::class)]))
+        $container->setDefinition(UploaderCollationListener::class, (new Definition(UploaderCollationListener::class, [new Reference(StorageEntityManager::class), $logger]))
             ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchemaTable']));
         foreach ([StorageProfileRepository::class, StoredFileRepository::class, StorageSyncRepository::class] as $repository) {
             $container->setDefinition($repository, (new Definition($repository, [new Reference(StorageEntityManager::class)]))->setPublic(true));
@@ -402,7 +402,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $container->setDefinition(FileContexts::class, (new Definition(FileContexts::class, [new TaggedIteratorArgument(FileContextInterface::TAG)]))
             ->setPublic(true)->addTag('kernel.reset', ['method' => 'reset']));
         $container->setDefinition(FileUris::class, (new Definition(FileUris::class, [$config['uri_scheme'], $config['upload']['path_prefix']]))->setPublic(true));
-        $container->setDefinition(FileReferences::class, (new Definition(FileReferences::class, [new Reference(StorageEntityManager::class), new Reference(FileUris::class)]))->setPublic(true));
+        $container->setDefinition(FileReferences::class, (new Definition(FileReferences::class, [new Reference(StorageEntityManager::class), new Reference(FileUris::class), new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE)]))->setPublic(true));
         // 1.5 (rule 1): the reference port.
         $container->setAlias(FileReferencesInterface::class, FileReferences::class)->setPublic(true);
         $container->setDefinition(FileReferenceListener::class, (new Definition(FileReferenceListener::class, [

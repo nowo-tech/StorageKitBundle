@@ -1,6 +1,6 @@
 # Code inventory — 001-baseline
 
-**Last audited**: 2026-11-03
+**Last audited**: 2026-11-13
 **Scope**: every production file under `src/` (`find src -type f | wc -l`). Tests, demo and generated caches are out of scope.
 
 ## Bundle / DI
@@ -15,6 +15,12 @@
 | `src/DependencyInjection/Compiler/InstanceSettingsPass.php` | Bundle / DI | FR-DI-006, FR-SET-001 |
 | `src/DependencyInjection/Compiler/MessengerIntegrationPass.php` | Bundle / DI | FR-DI-007, FR-MOVE-004 |
 | `src/DependencyInjection/Compiler/TwigPathsPass.php` | Bundle / DI | FR-DI-008 |
+| `src/DependencyInjection/Compiler/StorageEntityManagerPass.php` | Bundle / DI | FR-DI-009 |
+| `src/Doctrine/ExcludedEntityNamespaceDriver.php` | Bundle / DI | FR-DI-009 |
+| `src/Doctrine/OwnEntityManagerSubscriber.php` | Bundle / DI | FR-DI-009 |
+| `src/DependencyInjection/Compiler/FileDeliveryPortsPass.php` | Bundle / DI | FR-DI-010 |
+| `src/EventListener/RequestBoundaryListener.php` | Bundle / DI | FR-RUN-001 |
+| `src/EventListener/UnitOfWorkFrames.php` | Bundle / DI | FR-RUN-001 |
 
 ## Storage
 
@@ -48,6 +54,7 @@
 | `src/Profile/StorageProfiles.php` | Profiles | FR-PROF-002 |
 | `src/Profile/ConfigProfiles.php` | Profiles | FR-PROF-003 |
 | `src/Repository/StorageProfileRepository.php` | Profiles | FR-PROF-004 |
+| `src/Profile/ConfigProfileProviderInterface.php` | Profiles | FR-PROF-005 |
 
 ## Instance Settings
 
@@ -81,6 +88,8 @@
 | `src/Upload/UploadEndpoint.php` | Upload | FR-UP-004 |
 | `src/Upload/UploadLimitInterface.php` | Upload | FR-UP-005 |
 | `src/Upload/UploadRefused.php` | Upload | FR-UP-006 |
+| `src/Upload/ImageUploaderInterface.php` | Upload | FR-UP-007 |
+| `src/Upload/StoredFileView.php` | Upload | FR-UP-007 |
 
 ## Download and rendering
 
@@ -94,6 +103,12 @@
 | `src/Http/StorageCspSources.php` | Download and rendering | FR-DL-005 |
 | `src/Integration/HttpHardening/StorageCspSourceProvider.php` | Download and rendering | FR-DL-005 |
 | `src/Twig/StorageKitTwigExtension.php` | Download and rendering | FR-DL-006, FR-UP-004 |
+| `src/Download/FileDeliveryInterface.php` | Download and rendering | FR-DL-007 |
+| `src/Download/FileDeliveryResponder.php` | Download and rendering | FR-DL-007 |
+| `src/Download/DeliverableFile.php` | Download and rendering | FR-DL-007 |
+| `src/Download/DeliverableFileData.php` | Download and rendering | FR-DL-007 |
+| `src/Download/FileNotDeliverable.php` | Download and rendering | FR-DL-007 |
+| `src/Download/StoredImageResolverInterface.php` | Download and rendering | FR-DL-007 |
 
 ## References and purge
 
@@ -106,6 +121,7 @@
 | `src/Reference/FileUris.php` | References and purge | FR-REF-004 |
 | `src/Lifecycle/FilePurger.php` | References and purge | FR-PURGE-001 |
 | `src/Command/PurgeFilesCommand.php` | References and purge | FR-PURGE-002 |
+| `src/Reference/FileReferencesInterface.php` | References and purge | FR-REF-005 |
 
 ## Moves
 
@@ -131,6 +147,9 @@
 | `src/Repository/StoredFileRepository.php` | Files data | FR-DATA-001 |
 | `src/Doctrine/StorageEntityManager.php` | Files data | FR-DATA-002 |
 | `src/Doctrine/TablePrefixListener.php` | Files data | FR-DATA-002 |
+| `src/Identifier/ExactIdentifier.php` | Files data | FR-DATA-003 |
+| `src/PersonalData/UploaderIdentity.php` | Files data | FR-DATA-003, FR-GDPR-001 |
+| `src/Doctrine/UploaderCollationListener.php` | Files data | FR-DATA-003 |
 
 ## Personal data and audit
 
@@ -139,6 +158,10 @@
 | `src/PersonalData/StoredFilesPersonalData.php` | Personal data and audit | FR-GDPR-001 |
 | `src/Audit/AuditRecorder.php` | Personal data and audit | FR-AUD-001 |
 | `src/Audit/StorageAuditEvent.php` | Personal data and audit | FR-AUD-001 |
+| `src/PersonalData/StoredFilesPersonalDataInterface.php` | Personal data and audit | FR-GDPR-002 |
+| `src/PersonalData/UploaderKeyResolverInterface.php` | Personal data and audit | FR-GDPR-002 |
+| `src/PersonalData/UserIdUploaderKeyResolver.php` | Personal data and audit | FR-GDPR-002 |
+| `src/Command/BackfillUploaderKeysCommand.php` | Personal data and audit | FR-GDPR-002 |
 
 ## Admin UI and access
 
@@ -181,18 +204,18 @@
 
 | Category | Files |
 | --- | --- |
-| Bundle / DI | 8 |
+| Bundle / DI | 14 |
 | Storage | 12 |
 | SSRF | 2 |
-| Profiles | 4 |
+| Profiles | 5 |
 | Instance Settings | 3 |
 | Contexts and scopes | 8 |
-| Upload | 7 |
-| Download and rendering | 8 |
-| References and purge | 7 |
-| Moves | 9 |
-| Files data | 5 |
-| Personal data and audit | 3 |
+| Upload | 9 |
+| Download and rendering | 14 |
+| References and purge | 8 |
+| Moves | 10 |
+| Files data | 8 |
+| Personal data and audit | 7 |
 | Admin UI and access | 20 |
 | Translations | 7 |
-| **Total production sources** | **104 / 104** (`find src -type f \| wc -l` = 104) |
+| **Total production sources** | **127 / 127** (`find src -type f \| wc -l` = 127) |
