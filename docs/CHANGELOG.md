@@ -58,6 +58,9 @@ All notable changes to this project are documented here. The format follows
   `kernel.terminate` of a main request handled in-process inside another one no longer clears the outer request nor
   resets the tracker (OB-L3). Note: in hosts with Messenger, DoctrineBundle's own subscriber clears every manager after
   each message, so a worker run inside a handler keeps the bundle's pending events and memos, not the identity map.
+  Audit OB2-L1: a main request also drops the requests left in flight when the oldest one is not the kernel's main
+  request (host code left the `RequestStack` unbalanced, then a request threw out of `HttpKernel::handle()`), so the
+  next requests keep clearing instead of never clearing again for the rest of the worker's life.
 
 ## [1.5.1] - 2026-11-12
 

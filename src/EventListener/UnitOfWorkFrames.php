@@ -106,9 +106,13 @@ final class UnitOfWorkFrames
     public function requestStarted(Request $request): bool
     {
         $this->dropStaleUnits();
-        if ($this->requests !== [] && $this->requestStack?->getMainRequest() === $request) {
+        $main = $this->requestStack?->getMainRequest();
+        if ($this->requests !== [] && $this->requestStack !== null && ($main === $request || $main !== $this->requests[0])) {
             // The HTTP kernel runs no other request (it pops its own stack in a `finally`): the requests left here never
-            // reached their finish_request / terminate (a throwing `kernel.exception` listener).
+            // reached their finish_request / terminate (a throwing `kernel.exception` listener). Audit OB2-L1: also
+            // when the bottom request here is not the kernel's main request (host code left the request stack
+            // unbalanced, then a request threw out of `handle()`); a real nested main request has the outer request
+            // at the bottom of both stacks.
             // @igor-ignore - Stack of the main requests in flight (no request data kept), healed at a top-level start.
             $this->requests = [];
         }

@@ -429,6 +429,50 @@ final class UnitBoundaryTrackerNxTest extends TestCase
         $this->assertNextUnitsClear();
     }
 
+    /**
+     * Audit OB2-L1 (S14): host code leaves the kernel's request stack unbalanced (a push without a pop), then a request
+     * throws out of `handle()` (no finish_request, no terminate). The kernel's main request is stuck from then on, yet
+     * the next top-level requests still clear at their start and at their terminate.
+     *
+     * @param Closure(self): void $factory
+     */
+    #[DataProvider('subscribers')]
+    public function testAnUnbalancedRequestStackNeverStopsTheNextRequestsFromClearing(Closure $factory): void
+    {
+        $this->boot($factory);
+        $this->handleRequest(function (): void {
+            $this->requestStack->push(Request::create('/pushed-never-popped'));
+        });
+        $throw = static function (): never {
+            throw new RuntimeException('exception listener failed');
+        };
+        $this->dispatcher->addListener(KernelEvents::EXCEPTION, $throw);
+        $request = Request::create('/');
+        $request->attributes->set('_controller', static function (): never {
+            throw new RuntimeException('controller failed');
+        });
+        try {
+            $this->kernel->handle($request);
+            self::fail('The kernel.exception listener must throw.');
+        } catch (RuntimeException) {
+            // No kernel.finish_request, no kernel.terminate.
+        } finally {
+            $this->dispatcher->removeListener(KernelEvents::EXCEPTION, $throw);
+        }
+        self::assertNotNull($this->requestStack->getMainRequest(), 'The host left a request on the kernel stack.');
+
+        for ($i = 0; $i < 2; ++$i) {
+            $before  = $this->clears;
+            $atStart = null;
+            $this->handleRequest(function () use ($before, &$atStart): void {
+                $atStart = $this->clears - $before;
+            });
+            self::assertSame(1, $atStart, 'The next main request must clear at its start.');
+            self::assertSame(2, $this->clears - $before, 'The next main request must clear at kernel.terminate.');
+        }
+        $this->assertNextUnitsClear();
+    }
+
     private function runWorker(int $count, Closure $handler, bool $stopAfterFirst = false): void
     {
         $transport = new InMemoryTransport();

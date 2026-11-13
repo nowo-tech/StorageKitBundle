@@ -59,6 +59,8 @@ scenarios are evaluated:
 | Controllers, `AdminPages`, `StorageKitPages`, `ProfileTester`, form types, `StorageSettingsSection` | none (forms and view models built per call) | ✅ | ✅ |
 | `AccessGuard`, `StorageKitAccessListener`, access checkers, `InstanceSettingsListener`, Twig extension, commands, Messenger handler | none | ✅ | ✅ |
 
+Note (audit OB2): with a custom asynchronous Messenger `MessageExecutionStrategyInterface` the tracker loses its nested-worker protection (a worker run inside a handler may clear the outer message's unit); the boundary clears still happen.
+
 ## Findings
 
 No finding under scenario **A**, which is what FrankenPHP's Symfony integration and Messenger workers
