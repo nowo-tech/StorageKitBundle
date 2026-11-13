@@ -8,10 +8,18 @@ use Doctrine\ORM\QueryBuilder;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StoredFile;
+use Nowo\StorageKitBundle\Identifier\ExactIdentifier;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
+
+use function array_filter;
+use function array_values;
 
 /**
  * Queries of {@see StorageProfile}: an owner's active / target / retired profiles, the rows of config profiles.
+ *
+ * Scope keys are matched byte for byte (REQ-SEC-006, 1.5.3): the profile ids of a scope are read with an exact SQL
+ * expression and re-checked with `===` before any `LIMIT`, and every profile returned is checked again, so the scope
+ * `Acme` never reaches the bucket of `acme` on a case-insensitive collation (its Storage and Move pages, its uploads).
  */
 final readonly class StorageProfileRepository
 {
@@ -59,7 +67,7 @@ final readonly class StorageProfileRepository
         /** @var list<StorageProfile> $profiles */
         $profiles = $qb->getQuery()->getResult();
 
-        return $profiles;
+        return $this->ofScope($profiles, $scope);
     }
 
     /**
@@ -81,7 +89,7 @@ final readonly class StorageProfileRepository
         /** @var list<StorageProfile> $profiles */
         $profiles = $qb->getQuery()->getResult();
 
-        return $profiles;
+        return $all ? $profiles : $this->ofScope($profiles, $scope);
     }
 
     /**
@@ -122,7 +130,7 @@ final readonly class StorageProfileRepository
         /** @var StorageProfile|null $profile */
         $profile = $qb->getQuery()->getOneOrNullResult();
 
-        return $profile;
+        return $profile instanceof StorageProfile && $profile->getScope() === $scope ? $profile : null;
     }
 
     private function whereOwner(QueryBuilder $qb, ?string $scope): void
@@ -132,7 +140,41 @@ final readonly class StorageProfileRepository
 
             return;
         }
-        $qb->andWhere('p.scope = :scope')->setParameter('scope', $scope);
+        // The exact ids first: a LIMIT after a folding `p.scope = :scope` could return a look-alike scope's profile.
+        $qb->andWhere('p.scope = :scope')->setParameter('scope', $scope)
+            ->andWhere('p.id IN (:exact_scope_ids)')->setParameter('exact_scope_ids', $this->idsOfScope($scope));
+    }
+
+    /**
+     * The ids of the profiles of exactly `$scope` (a scope has a handful: its active, target and retired buckets).
+     *
+     * @return list<int> never empty (0 matches no row)
+     */
+    private function idsOfScope(string $scope): array
+    {
+        $connection = $this->entityManager->connection();
+        $ids        = [];
+        foreach ($connection->fetchAllAssociative(
+            'SELECT id, scope FROM ' . $this->entityManager->table(StorageProfile::class)
+            . ' WHERE scope = ? AND ' . ExactIdentifier::sql($connection->getDatabasePlatform(), 'scope') . ' = ?',
+            [$scope, $scope],
+        ) as $row) {
+            if (ExactIdentifier::same($row['scope'], $scope)) {
+                $ids[] = (int) $row['id'];
+            }
+        }
+
+        return $ids === [] ? [0] : $ids;
+    }
+
+    /**
+     * @param list<StorageProfile> $profiles
+     *
+     * @return list<StorageProfile> those of exactly `$scope`
+     */
+    private function ofScope(array $profiles, ?string $scope): array
+    {
+        return array_values(array_filter($profiles, static fn (StorageProfile $profile): bool => $profile->getScope() === $scope));
     }
 
     private function query(): QueryBuilder

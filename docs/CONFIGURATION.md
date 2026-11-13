@@ -354,6 +354,30 @@ framework:
 
 Without a bus the handler is removed and the Move page tells the operator to run `nowo:storage-kit:sync <from> <to>`.
 
+The handler carries `#[AsMessageHandler]` and the bundle registers it with an explicit `messenger.message_handler` tag
+(its service is not autoconfigured, so it is registered once either way).
+
+**Retry and failure policy.** A file that cannot be copied does not throw: the sync stops as `failed` with the file and
+a scrubbed reason, and *Resume copying* (or the command) continues from that file. Only an infrastructure error (the
+database or the lock store unreachable) throws, so the transport's `retry_strategy` applies (Symfony default: 3 retries,
+delay doubling from 1 s). Every message is idempotent: one that finds its sync no longer `queued` (done, cancelled,
+held by another runner, or claimed by the failed attempt) does nothing. A sync left `running` by a failed attempt is
+taken over by `nowo:storage-kit:sync` once `sync.stale_seconds` (120 s) pass (or *Stop copying*, then *Resume
+copying*). Messages that exhaust
+their retries go to your `failure_transport`; `messenger:failed:retry` is safe. A dedicated transport keeps long slices
+away from your other jobs:
+
+```yaml
+framework:
+    messenger:
+        transports:
+            storage_kit:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy: { max_retries: 3, delay: 5000, multiplier: 2 }
+        routing:
+            Nowo\StorageKitBundle\Message\RunStorageSyncMessage: storage_kit
+```
+
 ## Timeouts (REQ-RUNTIME-001)
 
 | Layer | Value |

@@ -8,6 +8,10 @@ namespace Nowo\StorageKitBundle\Context;
  * A kind of text files are uploaded into (comments of an issue, a board, a wiki page…), implemented by the host and
  * tagged `nowo_storage_kit.file_context` (autoconfigured). Who may **write** decides uploads; who may **read** the text
  * decides downloads — batched: one query per call, whatever the number of files of a text.
+ *
+ * Context ids are matched byte for byte (REQ-SEC-006): {@see self::readable()} and {@see self::existing()} return ids
+ * exactly as they were asked (`abc` is not `ABC`); the bundle compares the answer with `===`, so an id the host returns
+ * in another spelling counts as not readable / not existing.
  */
 interface FileContextInterface
 {

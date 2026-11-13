@@ -20,8 +20,11 @@ use Doctrine\Persistence\ManagerRegistry;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Doctrine\UploaderCollationListener;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
+use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Entity\StoredFile;
+use Nowo\StorageKitBundle\Entity\StoredFileReference;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\ErrorHandler\BufferingLogger;
 
 final class UploaderCollationListenerTest extends TestCase
 {
@@ -34,12 +37,51 @@ final class UploaderCollationListenerTest extends TestCase
         self::assertNull(UploaderCollationListener::collationFor(new SQLitePlatform()));
     }
 
+    public function testAFullMysqlServerVersionOlderThan8017FallsBackToUtf8mb4Bin(): void
+    {
+        self::assertSame('utf8mb4_bin', UploaderCollationListener::collationFor(new MySQL80Platform(), '8.0.16'));
+        self::assertSame('utf8mb4_0900_bin', UploaderCollationListener::collationFor(new MySQL80Platform(), '8.0.17'));
+        self::assertSame('utf8mb4_0900_bin', UploaderCollationListener::collationFor(new MySQL80Platform(), '8.4'));
+        self::assertSame('utf8mb4_0900_bin', UploaderCollationListener::collationFor(new MySQL80Platform()));
+        self::assertSame('utf8mb4_nopad_bin', UploaderCollationListener::collationFor(new MariaDBPlatform(), '10.4.1-MariaDB'));
+    }
+
+    public function testTheConfiguredServerVersion(): void
+    {
+        self::assertSame('8.0.36', UploaderCollationListener::configuredServerVersion(['serverVersion' => '8.0.36']));
+        self::assertSame('8.0', UploaderCollationListener::configuredServerVersion(['primary' => ['serverVersion' => '8.0']]));
+        self::assertNull(UploaderCollationListener::configuredServerVersion(['serverVersion' => '']));
+        self::assertNull(UploaderCollationListener::configuredServerVersion(['primary' => 'x']));
+        self::assertNull(UploaderCollationListener::configuredServerVersion([]));
+    }
+
+    public function testTheFallbackIsLoggedWithTheServerVersion(): void
+    {
+        $logger = new BufferingLogger();
+        $args   = $this->args(StoredFileReference::class);
+        (new UploaderCollationListener($this->manager(new MySQLPlatform(), ['serverVersion' => '8.0']), $logger))->postGenerateSchemaTable($args);
+        self::assertSame('utf8mb4_bin', $args->getClassTable()->getColumn('source_id')->getPlatformOption('collation'));
+        $logs = $logger->cleanLogs();
+        self::assertCount(1, $logs);
+        self::assertSame('warning', $logs[0][0]);
+        self::assertSame(['table' => 'storage_kit_file', 'version' => '8.0'], $logs[0][2]);
+
+        $args = $this->args(StorageProfile::class);
+        (new UploaderCollationListener($this->manager(new MySQLPlatform()), $logger))->postGenerateSchemaTable($args);
+        self::assertSame('utf8mb4_bin', $args->getClassTable()->getColumn('scope')->getPlatformOption('collation'));
+        self::assertSame('detected', $logger->cleanLogs()[0][2]['version']);
+
+        $args = $this->args(StoredFile::class);
+        (new UploaderCollationListener($this->manager(new MariaDBPlatform()), $logger))->postGenerateSchemaTable($args);
+        self::assertSame([], $logger->cleanLogs(), 'a NO PAD collation logs nothing');
+    }
+
     public function testTheIdentityColumnsGetTheCollationOnMysql(): void
     {
         $args = $this->args(StoredFile::class);
         (new UploaderCollationListener($this->manager(new MySQL80Platform())))->postGenerateSchemaTable($args);
 
-        foreach (['uploaded_by', 'uploaded_by_key'] as $column) {
+        foreach (['uploaded_by', 'uploaded_by_key', 'context_id', 'owner'] as $column) {
             self::assertSame('utf8mb4_0900_bin', $args->getClassTable()->getColumn($column)->getPlatformOption('collation'));
             self::assertSame('utf8mb4', $args->getClassTable()->getColumn($column)->getPlatformOption('charset'));
         }
@@ -48,10 +90,16 @@ final class UploaderCollationListenerTest extends TestCase
 
     public function testOtherEntitiesAndExactPlatformsAreUntouched(): void
     {
-        $args  = $this->args(StorageProfile::class);
+        $args  = $this->args(StorageSync::class);
         $table = $args->getClassTable();
         (new UploaderCollationListener($this->manager(new MySQL80Platform())))->postGenerateSchemaTable($args);
         self::assertSame($table, $args->getClassTable());
+
+        foreach ([StoredFileReference::class => 'source_id', StorageProfile::class => 'scope'] as $class => $column) {
+            $args = $this->args($class);
+            (new UploaderCollationListener($this->manager(new MySQL80Platform())))->postGenerateSchemaTable($args);
+            self::assertSame('utf8mb4_0900_bin', $args->getClassTable()->getColumn($column)->getPlatformOption('collation'));
+        }
 
         $args  = $this->args(StoredFile::class);
         $table = $args->getClassTable();
@@ -76,7 +124,7 @@ final class UploaderCollationListenerTest extends TestCase
         $metadata = new ClassMetadata($class);
         $metadata->setPrimaryTable(['name' => 'storage_kit_file']);
         $table = new Table('storage_kit_file');
-        foreach (['uploadedBy' => 'uploaded_by', 'uploadedByKey' => 'uploaded_by_key', 'originalName' => 'original_name'] as $field => $column) {
+        foreach (['uploadedBy' => 'uploaded_by', 'uploadedByKey' => 'uploaded_by_key', 'originalName' => 'original_name', 'contextId' => 'context_id', 'owner' => 'owner', 'sourceId' => 'source_id', 'scope' => 'scope'] as $field => $column) {
             $metadata->mapField(['fieldName' => $field, 'columnName' => $column, 'type' => 'string', 'length' => 180, 'nullable' => true]);
             $table->addColumn($column, 'string', ['length' => 180, 'notnull' => false]);
         }
@@ -84,10 +132,14 @@ final class UploaderCollationListenerTest extends TestCase
         return new GenerateSchemaTableEventArgs($metadata, new Schema(), $table);
     }
 
-    private function manager(AbstractPlatform $platform): StorageEntityManager
+    /**
+     * @param array<string, mixed> $params connection parameters
+     */
+    private function manager(AbstractPlatform $platform, array $params = []): StorageEntityManager
     {
         $connection = $this->createStub(Connection::class);
         $connection->method('getDatabasePlatform')->willReturn($platform);
+        $connection->method('getParams')->willReturn($params);
         $manager = $this->createStub(EntityManagerInterface::class);
         $manager->method('getConnection')->willReturn($connection);
         $registry = $this->createStub(ManagerRegistry::class);

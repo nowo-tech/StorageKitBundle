@@ -35,7 +35,9 @@ interface FileReferenceSourceInterface
     public function field(): string;
 
     /**
-     * The source id of an entity (1–64 characters, known before the insert: a UUID, not an auto-increment id).
+     * The source id of an entity (1–64 characters, known before the insert: a UUID, not an auto-increment id). Matched
+     * byte for byte (REQ-SEC-006, 1.5.3): an id with edge white space, a control, zero-width or bidi character, invalid
+     * UTF-8 or more than 64 characters references nothing (logged).
      */
     public function id(object $entity): string;
 
@@ -54,7 +56,7 @@ interface FileReferenceSourceInterface
     public function context(object $entity): ?array;
 
     /**
-     * Which source ids still exist (one query).
+     * Which source ids still exist (one query), exactly as asked: the bundle compares the answer with `===`.
      *
      * @param list<string> $ids
      *

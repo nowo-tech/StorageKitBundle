@@ -112,6 +112,10 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-DI-006** — `InstanceSettingsPass` refuses to compile without Instance Settings when the section is needed.
 - **FR-DI-007** — `MessengerIntegrationPass` removes the sync handler without a bus.
 - **FR-DI-008** — `TwigPathsPass` registers `@NowoStorageKitBundle` with host overrides first.
+- **FR-DI-009** — `StorageEntityManagerPass`, `ExcludedEntityNamespaceDriver`, `OwnEntityManagerSubscriber` (1.5):
+  optional dedicated entity manager (`doctrine.entity_manager`), entities mapped on it only, recovered when closed.
+- **FR-DI-010** — `FileDeliveryPortsPass` (1.5): the service behind the download port (`FileDeliveryInterface`, host
+  alias or decorator wins) must implement it, or the build fails.
 
 ### Storage
 
@@ -146,6 +150,7 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-PROF-003** — `ConfigProfiles` (ops-only: infrastructure buckets managed outside the application; the primary
   path is the encrypted database settings): the `profiles` tree (DSN or fields), delivery, unusable entries logged by name.
 - **FR-PROF-004** — `StorageProfileRepository`: active / target / retired (bounded) profiles, config rows, by uuid.
+- **FR-PROF-005** — `ConfigProfileProviderInterface`: host provider of config profiles (`config_profile_provider`).
 
 ### Instance Settings
 
@@ -174,6 +179,8 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-UP-004** — `UploadEndpoint`: editor configuration (`on` / `off` / `none`), MilkdownEditor options, CSRF token id.
 - **FR-UP-005** — `UploadLimitInterface`: optional owner quota.
 - **FR-UP-006** — `UploadRefused`: stable refusal reasons.
+- **FR-UP-007** — `ImageUploaderInterface` / `StoredFileView` (1.3 – 1.5): upload port returning a read-only view, no
+  entity.
 
 ### Download and rendering
 
@@ -184,6 +191,9 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-DL-005** — `StorageCspSources` / `StorageCspSourceProvider`: `img-src` origins of redirect profiles only.
 - **FR-DL-006** — `StorageKitTwigExtension`: `nowo_storage_upload`, `nowo_storage_milkdown_upload`,
   `nowo_storage_file_url`, `nowo_storage_images`.
+- **FR-DL-007** — `FileDeliveryInterface`, `FileDeliveryResponder`, `DeliverableFile`, `DeliverableFileData`,
+  `FileNotDeliverable`, `StoredImageResolverInterface` (1.5): delivery and image-resolver ports with framework-free
+  value objects.
 
 ### References and purge
 
@@ -191,6 +201,7 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-REF-002** — `FileReferenceListener`: flush-time collection, post-flush sync.
 - **FR-REF-003** — `FileReferences`: same-context references, orphan marking.
 - **FR-REF-004** — `FileUris`: URI scheme, both URI forms, bounded id extraction, plain-text helper.
+- **FR-REF-005** — `FileReferencesInterface` (1.5): reference port for hosts that track their texts themselves.
 - **FR-PURGE-001** — `FilePurger`: four bounded keyset steps, per-bucket deletion, re-check before delete.
 - **FR-PURGE-002** — `PurgeFilesCommand` (`nowo:storage-kit:purge`, `--days`).
 
@@ -212,10 +223,17 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-DATA-001** — `StoredFile`, `StoredFileReference`, `StoredFileRepository`: file metadata, variants, orphan date,
   usage queries (bounded).
 - **FR-DATA-002** — `StorageEntityManager`, `TablePrefixListener`: configurable entity manager and table prefix.
+- **FR-DATA-003** — `ExactIdentifier`, `UploaderIdentity`, `UploaderCollationListener` (1.5.2 / 1.5.3, REQ-SEC-006):
+  string identifiers (`uploaded_by`, `uploaded_by_key`, `context_id`, `owner`, `source_id`, `scope`) refused when
+  unusable, matched with exact SQL and `===`, binary NO PAD collation on MySQL / MariaDB with a logged fallback.
+- **FR-RUN-001** — `RequestBoundaryListener`, `UnitOfWorkFrames` (1.4 / 1.5.1, REQ-RUNTIME-002): memos and the
+  dedicated entity manager cleared at every request, message and console boundary in worker mode.
 
 ### Personal data and audit
 
 - **FR-GDPR-001** — `StoredFilesPersonalData`: export and erasure by user identifier, keyset pages, no bucket call.
+- **FR-GDPR-002** — `StoredFilesPersonalDataInterface`, `UploaderKeyResolverInterface`, `UserIdUploaderKeyResolver`,
+  `BackfillUploaderKeysCommand` (1.2 – 1.5): personal-data port, stable uploader keys and their backfill.
 - **FR-AUD-001** — `AuditRecorder` / `StorageAuditEvent`: one event per mutation, no secret.
 
 ### Admin UI and access
