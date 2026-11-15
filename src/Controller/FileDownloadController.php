@@ -22,7 +22,8 @@ use function strtolower;
 
 /**
  * `GET <upload.path_prefix>/files/{uuid}/{variant}` — 404 unless the viewer may read the context the file belongs to
- * (no difference between missing and forbidden; anonymous viewers are asked to the context too), then
+ * (no difference between missing and forbidden; anonymous viewers are asked to the context too) and the file is not
+ * expired (1.6: erased or removed, waiting for the purge), then
  * the download port ({@see FileDeliveryInterface}, {@see FileDelivery} unless the host aliases its own): a pre-signed
  * redirect for redirect-delivered config profiles, the bytes otherwise (sandboxed, `nosniff`, configured disposition),
  * turned into a response by {@see FileDeliveryResponder} (1.5).
@@ -49,7 +50,7 @@ final class FileDownloadController
     {
         $uuid = strtolower($uuid);
         $file = $this->files->findOneByUuid($uuid);
-        if (!$file instanceof StoredFile || ($this->contexts->readable($this->guard->user(), [$file])[$uuid] ?? false) !== true) {
+        if (!$file instanceof StoredFile || $file->isExpired() || ($this->contexts->readable($this->guard->user(), [$file])[$uuid] ?? false) !== true) {
             throw new NotFoundHttpException();
         }
 

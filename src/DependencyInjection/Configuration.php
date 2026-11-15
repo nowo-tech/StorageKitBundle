@@ -12,6 +12,7 @@ use Nowo\StorageKitBundle\Storage\S3Settings;
 use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Ui\StorageKitPages;
 use Nowo\StorageKitBundle\Upload\ImageProcessor;
+use Nowo\StorageKitBundle\Upload\SquareImageProcessor;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
@@ -459,6 +460,30 @@ final class Configuration implements ConfigurationInterface
                     ->validate()
                         ->ifTrue(static fn (array $v): bool => array_diff(array_keys($v), ['preview', 'thumb']) !== [])
                         ->thenInvalid('nowo_storage_kit.upload.variants accepts the names "preview" and "thumb" only.')
+                    ->end()
+                ->end()
+                ->arrayNode('square')
+                    ->info('Square images (1.6, SquareImageUploaderInterface: profile pictures, logos): PNG, JPEG or still WebP, re-encoded as WebP squares of size, size / 2 (preview) and size / 4 (thumb) px. Needs GD with WebP (without it uploads are refused with "off").')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('max_bytes')
+                            ->info('Largest accepted square image upload, in bytes.')
+                            ->defaultValue(SquareImageProcessor::MAX_BYTES)
+                            ->min(1024)
+                            ->max(50 * 1024 * 1024)
+                        ->end()
+                        ->integerNode('max_pixels')
+                            ->info('Largest square image upload (width x height), read from the header before decoding; the smaller of this and upload.max_pixels applies.')
+                            ->defaultValue(SquareImageProcessor::MAX_PIXELS)
+                            ->min(1)
+                            ->max(100_000_000)
+                        ->end()
+                        ->integerNode('size')
+                            ->info('Side of the stored square, in pixels.')
+                            ->defaultValue(SquareImageProcessor::SIZE)
+                            ->min(SquareImageProcessor::SIZE_MIN)
+                            ->max(SquareImageProcessor::SIZE_MAX)
+                        ->end()
                     ->end()
                 ->end()
                 ->integerNode('rate_limit')

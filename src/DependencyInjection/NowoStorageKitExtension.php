@@ -42,6 +42,8 @@ use Nowo\StorageKitBundle\Form\StorageProfileType;
 use Nowo\StorageKitBundle\Http\StorageCspSources;
 use Nowo\StorageKitBundle\Integration\HttpHardening\StorageCspSourceProvider;
 use Nowo\StorageKitBundle\Lifecycle\FilePurger;
+use Nowo\StorageKitBundle\Lifecycle\FileRemover;
+use Nowo\StorageKitBundle\Lifecycle\FileRemoverInterface;
 use Nowo\StorageKitBundle\Message\RunStorageSyncMessage;
 use Nowo\StorageKitBundle\MessageHandler\RunStorageSyncHandler;
 use Nowo\StorageKitBundle\NowoStorageKitBundle;
@@ -85,6 +87,8 @@ use Nowo\StorageKitBundle\Ui\StorageKitPages;
 use Nowo\StorageKitBundle\Upload\ImageProcessor;
 use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
+use Nowo\StorageKitBundle\Upload\SquareImageProcessor;
+use Nowo\StorageKitBundle\Upload\SquareImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Console\ConsoleEvents;
@@ -106,6 +110,7 @@ use function interface_exists;
 use function is_array;
 use function is_bool;
 use function is_string;
+use function min;
 use function sprintf;
 use function trim;
 
@@ -212,7 +217,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /* @var array{profiles: array<string, array{dsn: string|null, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string|null, prefix: string, access_key: string|null, secret: string|null, path_style: bool, delivery: string}>, config_profile_provider: string|null, instance_profile: string|null, uri_scheme: string, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, upload: array{enabled: bool, path_prefix: string, access_roles: list<string>, max_bytes: int, max_pixels: int, variants: array<string, int>, rate_limit: int, rate_interval: string}, download: array{url_ttl: int, disposition: string}, purge: array{retention_days: int, batch_size: int, max_batches: int}, sync: array{batch_size: int, slice_seconds: int, stale_seconds: int}, scopes: array{enabled: bool, resolver: string|null, access_checker: string|null, path_prefix: string}, limits: array{upload_limit: string|null}, personal_data: array{uploader_key_resolver: string|null, user_provider: string}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
+        /* @var array{profiles: array<string, array{dsn: string|null, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string|null, prefix: string, access_key: string|null, secret: string|null, path_style: bool, delivery: string}>, config_profile_provider: string|null, instance_profile: string|null, uri_scheme: string, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, upload: array{enabled: bool, path_prefix: string, access_roles: list<string>, max_bytes: int, max_pixels: int, variants: array<string, int>, square: array{max_bytes: int, max_pixels: int, size: int}, rate_limit: int, rate_interval: string}, download: array{url_ttl: int, disposition: string}, purge: array{retention_days: int, batch_size: int, max_batches: int}, sync: array{batch_size: int, slice_seconds: int, stale_seconds: int}, scopes: array{enabled: bool, resolver: string|null, access_checker: string|null, path_prefix: string}, limits: array{upload_limit: string|null}, personal_data: array{uploader_key_resolver: string|null, user_provider: string}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
         if (!$this->hasBundle($container, 'NowoDoctrineEncryptBundle') && !$container->hasExtension('nowo_doctrine_encrypt')) {
             throw new LogicException('NowoStorageKitBundle requires nowo-tech/doctrine-encrypt-bundle (bucket secrets are encrypted at rest): register Nowo\DoctrineEncryptBundle\NowoDoctrineEncryptBundle in config/bundles.php.');
         }
@@ -389,7 +394,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
      */
     private function registerFiles(ContainerBuilder $container, array $config): void
     {
-        /** @var array{uri_scheme: string, upload: array{path_prefix: string, max_bytes: int, max_pixels: int, variants: array<string, int>}, download: array{url_ttl: int, disposition: string}, limits: array{upload_limit: string|null}, personal_data: array{uploader_key_resolver: string|null, user_provider: string}} $config */
+        /** @var array{uri_scheme: string, upload: array{path_prefix: string, max_bytes: int, max_pixels: int, variants: array<string, int>, square: array{max_bytes: int, max_pixels: int, size: int}}, download: array{url_ttl: int, disposition: string}, limits: array{upload_limit: string|null}, personal_data: array{uploader_key_resolver: string|null, user_provider: string}} $config */
         $logger = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
         $limit  = $config['limits']['upload_limit'];
         $keys   = $config['personal_data']['uploader_key_resolver'];
@@ -419,6 +424,11 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             $config['upload']['max_pixels'],
             Configuration::variants($config['upload']['variants']),
         ]))->setPublic(true));
+        $container->setDefinition(SquareImageProcessor::class, (new Definition(SquareImageProcessor::class, [
+            $config['upload']['square']['max_bytes'],
+            min($config['upload']['max_pixels'], $config['upload']['square']['max_pixels']),
+            $config['upload']['square']['size'],
+        ]))->setPublic(true));
         $container->setDefinition(ImageUploader::class, (new Definition(ImageUploader::class, [
             new Reference(FileContexts::class),
             new Reference(StorageProfiles::class),
@@ -429,9 +439,21 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             is_string($limit) && trim($limit) !== '' ? new Reference($limit) : null,
             $logger,
             new Reference(UploaderKeyResolverInterface::class),
+            new Reference(SquareImageProcessor::class),
         ]))->setPublic(true));
         // 1.3 (rule 1): the upload port (DTO return, after-commit audit).
         $container->setAlias(ImageUploaderInterface::class, ImageUploader::class)->setPublic(true);
+        // 1.6: square images (profile pictures, logos) and the removal port.
+        $container->setAlias(SquareImageUploaderInterface::class, ImageUploader::class)->setPublic(true);
+        $container->setDefinition(FileRemover::class, (new Definition(FileRemover::class, [
+            new Reference(StorageEntityManager::class),
+            new Reference(StoredFileRepository::class),
+            new Reference(StorageProfiles::class),
+            new Reference(FileStorage::class),
+            new Reference(AuditRecorder::class),
+            $logger,
+        ]))->setPublic(true));
+        $container->setAlias(FileRemoverInterface::class, FileRemover::class)->setPublic(true);
         $container->setDefinition(FileUrls::class, (new Definition(FileUrls::class, [new Reference('router')]))->setPublic(true));
         $container->setDefinition(self::FILE_DELIVERY_ID, new Definition(FileDelivery::class, [
             new Reference(StorageProfiles::class),

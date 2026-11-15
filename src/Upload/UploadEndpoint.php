@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Upload;
 
 use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
+use Nowo\StorageKitBundle\Context\SquareImageContextInterface;
 use Nowo\StorageKitBundle\Controller\StorageSettingsController;
 use Nowo\StorageKitBundle\Download\FileUrls;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
@@ -22,7 +23,8 @@ use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
  *   to send in the `X-CSRF-Token` header (token id `nowo_storage_kit/upload/<type>/<id>`: bound to the action and
  *   the target), the size cap and the accepted types;
  * - `off`: the user may write there but no bucket is set up (`setup_url` for whoever may set one up);
- * - `none`: no upload feature (the user may not upload, or not in that context).
+ * - `none`: no upload feature (the user may not upload, or not in that context, or the context is square-only:
+ *   {@see SquareImageContextInterface}, 1.6).
  */
 final readonly class UploadEndpoint
 {
@@ -70,7 +72,9 @@ final readonly class UploadEndpoint
         if ($user === null || !$this->csrf instanceof CsrfTokenManagerInterface || !$this->guard->canUpload() || !FileContexts::isType($contextType) || !FileContexts::isId($contextId)) {
             return ['state' => 'none'];
         }
-        $target = $this->contexts->get($contextType)?->writableTarget($user, $contextId);
+        $context = $this->contexts->get($contextType);
+        // 1.6: a square-only context (profile pictures, logos) takes no generic upload: the endpoint refuses it.
+        $target = $context instanceof SquareImageContextInterface ? null : $context?->writableTarget($user, $contextId);
         if (!$target instanceof FileContextTarget) {
             return ['state' => 'none'];
         }

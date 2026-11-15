@@ -55,7 +55,7 @@ scenarios are evaluated:
 | `DeliverableFileData` (1.5) | static `WeakMap` keyed by each per-request `DeliverableFile` (pre-signed URL / body source) | ✅ | ✅ (entries die with their VO; nothing to reset) |
 | `FileReferenceListener` | texts collected in `onFlush`, emptied in `postFlush` | ✅ | ✅ (emptied per flush; reset only drops a failed flush's leftovers) |
 | `StorageKitRouteLoader` | `loaded` flag (cache warm-up only) | ✅ | ✅ |
-| `ImageProcessor`, `ImageUploader`, `UploadEndpoint`, `FileDelivery`, `FileDeliveryResponder`, `FileUrls`, `StoredImageResolver`, `FileUris`, `FileReferences`, `FilePurger`, `StorageSyncer`, `StorageMove`, `StorageProbe`, `EndpointGuard`, `ConfigProfiles`, `InstanceStorageSettings`, `AuditRecorder`, repositories | none (`readonly`) | ✅ | ✅ |
+| `ImageProcessor`, `SquareImageProcessor` (1.6), `ImageUploader`, `FileRemover` (1.6), `UploadEndpoint`, `FileDelivery`, `FileDeliveryResponder`, `FileUrls`, `StoredImageResolver`, `FileUris`, `FileReferences`, `FilePurger`, `StorageSyncer`, `StorageMove`, `StorageProbe`, `EndpointGuard`, `ConfigProfiles`, `InstanceStorageSettings`, `AuditRecorder`, repositories | none (`readonly`) | ✅ | ✅ |
 | Controllers, `AdminPages`, `StorageKitPages`, `ProfileTester`, form types, `StorageSettingsSection` | none (forms and view models built per call) | ✅ | ✅ |
 | `AccessGuard`, `StorageKitAccessListener`, access checkers, `InstanceSettingsListener`, Twig extension, commands, Messenger handler | none | ✅ | ✅ |
 

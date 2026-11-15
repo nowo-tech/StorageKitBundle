@@ -27,7 +27,7 @@ final class UploadRefused extends RuntimeException
     /** Unknown context, or the user may not write in it. */
     public const CONTEXT = 'context';
 
-    /** No usable bucket for the context. */
+    /** No usable bucket for the context (1.6: or, for square images, GD without WebP support). */
     public const OFF = 'off';
 
     /** The owner's storage limit is reached ({@see UploadLimitInterface}). */

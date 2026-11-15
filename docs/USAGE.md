@@ -7,6 +7,7 @@
 - [DDD / hexagonal host](#ddd--hexagonal-host)
   - [The ports (1.5)](#the-ports-15)
   - [A dedicated entity manager (1.5)](#a-dedicated-entity-manager-15)
+  - [Square images: profile pictures and logos (1.6)](#square-images-profile-pictures-and-logos-16)
 - [The instance bucket](#the-instance-bucket)
   - [The `storage` settings section](#the-storage-settings-section)
   - [A bucket from the configuration](#a-bucket-from-the-configuration)
@@ -136,6 +137,8 @@ HttpFoundation type). All are public service aliases:
 | Port | Use |
 |---|---|
 | `Upload\ImageUploaderInterface` (1.3) | `uploadImage()` → `StoredFileView`; `afterCommit()` inside your transaction |
+| `Upload\SquareImageUploaderInterface` (1.6) | `uploadSquareImage()` → `StoredFileView` (WebP squares: profile pictures, logos) |
+| `Lifecycle\FileRemoverInterface` (1.6) | `remove($uuid, $contextType, $contextId)` now, `expire()` at the next purge (exact context only) |
 | `Reference\FileReferencesInterface` | `sync($type, $id, $text, [$contextType, $contextId])`, `forget($type, $ids)` for texts that are not Doctrine entities |
 | `Download\StoredImageResolverInterface` | `resolve($uuids, $viewer)` / `resolveText($text, $viewer)` → `StoredImage` VOs for your renderer |
 | `Download\FileDeliveryInterface` | `deliver($uuid, $variant)` → `DeliverableFile` (redirect URL or byte stream, headers); `FileDeliveryResponder` turns it into an HttpFoundation response, or write your own adapter (PSR-7, …). Call it only after your access check |
@@ -210,6 +213,40 @@ the same guarantee through the deprecated `upload()`, which still returns the `S
 $view = $connection->transactional(fn () => $this->uploader->uploadImage($user, 'issue', $issueId, $bytes, $name));
 $this->uploader->afterCommit($view);
 ```
+
+### Square images: profile pictures and logos (1.6)
+
+Inject `Upload\SquareImageUploaderInterface` and call `uploadSquareImage($user, $contextType, $contextId, $bytes, $name)`
+(same context, bucket, limit, transaction and audit rules as `uploadImage()`). The image must be a PNG, JPEG or still
+WebP by its content (SVG, GIF, HTML and animated WebP are refused), at most `upload.square.max_bytes`, and within
+`upload.square.max_pixels` (default 16 MP, never above `upload.max_pixels`) and the memory left (both read from the
+header before decoding). PHP GD needs WebP support: without it every square upload is refused with `off` (check
+`SquareImageProcessor::supported()` to hide the feature). It is turned upright (JPEG EXIF),
+cropped to its centred square and stored as WebP squares: `original` (`upload.square.size`, default 256 px),
+`preview` (half) and `thumb` (a quarter). Re-encoding drops EXIF / GPS / XMP and anything appended to the image.
+Serve it with `FileUrls::download($uuid, 'thumb')`: the download route checks the context's `readable()` as usual.
+
+Implement `Context\SquareImageContextInterface` (instead of `FileContextInterface`) for a context that holds square
+images only: `uploadImage()` and the upload endpoint then refuse it like an unknown context.
+
+The file starts as an orphan: point something at it (`FileReferencesInterface::sync($type, $id, '![](storage-file:' . $uuid . ')', [$contextType, $contextId])`)
+or the purge deletes it after the retention. To drop the previous picture at once, inject `Lifecycle\FileRemoverInterface`:
+
+```php
+$view = $this->squares->uploadSquareImage($user, 'avatar', $userId, $bytes, $name);
+$this->references->sync('avatar', $userId, '![](storage-file:' . $view->uuid . ')', ['avatar', $userId]);
+if ($previous !== null) {
+    $this->remover->remove($previous, 'avatar', $userId);   // objects, references and row; the purge retries a refusing bucket
+}
+```
+
+`remove()` and `expire()` only act on a file of exactly that context (a UUID learned elsewhere removes nothing).
+`remove()` calls the bucket: call it after your transaction committed. `expire()` makes no bucket call (use it inside a
+transaction, e.g. a GDPR erasure): the file is no longer served (its URL answers 404 at once) and the next
+`nowo:storage-kit:purge` deletes its objects and row. Both return a `Lifecycle\RemovedFile` (null when nothing
+matched). Outside a transaction the `file_removed` / `file_expired` audit event is recorded at once; inside yours, call
+`$this->remover->afterCommit($removed)` after the commit (a rolled-back removal leaves no trace). UserKitBundle 1.18
+(`owner_images`) wraps all of this for avatars and organization logos.
 
 ### Listening to it
 
@@ -688,6 +725,7 @@ logged at `info`. It never carries a secret, an access key, a signed URL or a pr
 | `move_switched` | from, to, files |
 | `profiles_forgotten` | profiles (UUIDs of the retired profiles deleted) |
 | `file_uploaded` | file, context, bytes |
+| `file_removed` | file, context (1.6, `FileRemoverInterface::remove()` outside a transaction) |
 | `files_purged` | counters |
 | `files_erased` | files |
 
