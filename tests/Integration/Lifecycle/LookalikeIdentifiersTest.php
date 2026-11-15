@@ -6,10 +6,10 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Lifecycle;
 
 use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Platforms\SQLitePlatform;
+use Doctrine\DBAL\Types\Types;
 use InvalidArgumentException;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
@@ -434,7 +434,7 @@ final class LookalikeIdentifiersTest extends KernelTestCase
         unset($row['id']);
         $row = ['uuid' => sprintf('00000000-0000-4000-9000-%012d', $n + 1), 'scope' => $scope, 'state' => StorageProfile::STATE_RETIRED] + $row;
         // PostgreSQL returns booleans as PHP booleans: bind them as such (a string `false` is "").
-        $types = array_map(static fn (mixed $value): ParameterType => is_bool($value) ? ParameterType::BOOLEAN : ParameterType::STRING, $row);
+        $types = array_map(static fn (mixed $value): string => is_bool($value) ? Types::BOOLEAN : Types::STRING, $row);
         SeedIds::insert($connection, 'storage_kit_profile', $row, $types);
     }
 
