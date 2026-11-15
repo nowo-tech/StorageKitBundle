@@ -209,13 +209,19 @@ final readonly class FileReferences implements FileReferencesInterface
     {
         $files      = $this->entityManager->table(StoredFile::class);
         $references = $this->entityManager->table(StoredFileReference::class);
+        // PostgreSQL with DBAL 3 maps the id with a sequence (no column default): the statement takes the next value itself.
+        $sequence = $this->entityManager->sequenceName(StoredFileReference::class);
+        $idColumn = $sequence === null ? '' : 'id, ';
+        $idValue  = $sequence === null ? '' : 'nextval(?), ';
+        $idParams = $sequence === null ? [] : [$sequence];
+        $idTypes  = $sequence === null ? [] : [Types::STRING];
         try {
             $inserted = (int) $this->entityManager->atomically(static fn (Connection $connection): int|string => $connection->executeStatement(
-                'INSERT INTO ' . $references . ' (file_id, source_type, source_id, created_at)'
-                . ' SELECT f.id, ?, ?, ? FROM ' . $files . ' f WHERE f.id IN (?)'
+                'INSERT INTO ' . $references . ' (' . $idColumn . 'file_id, source_type, source_id, created_at)'
+                . ' SELECT ' . $idValue . 'f.id, ?, ?, ? FROM ' . $files . ' f WHERE f.id IN (?)'
                 . ' AND NOT EXISTS (SELECT 1 FROM ' . $references . ' r WHERE r.file_id = f.id AND r.source_type = ? AND r.source_id = ?)',
-                [$type, $id, new DateTimeImmutable(), $fileIds, $type, $id],
-                [Types::STRING, Types::STRING, Types::DATETIME_IMMUTABLE, ArrayParameterType::INTEGER, Types::STRING, Types::STRING],
+                [...$idParams, $type, $id, new DateTimeImmutable(), $fileIds, $type, $id],
+                [...$idTypes, Types::STRING, Types::STRING, Types::DATETIME_IMMUTABLE, ArrayParameterType::INTEGER, Types::STRING, Types::STRING],
             ), 'reference');
         } catch (UniqueConstraintViolationException) {
             $inserted = 0;

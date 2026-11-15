@@ -6,22 +6,24 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Fixed](#fixed)
+  - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
   - [Added](#added)
   - [Changed](#changed)
-  - [Tests](#tests)
+  - [Tests](#tests-1)
 - [[1.5.3] - 2026-11-13](#153---2026-11-13)
   - [Security](#security)
   - [Added](#added-1)
   - [Changed](#changed-1)
-  - [Tests](#tests-1)
+  - [Tests](#tests-2)
 - [[1.5.2] - 2026-11-13](#152---2026-11-13)
   - [Security](#security-1)
-  - [Fixed](#fixed)
-  - [Tests](#tests-2)
-- [[1.5.1] - 2026-11-12](#151---2026-11-12)
   - [Fixed](#fixed-1)
   - [Tests](#tests-3)
+- [[1.5.1] - 2026-11-12](#151---2026-11-12)
+  - [Fixed](#fixed-2)
+  - [Tests](#tests-4)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
   - [Added](#added-2)
   - [Changed](#changed-2)
@@ -29,10 +31,10 @@ All notable changes to this project are documented here. The format follows
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Added](#added-3)
   - [Security](#security-2)
-  - [Fixed](#fixed-2)
+  - [Fixed](#fixed-3)
   - [Changed](#changed-3)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
-  - [Fixed](#fixed-3)
+  - [Fixed](#fixed-4)
   - [Added](#added-4)
   - [Changed](#changed-4)
   - [Deprecated](#deprecated-1)
@@ -43,12 +45,25 @@ All notable changes to this project are documented here. The format follows
 - [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-6)
   - [Changed](#changed-6)
-  - [Fixed](#fixed-4)
+  - [Fixed](#fixed-5)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
   - [Added](#added-7)
   - [Security](#security-4)
 
 ## [Unreleased]
+
+### Fixed
+
+- **PostgreSQL with DBAL 3: file references could not be inserted (1.0.0–1.6.0)**: the reference insert (`FileReferences`,
+  the only raw DBAL `INSERT` that left out an ORM-generated id; the entity inserts already take the id from the
+  generator) failed with a NOT NULL violation where the ORM maps the id with a sequence (`AUTO` on PostgreSQL with
+  DBAL 3, no column default). The statement now takes `nextval()` of that sequence itself; identity / autoincrement
+  platforms (DBAL 4, MySQL, MariaDB, SQLite) are unchanged. New `StorageEntityManager::sequenceName()` (read-only).
+  No behaviour or BC change otherwise; worker-safe (no state kept).
+
+### Tests
+
+- CI leg `PostgreSQL 17 (DBAL 3)` in the real-database job and `SequenceIdsTest` (fails on 1.6.0 there).
 
 ## [1.6.0] - 2026-11-15
 
