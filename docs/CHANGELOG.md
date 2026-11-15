@@ -54,7 +54,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **PostgreSQL with DBAL 3: file references could not be inserted (1.6.0)**: the reference insert (`FileReferences`,
+- **PostgreSQL with DBAL 3: file references could not be inserted (1.0.0–1.6.0)**: the reference insert (`FileReferences`,
   the only raw DBAL `INSERT` that left out an ORM-generated id; the entity inserts already take the id from the
   generator) failed with a NOT NULL violation where the ORM maps the id with a sequence (`AUTO` on PostgreSQL with
   DBAL 3, no column default). The statement now takes `nextval()` of that sequence itself; identity / autoincrement
