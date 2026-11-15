@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Added](#added)
+  - [Changed](#changed)
+  - [Tests](#tests)
 - [[1.5.3] - 2026-11-13](#153---2026-11-13)
   - [Security](#security)
   - [Added](#added)
@@ -45,6 +48,34 @@ All notable changes to this project are documented here. The format follows
   - [Security](#security-4)
 
 ## [Unreleased]
+
+### Added
+
+- **Square images (profile pictures, logos)**: `Upload\SquareImageUploaderInterface::uploadSquareImage()` (implemented
+  by `ImageUploader`) stores an image as WebP squares through the usual context / bucket / limit / audit flow. Checks
+  of the new `Upload\SquareImageProcessor`: PNG, JPEG or still WebP by content only (SVG, GIF, HTML, animated WebP
+  refused), `upload.square.max_bytes` (default 2 MiB) before anything is parsed, `upload.max_pixels` and the memory
+  budget read from the header before decoding, JPEG turned upright, centred square re-encoded as WebP (metadata and any
+  appended payload dropped) at `upload.square.size` (default 256 px) with `preview` (half) and `thumb` (quarter)
+  squares, served by the existing download route.
+- **Removal port** `Lifecycle\FileRemoverInterface` (`FileRemover`): `remove($uuid, $contextType, $contextId)` deletes a
+  file's objects, references and row at once (left to the next purge when the bucket refuses), `expire()` leaves it to
+  the next purge without a bucket call (for erasures inside a transaction). Matched by id AND exact context (a UUID
+  learned elsewhere removes nothing); DBAL statements, no entity manager flushed. New audit action `file_removed`.
+- `Context\SquareImageContextInterface`: a context that holds square images only; `uploadImage()` and the upload
+  endpoint refuse it like an unknown context, so a GIF of 10 MiB cannot land where a 256 px square is expected.
+- Configuration `upload.square.max_bytes` and `upload.square.size`.
+
+### Changed
+
+- `ImageProcessor::upright()` is now a public static helper (shared with `SquareImageProcessor`; same behaviour).
+
+### Tests
+
+- Square images: centred crop, sizes, EXIF orientation and metadata removal, PNG / JPEG polyglots (appended PHP, HTML,
+  ZIP) neutralised, header-only decompression bombs and memory-budget refusals before decoding, SVG / GIF / HTML /
+  animated WebP / mismatched magic refused; removal by exact context, inside and outside a host transaction, refusing
+  bucket and unusable profile left to the purge.
 
 ## [1.5.3] - 2026-11-13
 

@@ -157,7 +157,7 @@ final readonly class ImageProcessor
             throw new UploadRefused(UploadRefused::TYPE);
         }
         if ($mime === 'image/jpeg') {
-            $image = $this->upright($image, self::jpegOrientation($bytes));
+            $image = self::upright($image, self::jpegOrientation($bytes));
         }
         $original = $this->encode($image, $mime);
         $variants = [];
@@ -257,7 +257,11 @@ final readonly class ImageProcessor
         return $value === false ? 0 : (int) $value[1];
     }
 
-    private function upright(GdImage $image, int $orientation): GdImage
+    /**
+     * The image turned upright from an EXIF orientation (1–8; anything else leaves it as it is). Shared with
+     * {@see SquareImageProcessor} (1.6).
+     */
+    public static function upright(GdImage $image, int $orientation): GdImage
     {
         if (in_array($orientation, [2, 4, 5, 7], true)) {
             imageflip($image, $orientation === 4 ? IMG_FLIP_VERTICAL : IMG_FLIP_HORIZONTAL);

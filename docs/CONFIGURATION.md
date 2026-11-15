@@ -52,6 +52,9 @@ nowo_storage_kit:
         max_bytes: 10485760      # 10 MiB, 1024 – 50 MiB
         max_pixels: 24000000     # 1 – 100 000 000
         variants: { preview: 1600, thumb: 400 }
+        square:                  # 1.6: SquareImageUploaderInterface (profile pictures, logos)
+            max_bytes: 2097152   # 2 MiB, 1024 – 50 MiB
+            size: 256            # px, 64 – 1024 (preview = size / 2, thumb = size / 4)
         rate_limit: 30           # uploads per user and window, 1–1000
         rate_interval: '1 minute'
     download:
@@ -184,6 +187,8 @@ Upload and download endpoints: `POST <path_prefix>/upload/{type}/{id}` and `GET 
 | `max_bytes` | `10485760` | Largest upload in bytes (1024 – 52428800). Keep PHP `upload_max_filesize` / `post_max_size` above it. |
 | `max_pixels` | `24000000` | Largest image (width × height), read from the header before decoding (1 – 100 000 000). Every JPEG is also budgeted about 6 bytes per pixel of (progressive) decoder memory: see [SECURITY](SECURITY.md#size-pixel-and-memory-limits). |
 | `variants` | `{preview: 1600, thumb: 400}` | Longest side per variant (16–8192 px). Names `preview` and `thumb` only; a variant is made only for larger images. |
+| `square.max_bytes` | `2097152` | 1.6: largest square image upload (`SquareImageUploaderInterface`), checked before anything is parsed (1024 – 52428800). |
+| `square.size` | `256` | 1.6: side of the stored WebP square (64 – 1024 px); `preview` is half of it, `thumb` a quarter. `max_pixels` applies too. |
 | `rate_limit` | `30` | Uploads one user may make per window (1–1000, sliding window over `cache.app`). |
 | `rate_interval` | `'1 minute'` | Relative time (`strtotime('+…')` must give a positive offset). |
 

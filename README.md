@@ -66,6 +66,9 @@ worker. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md).
   check, re-encoding (EXIF / GPS stripped), preview and thumbnail variants, random server-side keys, optional plan quota
   (`UploadLimitInterface`); answers the Markdown snippet `![alt](storage-file:<uuid>)`. Twig helpers for
   MilkdownEditor and any other editor.
+- **Square images (1.6)** — `SquareImageUploaderInterface`: profile pictures and logos as WebP squares (256 / 128 /
+  64 px by default), PNG / JPEG / still WebP by content, 2 MiB and pixel caps before decoding, re-encoded (no
+  metadata, no polyglot payload); `FileRemoverInterface` drops a replaced picture at once.
 - **Host-decided access** — `FileContextInterface` says who may write in a context (and which scope / owner pays) and
   who may read it, batched per context type.
 - **Downloads** — 404 for missing and forbidden alike; streamed with `nosniff`, a sandbox CSP and `attachment`, or `302`

@@ -9,6 +9,7 @@ use Nowo\StorageKitBundle\Audit\AuditRecorder;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
 use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
+use Nowo\StorageKitBundle\Context\SquareImageContextInterface;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\PersonalData\UploaderIdentity;
@@ -43,14 +44,18 @@ use function trim;
  *
  * Since 1.3 (architecture bar rule 6) the row is written with a DBAL insert built from the entity metadata (in a
  * savepoint inside an open transaction): no entity manager is flushed. Type-hint {@see ImageUploaderInterface}.
+ * Since 1.6 it also stores square images ({@see SquareImageUploaderInterface}, checks of {@see SquareImageProcessor}).
  */
-final readonly class ImageUploader implements ImageUploaderInterface
+final readonly class ImageUploader implements ImageUploaderInterface, SquareImageUploaderInterface
 {
     /** Longest kept file name. */
     public const NAME_MAX = 120;
 
+    private SquareImageProcessor $squareProcessor;
+
     /**
-     * Contexts, profiles, storage, checks, entity manager, audit, optional limit, logger and the stable uploader key.
+     * Contexts, profiles, storage, checks, entity manager, audit, optional limit, logger, the stable uploader key and
+     * the square image checks (1.6; default: {@see SquareImageProcessor} with its defaults).
      */
     public function __construct(
         private FileContexts $contexts,
@@ -62,7 +67,9 @@ final readonly class ImageUploader implements ImageUploaderInterface
         private ?UploadLimitInterface $limit = null,
         private LoggerInterface $logger = new NullLogger(),
         private UploaderKeyResolverInterface $uploaderKeys = new UserIdUploaderKeyResolver(),
+        ?SquareImageProcessor $squareProcessor = null,
     ) {
+        $this->squareProcessor = $squareProcessor ?? new SquareImageProcessor();
     }
 
     /**
@@ -102,6 +109,21 @@ final readonly class ImageUploader implements ImageUploaderInterface
     }
 
     /**
+     * Stores a square image (1.6) and returns its view; the audit event follows the commit like {@see uploadImage()}.
+     *
+     * @throws UploadRefused
+     */
+    public function uploadSquareImage(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFileView
+    {
+        $view = StoredFileView::fromEntity($this->store($user, $contextType, $contextId, $bytes, $originalName, true));
+        if (!$this->entityManager->connection()->isTransactionActive()) {
+            $this->afterCommit($view);
+        }
+
+        return $view;
+    }
+
+    /**
      * Records the `file_uploaded` audit event of each upload (after the host commit).
      */
     public function afterCommit(StoredFileView ...$uploaded): void
@@ -116,17 +138,17 @@ final readonly class ImageUploader implements ImageUploaderInterface
      *
      * @throws UploadRefused
      */
-    private function store(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFile
+    private function store(object $user, string $contextType, string $contextId, string $bytes, string $originalName, bool $square = false): StoredFile
     {
-        $target = FileContexts::isType($contextType) && FileContexts::isId($contextId)
-            ? $this->contexts->get($contextType)?->writableTarget($user, $contextId)
-            : null;
+        $context = FileContexts::isType($contextType) && FileContexts::isId($contextId) ? $this->contexts->get($contextType) : null;
+        // 1.6: a square-only context (profile pictures, logos) takes square images only.
+        $target = $context instanceof SquareImageContextInterface && !$square ? null : $context?->writableTarget($user, $contextId);
         if (!$target instanceof FileContextTarget) {
             throw new UploadRefused(UploadRefused::CONTEXT);
         }
         $profile  = $this->profiles->forTarget($target) ?? throw new UploadRefused(UploadRefused::OFF);
         $settings = $this->profiles->settingsOf($profile) ?? throw new UploadRefused(UploadRefused::OFF);
-        $image    = $this->processor->process($bytes);
+        $image    = $square ? $this->squareProcessor->process($bytes) : $this->processor->process($bytes);
         if ($this->limit instanceof UploadLimitInterface && !$this->limit->allows($target, $image->totalBytes())) {
             throw new UploadRefused(UploadRefused::LIMIT);
         }

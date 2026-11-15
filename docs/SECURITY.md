@@ -19,6 +19,7 @@ Bundle-specific security analysis. The short GitHub reporting policy lives in [`
   - [SSRF in endpoint configuration](#ssrf-in-endpoint-configuration)
   - [Credentials](#credentials)
   - [References and the purge](#references-and-the-purge)
+  - [Removal (1.6)](#removal-16)
   - [Worker-mode state](#worker-mode-state)
 - [Admin UI exposure and debug-only switches](#admin-ui-exposure-and-debug-only-switches)
 - [Personal data (GDPR)](#personal-data-gdpr)
@@ -93,11 +94,16 @@ SECURITY.md), DoctrineEncrypt's key management, the bucket provider, or the Mark
   streamed responses carry `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
   `Cross-Origin-Resource-Policy: same-origin` and `Content-Disposition: attachment` by default (`download.disposition`).
 - Upload JSON answers are `private, no-store`, `nosniff`.
+- Square images (1.6, `SquareImageUploaderInterface`): PNG, JPEG or **still** WebP by content only (GIF, SVG, HTML
+  and animated WebP refused), always decoded and re-encoded as WebP squares (no metadata, no appended payload:
+  PHP / HTML / ZIP polyglots come out as plain WebP).
 
 ### Size, pixel and memory limits
 
 - `upload.max_bytes` (default 10 MiB) before and after PHP's own limits.
 - `upload.max_pixels` (default 24 MP) read from the header **before** decoding: no decompression bomb.
+- Square images: `upload.square.max_bytes` (default 2 MiB) before anything is parsed, then the same pixel cap and
+  memory budget before decoding.
 - Before decoding, the image must fit twice (4 bytes per pixel × 2) in what is left of `memory_limit`, or it is refused
   like an oversized image instead of a fatal out-of-memory; variants are made one from the other (at most two decoded
   images alive). **Every JPEG** is budgeted 6 more bytes per pixel: libjpeg keeps every DCT coefficient while it
@@ -208,6 +214,12 @@ section unless `endpoints.guard_instance_profile: false`):
   else's orphan from the purge or claim it.
 - The purge deletes objects from each file's own bucket, re-checks for a new reference before deleting, and keeps the
   row when the bucket refuses.
+
+### Removal (1.6)
+
+- `FileRemoverInterface::remove()` / `expire()` act only on a file whose context type and id equal the given ones
+  byte for byte (`===` on the loaded row): a UUID learned elsewhere cannot remove another context's file. Malformed ids
+  and contexts are refused before any query. Statements go by primary key.
 
 ### Worker-mode state
 

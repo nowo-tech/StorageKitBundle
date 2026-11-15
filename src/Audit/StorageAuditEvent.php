@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Audit;
 
+use Nowo\StorageKitBundle\Lifecycle\FileRemoverInterface;
 use Symfony\Contracts\EventDispatcher\Event;
 
 /**
@@ -40,6 +41,9 @@ final class StorageAuditEvent extends Event
 
     /** A file was uploaded (details: file, context, bytes). */
     public const FILE_UPLOADED = 'file_uploaded';
+
+    /** A file was removed at once through {@see FileRemoverInterface} (1.6; details: file, context). */
+    public const FILE_REMOVED = 'file_removed';
 
     /** The purge ran (details: counters). */
     public const FILES_PURGED = 'files_purged';
