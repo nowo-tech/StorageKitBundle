@@ -28,8 +28,9 @@ use function strtolower;
 /**
  * Default {@see FileRemoverInterface} (1.6). The row is looked up by public id, then its context is compared with `===`
  * (no SQL collation decides it); the statements go by primary key, each pair in one unit
- * ({@see StorageEntityManager::atomically()}: a savepoint inside a host transaction). The `file_removed` audit event is
- * recorded only outside a transaction (after commit, rule 7); the loaded row leaves the bundle's unit of work.
+ * ({@see StorageEntityManager::atomically()}: a savepoint inside a host transaction). The `file_removed` /
+ * `file_expired` audit event is recorded at once outside a transaction, else by {@see self::afterCommit()} once the host
+ * committed (rule 7); the loaded row leaves the bundle's unit of work.
  *
  * Stateless (REQ-RUNTIME-002).
  */
@@ -54,20 +55,19 @@ final readonly class FileRemover implements FileRemoverInterface
     }
 
     /**
-     * Deletes the objects, then the references and the row (or leaves the file to the purge when the bucket refuses).
+     * Deletes the objects, then the references and the row (or expires the file for the purge when the bucket refuses).
      */
-    public function remove(string $uuid, string $contextType, string $contextId): bool
+    public function remove(string $uuid, string $contextType, string $contextId): ?RemovedFile
     {
         $file = $this->find($uuid, $contextType, $contextId);
         if (!$file instanceof StoredFile) {
-            return false;
+            return null;
         }
-        $id    = (int) $file->getId();
-        $scope = $file->getProfile()->getScope();
+        $id = (int) $file->getId();
         if (!$this->deleteObjects($file)) {
             $this->expireRow($id);
 
-            return true;
+            return $this->done($file, true);
         }
         $files      = $this->entityManager->table(StoredFile::class);
         $references = $this->entityManager->table(StoredFileReference::class);
@@ -76,29 +76,54 @@ final readonly class FileRemover implements FileRemoverInterface
             $connection->executeStatement('DELETE FROM ' . $references . ' WHERE file_id = ?', [$id], [Types::INTEGER]);
             $connection->executeStatement('DELETE FROM ' . $files . ' WHERE id = ?', [$id], [Types::INTEGER]);
         }, 'remove');
-        if (!$this->entityManager->connection()->isTransactionActive()) {
-            $this->audit->record(StorageAuditEvent::FILE_REMOVED, $scope, null, ['file' => $file->getUuid(), 'context' => $contextType . '/' . $contextId]);
-        }
 
-        return true;
+        return $this->done($file, false);
     }
 
     /**
-     * Drops the references and expires the orphan window (the next purge run deletes the file).
+     * Drops the references and expires the orphan window (not served any more; the next purge run deletes the file).
      */
-    public function expire(string $uuid, string $contextType, string $contextId): bool
+    public function expire(string $uuid, string $contextType, string $contextId): ?RemovedFile
     {
         $file = $this->find($uuid, $contextType, $contextId);
         if (!$file instanceof StoredFile) {
-            return false;
+            return null;
         }
         $this->expireRow((int) $file->getId());
 
-        return true;
+        return $this->done($file, true);
     }
 
     /**
-     * The file with that public id stored in exactly that context, detached from the bundle's unit of work.
+     * Records `file_removed` / `file_expired` for each removal.
+     */
+    public function afterCommit(RemovedFile ...$removed): void
+    {
+        foreach ($removed as $file) {
+            $this->audit->record($file->expired ? StorageAuditEvent::FILE_EXPIRED : StorageAuditEvent::FILE_REMOVED, $file->scope, null, [
+                'file'    => $file->uuid,
+                'context' => $file->contextType . '/' . $file->contextId,
+            ]);
+        }
+    }
+
+    /**
+     * The removal; its audit event is recorded now unless a transaction is open (then after the commit, rule 7).
+     */
+    private function done(StoredFile $file, bool $expired): RemovedFile
+    {
+        $removed = new RemovedFile($file->getUuid(), $file->getContextType(), $file->getContextId(), $file->getProfile()->getScope(), $expired);
+        if (!$this->entityManager->connection()->isTransactionActive()) {
+            $this->afterCommit($removed);
+        }
+
+        return $removed;
+    }
+
+    /**
+     * The file with that public id stored in exactly that context, detached from the bundle's unit of work. The context
+     * is compared on a DBAL read first, so a file of another context is never loaded into (or detached from) the
+     * entity manager (audit QJ-I2).
      */
     private function find(string $uuid, string $contextType, string $contextId): ?StoredFile
     {
@@ -106,13 +131,19 @@ final readonly class FileRemover implements FileRemoverInterface
         if (preg_match(self::UUID, $uuid) !== 1 || !FileContexts::isType($contextType) || !FileContexts::isId($contextId)) {
             return null;
         }
-        $file = $this->files->findOneByUuid($uuid);
-        if (!$file instanceof StoredFile) {
+        $row = $this->entityManager->connection()->fetchAssociative(
+            'SELECT context_type, context_id FROM ' . $this->entityManager->table(StoredFile::class) . ' WHERE uuid = ?',
+            [$uuid],
+        );
+        if ($row === false || !ExactIdentifier::same($row['context_type'], $contextType) || !ExactIdentifier::same($row['context_id'], $contextId)) {
             return null;
         }
-        $this->entityManager->manager()->detach($file);
+        $file = $this->files->findOneByUuid($uuid);
+        if ($file instanceof StoredFile) {
+            $this->entityManager->manager()->detach($file);
+        }
 
-        return ExactIdentifier::same($file->getContextType(), $contextType) && ExactIdentifier::same($file->getContextId(), $contextId) ? $file : null;
+        return $file instanceof StoredFile && ExactIdentifier::same($file->getContextType(), $contextType) && ExactIdentifier::same($file->getContextId(), $contextId) ? $file : null;
     }
 
     private function expireRow(int $id): void

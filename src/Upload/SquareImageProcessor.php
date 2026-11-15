@@ -8,6 +8,7 @@ use GdImage;
 use InvalidArgumentException;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 
+use function function_exists;
 use function getimagesizefromstring;
 use function imagealphablending;
 use function imagecolorallocatealpha;
@@ -18,6 +19,7 @@ use function imagefill;
 use function imagesavealpha;
 use function imagesx;
 use function imagesy;
+use function imagetypes;
 use function imagewebp;
 use function in_array;
 use function ini_get;
@@ -35,6 +37,7 @@ use function substr;
 use const IMAGETYPE_JPEG;
 use const IMAGETYPE_PNG;
 use const IMAGETYPE_WEBP;
+use const IMG_WEBP;
 
 /**
  * Square image checks (GD, 1.6) for profile pictures and logos: accepts PNG, JPEG and still WebP by their content —
@@ -44,7 +47,8 @@ use const IMAGETYPE_WEBP;
  * JPEG budget). A JPEG is turned upright from its EXIF orientation; the image is cropped to its centred square and
  * re-encoded as WebP squares: the original at `size` px, the `preview` at half and the `thumb` at a quarter of it, each
  * made from the previous one. Re-encoding drops EXIF / GPS / XMP and any payload appended to the image (polyglots).
- * Animated WebP is refused.
+ * Animated WebP is refused. Needs GD with WebP: without it every image is refused with `off`
+ * ({@see self::supported()}), never an error.
  *
  * Stateless (REQ-RUNTIME-002): nothing is kept between calls.
  */
@@ -52,6 +56,9 @@ final readonly class SquareImageProcessor
 {
     /** Default `upload.square.max_bytes`. */
     public const MAX_BYTES = 2 * 1024 * 1024;
+
+    /** Default `upload.square.max_pixels` (the smaller of it and `upload.max_pixels` applies). */
+    public const MAX_PIXELS = 16_000_000;
 
     /** Default `upload.square.size` (side of the stored original, in pixels). */
     public const SIZE = 256;
@@ -72,23 +79,45 @@ final readonly class SquareImageProcessor
 
     private const TYPES = [IMAGETYPE_PNG => 'image/png', IMAGETYPE_JPEG => 'image/jpeg', IMAGETYPE_WEBP => 'image/webp'];
 
+    /** Whether GD can encode WebP here. */
+    private bool $webp;
+
     /**
      * @param int $maxBytes `upload.square.max_bytes`
-     * @param int $maxPixels `upload.max_pixels` (shared pixel cap)
+     * @param int $maxPixels the smaller of `upload.square.max_pixels` and `upload.max_pixels`
      * @param int $size `upload.square.size` ({@see self::SIZE_MIN}–{@see self::SIZE_MAX})
      * @param string|null $memoryLimit the `memory_limit` to plan the decoding against (null: the current ini value)
+     * @param bool|null $webp whether GD encodes WebP (null: {@see self::webpSupported()})
      *
      * @throws InvalidArgumentException on a size outside the bounds
      */
     public function __construct(
         private int $maxBytes = self::MAX_BYTES,
-        private int $maxPixels = ImageProcessor::MAX_PIXELS,
+        private int $maxPixels = self::MAX_PIXELS,
         private int $size = self::SIZE,
         private ?string $memoryLimit = null,
+        ?bool $webp = null,
     ) {
         if ($size < self::SIZE_MIN || $size > self::SIZE_MAX) {
             throw new InvalidArgumentException('The square size must be 64-1024 pixels.');
         }
+        $this->webp = $webp ?? self::webpSupported();
+    }
+
+    /**
+     * Whether this PHP build's GD encodes WebP (`imagewebp()` exists and `imagetypes()` has `IMG_WEBP`).
+     */
+    public static function webpSupported(): bool
+    {
+        return function_exists('imagewebp') && (imagetypes() & IMG_WEBP) !== 0;
+    }
+
+    /**
+     * Whether square images can be stored at all (GD with WebP): false = every upload is refused with `off`.
+     */
+    public function supported(): bool
+    {
+        return $this->webp;
     }
 
     /**
@@ -116,10 +145,13 @@ final readonly class SquareImageProcessor
     /**
      * Checks an image and turns it into WebP squares.
      *
-     * @throws UploadRefused
+     * @throws UploadRefused (`off` when GD cannot encode WebP here)
      */
     public function process(string $bytes): ProcessedImage
     {
+        if (!$this->webp) {
+            throw new UploadRefused(UploadRefused::OFF);
+        }
         if ($bytes === '') {
             throw new UploadRefused(UploadRefused::EMPTY);
         }

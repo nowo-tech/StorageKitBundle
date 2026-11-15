@@ -10,12 +10,14 @@ use Nowo\StorageKitBundle\Download\StoredImageResolver;
 use Nowo\StorageKitBundle\Http\StorageCspSources;
 use Nowo\StorageKitBundle\Integration\HttpHardening\StorageCspSourceProvider;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
+use Nowo\StorageKitBundle\Tests\Fixtures\AvatarContext;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Twig\StorageKitTwigExtension;
 use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
+use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Session\Session;
@@ -49,6 +51,21 @@ final class ApiTest extends KernelTestCase
         $tokens = $this->service($kernel, 'security.token_storage');
         self::assertInstanceOf(TokenStorageInterface::class, $tokens);
         $tokens->setToken($user === null ? null : new UsernamePasswordToken(new InMemoryUser($user, null, $roles), 'main', $roles));
+    }
+
+    public function testASquareOnlyContextGetsNoUploadConfiguration(): void
+    {
+        $kernel = $this->bootKernel(extra: static function (ContainerConfigurator $container): void {
+            $container->services()->set(AvatarContext::class)->tag('nowo_storage_kit.file_context');
+        });
+        $this->profile($kernel);
+        $this->signIn($kernel, 'alice');
+        $endpoint = $this->service($kernel, UploadEndpoint::class);
+
+        // 1.6 (audit QJ-I1): the generic endpoint refuses square-only contexts, so it offers nothing for them.
+        self::assertSame(['state' => 'none'], $endpoint->config('avatar', 'alice'));
+        self::assertSame([], $endpoint->milkdownOptions('avatar', 'alice'));
+        self::assertSame('on', $endpoint->config('board', 'b1')['state']);
     }
 
     public function testTheUploadConfigurationOfAContext(): void

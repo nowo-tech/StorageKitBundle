@@ -219,7 +219,9 @@ $this->uploader->afterCommit($view);
 Inject `Upload\SquareImageUploaderInterface` and call `uploadSquareImage($user, $contextType, $contextId, $bytes, $name)`
 (same context, bucket, limit, transaction and audit rules as `uploadImage()`). The image must be a PNG, JPEG or still
 WebP by its content (SVG, GIF, HTML and animated WebP are refused), at most `upload.square.max_bytes`, and within
-`upload.max_pixels` and the memory left (both read from the header before decoding). It is turned upright (JPEG EXIF),
+`upload.square.max_pixels` (default 16 MP, never above `upload.max_pixels`) and the memory left (both read from the
+header before decoding). PHP GD needs WebP support: without it every square upload is refused with `off` (check
+`SquareImageProcessor::supported()` to hide the feature). It is turned upright (JPEG EXIF),
 cropped to its centred square and stored as WebP squares: `original` (`upload.square.size`, default 256 px),
 `preview` (half) and `thumb` (a quarter). Re-encoding drops EXIF / GPS / XMP and anything appended to the image.
 Serve it with `FileUrls::download($uuid, 'thumb')`: the download route checks the context's `readable()` as usual.
@@ -240,7 +242,10 @@ if ($previous !== null) {
 
 `remove()` and `expire()` only act on a file of exactly that context (a UUID learned elsewhere removes nothing).
 `remove()` calls the bucket: call it after your transaction committed. `expire()` makes no bucket call (use it inside a
-transaction, e.g. a GDPR erasure): the next `nowo:storage-kit:purge` deletes the file. UserKitBundle 1.18
+transaction, e.g. a GDPR erasure): the file is no longer served (its URL answers 404 at once) and the next
+`nowo:storage-kit:purge` deletes its objects and row. Both return a `Lifecycle\RemovedFile` (null when nothing
+matched). Outside a transaction the `file_removed` / `file_expired` audit event is recorded at once; inside yours, call
+`$this->remover->afterCommit($removed)` after the commit (a rolled-back removal leaves no trace). UserKitBundle 1.18
 (`owner_images`) wraps all of this for avatars and organization logos.
 
 ### Listening to it

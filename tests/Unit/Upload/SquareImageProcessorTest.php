@@ -65,6 +65,21 @@ final class SquareImageProcessorTest extends TestCase
         self::assertLessThan(60, ($rgb >> 16) & 0xFF, 'no red');
     }
 
+    public function testWithoutGdWebpSupportEveryImageIsRefusedCleanly(): void
+    {
+        // Audit QJ-L1: a GD build without WebP must refuse (`off`), never fail with an Error (HTTP 500).
+        self::assertTrue(SquareImageProcessor::webpSupported(), 'the test image has GD with WebP');
+        self::assertTrue((new SquareImageProcessor())->supported());
+        $processor = new SquareImageProcessor(webp: false);
+        self::assertFalse($processor->supported());
+        try {
+            $processor->process(Images::png(20, 20));
+            self::fail('accepted');
+        } catch (UploadRefused $e) {
+            self::assertSame(UploadRefused::OFF, $e->reason);
+        }
+    }
+
     public function testAJpegIsTurnedUprightAndLosesItsMetadata(): void
     {
         $jpeg   = $this->withExif($this->jpeg(40, 20), 6, 'GPS 41.38N 2.17E');

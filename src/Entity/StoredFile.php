@@ -50,6 +50,12 @@ class StoredFile
     /** Name kept after a personal-data erasure. */
     public const ANONYMOUS_NAME = 'image';
 
+    /**
+     * 1.6: an `orphaned_since` before this marks an expired file (erased, or removed while its bucket refused): it is
+     * not served any more and the next purge deletes it. Expiry writes `2000-01-01`; the extra day absorbs time zones.
+     */
+    public const EXPIRED_BEFORE = '2000-01-02 00:00:00';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -326,6 +332,14 @@ class StoredFile
     public function getOrphanedSince(): ?DateTimeImmutable
     {
         return $this->orphanedSince;
+    }
+
+    /**
+     * Whether the file was expired (1.6): erased or removed, waiting for the purge. It is not served any more.
+     */
+    public function isExpired(): bool
+    {
+        return $this->orphanedSince instanceof DateTimeImmutable && $this->orphanedSince < new DateTimeImmutable(self::EXPIRED_BEFORE);
     }
 
     /**

@@ -102,8 +102,10 @@ SECURITY.md), DoctrineEncrypt's key management, the bucket provider, or the Mark
 
 - `upload.max_bytes` (default 10 MiB) before and after PHP's own limits.
 - `upload.max_pixels` (default 24 MP) read from the header **before** decoding: no decompression bomb.
-- Square images: `upload.square.max_bytes` (default 2 MiB) before anything is parsed, then the same pixel cap and
-  memory budget before decoding.
+- Square images: `upload.square.max_bytes` (default 2 MiB) before anything is parsed, then
+  `upload.square.max_pixels` (default 16 MP, never above `upload.max_pixels`) and the same memory budget before
+  decoding. `uploadSquareImage()` has no rate limit of its own (the limiter belongs to the upload endpoint): put one on
+  the host action that calls it. On a GD build without WebP every square upload is refused with `off`, never a 500.
 - Before decoding, the image must fit twice (4 bytes per pixel × 2) in what is left of `memory_limit`, or it is refused
   like an oversized image instead of a fatal out-of-memory; variants are made one from the other (at most two decoded
   images alive). **Every JPEG** is budgeted 6 more bytes per pixel: libjpeg keeps every DCT coefficient while it

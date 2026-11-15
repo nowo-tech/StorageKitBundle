@@ -39,12 +39,18 @@ Target **1.6.0**, from **1.5.x**: `composer update nowo-tech/storage-kit-bundle`
 no schema change, no configuration change required.
 
 - Square images (profile pictures, logos): inject `Upload\SquareImageUploaderInterface` and call
-  `uploadSquareImage($user, $contextType, $contextId, $bytes, $name)`. Tune `upload.square.max_bytes` (default 2 MiB)
-  and `upload.square.size` (default 256 px) if needed; keep PHP `upload_max_filesize` / `post_max_size` above
-  `max_bytes`. UserKitBundle 1.18 (`owner_images`) uses it for avatars and organization logos.
+  `uploadSquareImage($user, $contextType, $contextId, $bytes, $name)`. Tune `upload.square.max_bytes` (default 2 MiB),
+  `upload.square.max_pixels` (default 16 MP) and `upload.square.size` (default 256 px) if needed; keep PHP
+  `upload_max_filesize` / `post_max_size` above `max_bytes`. **PHP GD must be built with WebP** (`--with-webp`;
+  `gd_info()['WebP Support']`): without it every square upload is refused with `off` and
+  `SquareImageProcessor::supported()` returns false. UserKitBundle 1.18 (`owner_images`) uses it for avatars and
+  organization logos.
 - Removing a file at once (a replaced picture): inject `Lifecycle\FileRemoverInterface`. Call `remove()` after your
-  transaction committed (it calls the bucket), `expire()` inside one.
-- Listeners of `StorageAuditEvent` may see the new action `file_removed` (details: file, context).
+  transaction committed (it calls the bucket), `expire()` inside one; inside a transaction, pass the returned
+  `RemovedFile` to `afterCommit()` once you committed so the audit event is recorded.
+- Listeners of `StorageAuditEvent` may see the new actions `file_removed` and `file_expired` (details: file, context).
+- An expired file (removed, or handed to the purge by a personal-data erasure) is no longer downloadable: its URL
+  answers 404 at once instead of until the next purge.
 - `ImageUploader` has a new last, optional constructor argument (`SquareImageProcessor`); positional calls keep working.
 
 ## To 1.5.3

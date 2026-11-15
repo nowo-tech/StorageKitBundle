@@ -6,11 +6,15 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Lifecycle;
 
 use DateTimeImmutable;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
+use Nowo\StorageKitBundle\Download\FileNotDeliverable;
+use Nowo\StorageKitBundle\Download\StoredImageResolver;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Lifecycle\FilePurger;
 use Nowo\StorageKitBundle\Lifecycle\FileRemover;
 use Nowo\StorageKitBundle\Lifecycle\FileRemoverInterface;
+use Nowo\StorageKitBundle\Lifecycle\RemovedFile;
 use Nowo\StorageKitBundle\Reference\FileReferencesInterface;
 use Nowo\StorageKitBundle\Tests\Fixtures\AvatarContext;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
@@ -136,29 +140,35 @@ final class SquareImagesAndRemovalTest extends KernelTestCase
         self::assertSame(1, (int) $this->entityManager($kernel)->getConnection()->fetchOne('SELECT COUNT(*) FROM storage_kit_file_reference'));
 
         // Another context, a look-alike context id, a malformed id or context: nothing happens.
-        self::assertFalse($remover->remove($view->uuid, 'board', 'b2'));
-        self::assertFalse($remover->remove($view->uuid, 'board', 'B1'));
-        self::assertFalse($remover->remove($view->uuid, 'Board', 'b1'));
-        self::assertFalse($remover->remove('not-a-uuid', 'board', 'b1'));
-        self::assertFalse($remover->remove($view->uuid, 'board', '../b1'));
-        self::assertFalse($remover->remove('00000000-0000-4000-8000-000000000000', 'board', 'b1'));
+        self::assertNull($remover->remove($view->uuid, 'board', 'b2'));
+        self::assertNull($remover->remove($view->uuid, 'board', 'B1'));
+        self::assertNull($remover->remove($view->uuid, 'Board', 'b1'));
+        self::assertNull($remover->remove('not-a-uuid', 'board', 'b1'));
+        self::assertNull($remover->remove($view->uuid, 'board', '../b1'));
+        self::assertNull($remover->remove('00000000-0000-4000-8000-000000000000', 'board', 'b1'));
         self::assertSame(2, $this->rows($kernel));
 
-        self::assertTrue($remover->remove(strtoupper($view->uuid), 'board', 'b1'));
+        $removed = $remover->remove(strtoupper($view->uuid), 'board', 'b1');
+        self::assertEquals(new RemovedFile($view->uuid, 'board', 'b1', null, false), $removed);
         self::assertSame(1, $this->rows($kernel));
         self::assertCount(3, $this->buckets($kernel)->objects('files', 'http://minio:9000'));
         self::assertSame(0, (int) $this->entityManager($kernel)->getConnection()->fetchOne('SELECT COUNT(*) FROM storage_kit_file_reference'));
         self::assertContains(StorageAuditEvent::FILE_REMOVED, $this->audit($kernel)->actions());
-        self::assertFalse($remover->remove($view->uuid, 'board', 'b1'), 'already gone');
+        self::assertNull($remover->remove($view->uuid, 'board', 'b1'), 'already gone');
 
-        // Inside a host transaction: removed, the audit is not recorded (rule 7).
+        // Inside a host transaction: removed, the audit waits for the host's afterCommit() call (rule 7).
         $before     = count($this->audit($kernel)->events);
         $connection = $this->entityManager($kernel)->getConnection();
         $connection->beginTransaction();
-        self::assertTrue($remover->remove($kept->uuid, 'board', 'b1'));
+        $removed = $remover->remove($kept->uuid, 'board', 'b1');
+        self::assertInstanceOf(RemovedFile::class, $removed);
         $connection->commit();
         self::assertCount($before, $this->audit($kernel)->events);
         self::assertSame(0, $this->rows($kernel));
+        $remover->afterCommit($removed);
+        self::assertCount($before + 1, $this->audit($kernel)->events);
+        self::assertSame(StorageAuditEvent::FILE_REMOVED, $this->audit($kernel)->events[$before]->action);
+        self::assertSame(['file' => $kept->uuid, 'context' => 'board/b1'], $this->audit($kernel)->events[$before]->details);
     }
 
     public function testARefusingBucketLeavesTheFileToThePurge(): void
@@ -169,8 +179,14 @@ final class SquareImagesAndRemovalTest extends KernelTestCase
         $this->service($kernel, FileReferencesInterface::class)->sync('avatar', 'u1', '![](storage-file:' . $view->uuid . ')', ['board', 'b1']);
         $this->buckets($kernel)->failDeletes = true;
 
-        self::assertTrue($this->service($kernel, FileRemoverInterface::class)->remove($view->uuid, 'board', 'b1'));
+        self::assertTrue($this->service($kernel, FileRemoverInterface::class)->remove($view->uuid, 'board', 'b1')?->expired);
         self::assertSame(1, $this->rows($kernel));
+        self::assertContains(StorageAuditEvent::FILE_EXPIRED, $this->audit($kernel)->actions());
+        self::assertNotContains(StorageAuditEvent::FILE_REMOVED, $this->audit($kernel)->actions());
+        // QJ-L2: no longer served, although its objects are still in the bucket until the purge.
+        $client = $this->client($kernel, 'alice');
+        $client->request('GET', '/storage/files/' . $view->uuid . '/thumb');
+        self::assertSame(404, $client->getResponse()->getStatusCode());
         self::assertSame(0, (int) $this->entityManager($kernel)->getConnection()->fetchOne('SELECT COUNT(*) FROM storage_kit_file_reference'));
         self::assertNotNull($this->entityManager($kernel)->getConnection()->fetchOne('SELECT orphaned_since FROM storage_kit_file'));
 
@@ -188,7 +204,7 @@ final class SquareImagesAndRemovalTest extends KernelTestCase
         $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET bucket = '' WHERE id = ?", [$profile->getId()]);
         $this->entityManager($kernel)->clear();
 
-        self::assertTrue($this->service($kernel, FileRemoverInterface::class)->remove($view->uuid, 'board', 'b1'));
+        self::assertTrue($this->service($kernel, FileRemoverInterface::class)->remove($view->uuid, 'board', 'b1')?->expired);
         self::assertSame(1, $this->rows($kernel));
         self::assertCount(3, $this->buckets($kernel)->objects('files', 'http://minio:9000'));
     }
@@ -201,11 +217,32 @@ final class SquareImagesAndRemovalTest extends KernelTestCase
         $remover = $this->service($kernel, FileRemoverInterface::class);
         $this->service($kernel, FileReferencesInterface::class)->sync('avatar', 'u1', '![](storage-file:' . $view->uuid . ')', ['board', 'b1']);
 
-        self::assertFalse($remover->expire($view->uuid, 'board', 'b2'));
+        self::assertNull($remover->expire($view->uuid, 'board', 'b2'));
+        $client = $this->client($kernel, 'alice');
+        $client->request('GET', '/storage/files/' . $view->uuid . '/thumb');
+        self::assertSame(200, $client->getResponse()->getStatusCode());
         $connection = $this->entityManager($kernel)->getConnection();
         $connection->beginTransaction();
-        self::assertTrue($remover->expire($view->uuid, 'board', 'b1'));
+        $expired = $remover->expire($view->uuid, 'board', 'b1');
+        self::assertEquals(new RemovedFile($view->uuid, 'board', 'b1', null, true), $expired);
+        self::assertInstanceOf(RemovedFile::class, $expired);
         $connection->commit();
+        self::assertNotContains(StorageAuditEvent::FILE_EXPIRED, $this->audit($kernel)->actions(), 'waits for afterCommit()');
+        $remover->afterCommit($expired);
+        self::assertContains(StorageAuditEvent::FILE_EXPIRED, $this->audit($kernel)->actions());
+
+        // QJ-L2: an expired file is gone for every reader at once, not only after the purge.
+        $this->entityManager($kernel)->clear();
+        foreach (['thumb', 'preview', 'original'] as $variant) {
+            $client->request('GET', '/storage/files/' . $view->uuid . '/' . $variant);
+            self::assertSame(404, $client->getResponse()->getStatusCode());
+        }
+        try {
+            $this->service($kernel, FileDeliveryInterface::class)->deliver($view->uuid, 'thumb');
+            self::fail('delivered');
+        } catch (FileNotDeliverable) {
+        }
+        self::assertSame([], $this->service($kernel, StoredImageResolver::class)->resolve([$view->uuid], new InMemoryUser('alice', null)));
         self::assertCount(3, $this->buckets($kernel)->objects('files', 'http://minio:9000'), 'no bucket call');
         self::assertSame(0, (int) $connection->fetchOne('SELECT COUNT(*) FROM storage_kit_file_reference'));
 
@@ -214,5 +251,33 @@ final class SquareImagesAndRemovalTest extends KernelTestCase
         self::assertNotContains(StorageAuditEvent::FILE_REMOVED, $this->audit($kernel)->actions());
         self::assertSame(StorageProfile::STATE_ACTIVE, $this->entityManager($kernel)->getRepository(StorageProfile::class)->findAll()[0]->getState());
         self::assertSame(0, $this->entityManager($kernel)->getRepository(StoredFile::class)->count([]));
+    }
+
+    public function testAFileOfAnotherContextStaysInTheEntityManager(): void
+    {
+        $kernel = $this->bootKernel();
+        $this->profile($kernel);
+        $view    = $this->square($kernel);
+        $manager = $this->entityManager($kernel);
+        $loaded  = $manager->getRepository(StoredFile::class)->findOneBy(['uuid' => $view->uuid]);
+        self::assertInstanceOf(StoredFile::class, $loaded);
+
+        self::assertNull($this->service($kernel, FileRemoverInterface::class)->remove($view->uuid, 'board', 'b2'));
+        self::assertNull($this->service($kernel, FileRemoverInterface::class)->expire($view->uuid, 'board', 'b2'));
+        self::assertTrue($manager->contains($loaded), 'not detached: the context did not match');
+    }
+
+    public function testTheSquarePixelCapIsTheSmallerOfBoth(): void
+    {
+        foreach ([['square' => ['max_pixels' => 100]], ['max_pixels' => 100]] as $upload) {
+            $kernel = $this->bootKernel(['upload' => $upload]);
+            $this->profile($kernel);
+            try {
+                $this->square($kernel);
+                self::fail('accepted');
+            } catch (UploadRefused $e) {
+                self::assertSame(UploadRefused::PIXELS, $e->reason);
+            }
+        }
     }
 }

@@ -54,28 +54,41 @@ All notable changes to this project are documented here. The format follows
 - **Square images (profile pictures, logos)**: `Upload\SquareImageUploaderInterface::uploadSquareImage()` (implemented
   by `ImageUploader`) stores an image as WebP squares through the usual context / bucket / limit / audit flow. Checks
   of the new `Upload\SquareImageProcessor`: PNG, JPEG or still WebP by content only (SVG, GIF, HTML, animated WebP
-  refused), `upload.square.max_bytes` (default 2 MiB) before anything is parsed, `upload.max_pixels` and the memory
-  budget read from the header before decoding, JPEG turned upright, centred square re-encoded as WebP (metadata and any
-  appended payload dropped) at `upload.square.size` (default 256 px) with `preview` (half) and `thumb` (quarter)
-  squares, served by the existing download route.
+  refused), `upload.square.max_bytes` (default 2 MiB) before anything is parsed, `upload.square.max_pixels` (default
+  16 MP, never above `upload.max_pixels`) and the memory budget read from the header before decoding, JPEG turned
+  upright, centred square re-encoded as WebP (metadata and any appended payload dropped) at `upload.square.size`
+  (default 256 px) with `preview` (half) and `thumb` (quarter) squares, served by the existing download route. Needs GD
+  with WebP: without it every square upload is refused with `off` (`SquareImageProcessor::supported()` says so
+  beforehand), never an error.
 - **Removal port** `Lifecycle\FileRemoverInterface` (`FileRemover`): `remove($uuid, $contextType, $contextId)` deletes a
   file's objects, references and row at once (left to the next purge when the bucket refuses), `expire()` leaves it to
   the next purge without a bucket call (for erasures inside a transaction). Matched by id AND exact context (a UUID
-  learned elsewhere removes nothing); DBAL statements, no entity manager flushed. New audit action `file_removed`.
+  learned elsewhere removes nothing; the context is compared on a DBAL read before the row is loaded); DBAL
+  statements, no entity manager flushed. Both return a `Lifecycle\RemovedFile` (null when nothing matched). An expired
+  file is no longer served: the download route answers 404, `FileDeliveryInterface::deliver()` throws
+  `FileNotDeliverable` and `StoredImageResolver` skips it, from the expiry on and not only after the purge. New audit
+  actions `file_removed` and `file_expired` (also for a removal whose bucket refused), recorded at once outside a
+  transaction, else by `FileRemoverInterface::afterCommit(RemovedFile ...)` once the host committed.
+- `StoredFile::isExpired()` and `StoredFile::EXPIRED_BEFORE`.
 - `Context\SquareImageContextInterface`: a context that holds square images only; `uploadImage()` and the upload
   endpoint refuse it like an unknown context, so a GIF of 10 MiB cannot land where a 256 px square is expected.
-- Configuration `upload.square.max_bytes` and `upload.square.size`.
+- Configuration `upload.square.max_bytes`, `upload.square.max_pixels` and `upload.square.size`.
 
 ### Changed
 
 - `ImageProcessor::upright()` is now a public static helper (shared with `SquareImageProcessor`; same behaviour).
+- `UploadEndpoint::config()` answers `none` for a square-only context (the endpoint refuses its uploads anyway), so
+  `nowo_storage_upload()` and `milkdownOptions()` offer no upload there.
+- Files a personal-data erasure handed to the purge (`orphaned_since` 2000-01-01) are not served any more either:
+  the download route answers 404 for them before the purge deletes them.
 
 ### Tests
 
 - Square images: centred crop, sizes, EXIF orientation and metadata removal, PNG / JPEG polyglots (appended PHP, HTML,
   ZIP) neutralised, header-only decompression bombs and memory-budget refusals before decoding, SVG / GIF / HTML /
   animated WebP / mismatched magic refused; removal by exact context, inside and outside a host transaction, refusing
-  bucket and unusable profile left to the purge.
+  bucket and unusable profile left to the purge; audit after commit; expired files answer 404; no square upload on GD
+  without WebP; the endpoint offers nothing for square-only contexts; the square pixel cap.
 
 ## [1.5.3] - 2026-11-13
 

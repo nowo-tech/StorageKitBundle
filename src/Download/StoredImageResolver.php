@@ -41,7 +41,7 @@ final readonly class StoredImageResolver implements StoredImageResolverInterface
         $readable = $this->contexts->readable($viewer, array_values($files));
         $images   = [];
         foreach ($files as $uuid => $file) {
-            if (($readable[$uuid] ?? false) !== true) {
+            if (($readable[$uuid] ?? false) !== true || $file->isExpired()) {
                 continue;
             }
             $preview       = $file->variant(StoredFile::VARIANT_PREVIEW);

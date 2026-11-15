@@ -66,7 +66,7 @@ final readonly class FileDelivery implements FileDeliveryInterface
     /**
      * The delivery of a variant of the file `$uuid` (1.5, {@see FileDeliveryInterface}). Access is the caller's job.
      *
-     * @throws FileNotDeliverable when there is no such file or variant, or its profile is not connectable any more
+     * @throws FileNotDeliverable when there is no such file or variant (an expired file is none, 1.6), or its profile is not connectable any more
      * @throws LogicException when the service was built without the file repository
      */
     public function deliver(string $uuid, string $variant): DeliverableFile
@@ -76,6 +76,9 @@ final readonly class FileDelivery implements FileDeliveryInterface
         }
         $files = $this->files ?? throw new LogicException('FileDelivery::deliver() needs the StoredFileRepository (constructor argument $files).');
         $file  = $files->findOneByUuid(strtolower($uuid)) ?? throw new FileNotDeliverable('No such file.');
+        if ($file->isExpired()) {
+            throw new FileNotDeliverable('No such file.'); // 1.6: erased or removed, waiting for the purge
+        }
 
         return $this->prepare($file, $variant);
     }
