@@ -101,6 +101,8 @@ jobs:
           - { name: 'MySQL 8.4', image: 'mysql:8.4', port: 3306, scheme: mysql, user: root, query: 'serverVersion=8.4&charset=utf8mb4', health: 'mysqladmin ping -h 127.0.0.1 -uroot -pci-throwaway' }
           - { name: 'MariaDB 11', image: 'mariadb:11.4', port: 3306, scheme: mysql, user: root, query: 'serverVersion=11.4.0-MariaDB&charset=utf8mb4', health: 'healthcheck.sh --connect' }
           - { name: 'PostgreSQL 17', image: 'postgres:17', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=17&charset=utf8', health: 'pg_isready -U postgres' }
+          # 1.6.1: PostgreSQL with DBAL 3 maps the ORM id with a sequence (no column default); the raw inserts must take it themselves.
+          - { name: 'PostgreSQL 17 (DBAL 3)', image: 'postgres:17', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=17&charset=utf8', health: 'pg_isready -U postgres', dbal: '^3.8' }
     services:
       db:
         image: ${{ matrix.db.image }}
@@ -133,6 +135,10 @@ jobs:
 
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Pin DBAL 3 (matrix legs that name a DBAL constraint)
+        if: matrix.db.dbal != ''
+        run: composer require "doctrine/dbal:${{ matrix.db.dbal }}" --with-all-dependencies --no-interaction --no-progress --prefer-dist
 
       - name: Lifecycle and architecture-bar tests (purge, references, moves, adoption, DBAL upload insert)
         run: |

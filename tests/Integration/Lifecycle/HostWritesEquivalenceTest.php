@@ -30,6 +30,7 @@ use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Tests\Support\Legacy\InstanceSettingsListenerV140;
 use Nowo\StorageKitBundle\Tests\Support\Legacy\StoredFilesPersonalDataV140;
+use Nowo\StorageKitBundle\Tests\Support\SeedIds;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
@@ -216,12 +217,12 @@ final class HostWritesEquivalenceTest extends KernelTestCase
                 'storage_key'     => sprintf('2026/01/%d', $i),
                 'orphaned_since'  => $i % 4 === 0 ? null : '2026-01-0' . (1 + $i % 9) . ' 00:00:00',
             ] + $base;
-            $connection->insert($files, $row);
+            SeedIds::insert($connection, $files, $row);
         }
         $ids = $connection->fetchFirstColumn('SELECT id FROM ' . $files . ' ORDER BY id');
         foreach ($ids as $n => $id) {
             if ($n % 3 === 0) {
-                $connection->insert($references, ['file_id' => $id, 'source_type' => 'note', 'source_id' => 'n' . $n, 'created_at' => '2026-01-01 00:00:00']);
+                SeedIds::insert($connection, $references, ['file_id' => $id, 'source_type' => 'note', 'source_id' => 'n' . $n, 'created_at' => '2026-01-01 00:00:00']);
             }
         }
 

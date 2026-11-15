@@ -6,8 +6,10 @@ namespace Nowo\StorageKitBundle\Doctrine;
 
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Id\SequenceGenerator;
 use Doctrine\ORM\Mapping\ToOneOwningSideMapping;
 use Doctrine\Persistence\ManagerRegistry;
 use LogicException;
@@ -80,6 +82,27 @@ final readonly class StorageEntityManager
     public function table(string $class): string
     {
         return $this->manager()->getClassMetadata($class)->getTableName();
+    }
+
+    /**
+     * The name of the sequence that generates the identifier of `$class` when the database takes ids from a sequence
+     * (PostgreSQL with DBAL 3: the ORM maps `AUTO` to a sequence and the column has no default); null when the
+     * identifier is an identity / autoincrement column, which a raw `INSERT` can leave out. For a host statement that
+     * inserts rows of a bundle table without the entity manager (1.6.1). Read-only: no shared state is touched.
+     *
+     * @param class-string $class
+     */
+    public function sequenceName(string $class): ?string
+    {
+        $manager  = $this->manager();
+        $metadata = $manager->getClassMetadata($class);
+        if (!$metadata->idGenerator instanceof SequenceGenerator) {
+            return null;
+        }
+        $platform = $manager->getConnection()->getDatabasePlatform();
+        $name     = $metadata->sequenceGeneratorDefinition['sequenceName'] ?? null;
+
+        return $platform instanceof PostgreSQLPlatform && is_string($name) && $name !== '' ? $name : null;
     }
 
     /**

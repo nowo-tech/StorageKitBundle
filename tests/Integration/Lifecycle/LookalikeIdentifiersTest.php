@@ -29,6 +29,7 @@ use Nowo\StorageKitBundle\Tests\Fixtures\ScopeAccess;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
+use Nowo\StorageKitBundle\Tests\Support\SeedIds;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
@@ -399,7 +400,7 @@ final class LookalikeIdentifiersTest extends KernelTestCase
         }
         unset($base['id']);
         $uuid = sprintf('00000000-0000-4000-8000-%012d', $n + 1);
-        $connection->insert('storage_kit_file', [
+        SeedIds::insert($connection, 'storage_kit_file', [
             'uuid'           => $uuid,
             'storage_key'    => sprintf('probe/%d', $n),
             'context_type'   => 'board',
@@ -414,7 +415,7 @@ final class LookalikeIdentifiersTest extends KernelTestCase
 
     private function seedReference(StorageKitTestKernel $kernel, int $fileId, string $sourceId): void
     {
-        $this->connection($kernel)->insert('storage_kit_file_reference', [
+        SeedIds::insert($this->connection($kernel), 'storage_kit_file_reference', [
             'file_id'     => $fileId,
             'source_type' => 'note',
             'source_id'   => $sourceId,
@@ -434,7 +435,7 @@ final class LookalikeIdentifiersTest extends KernelTestCase
         $row = ['uuid' => sprintf('00000000-0000-4000-9000-%012d', $n + 1), 'scope' => $scope, 'state' => StorageProfile::STATE_RETIRED] + $row;
         // PostgreSQL returns booleans as PHP booleans: bind them as such (a string `false` is "").
         $types = array_map(static fn (mixed $value): ParameterType => is_bool($value) ? ParameterType::BOOLEAN : ParameterType::STRING, $row);
-        $connection->insert('storage_kit_profile', $row, $types);
+        SeedIds::insert($connection, 'storage_kit_profile', $row, $types);
     }
 
     /**

@@ -17,6 +17,7 @@ use Nowo\StorageKitBundle\Tests\Fixtures\Users\CaseInsensitiveAppUsers;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
+use Nowo\StorageKitBundle\Tests\Support\SeedIds;
 use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -183,7 +184,7 @@ final class LookalikeUploaderTest extends KernelTestCase
         foreach ($rows as $n => [$identifier, $key]) {
             $name              = isset($seen[$identifier]) ? sprintf('%s-%d', $this->nameOf($identifier), $n) : $this->nameOf($identifier);
             $seen[$identifier] = true;
-            $connection->insert('storage_kit_file', [
+            SeedIds::insert($connection, 'storage_kit_file', [
                 'uuid'            => sprintf('00000000-0000-4000-8000-%012d', $n + 1),
                 'storage_key'     => sprintf('probe/%d', $n),
                 'original_name'   => $name,
