@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.6.1] - 2026-11-15](#161---2026-11-15)
   - [Fixed](#fixed)
   - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
@@ -51,6 +52,8 @@ All notable changes to this project are documented here. The format follows
   - [Security](#security-4)
 
 ## [Unreleased]
+
+## [1.6.1] - 2026-11-15
 
 ### Fixed
 

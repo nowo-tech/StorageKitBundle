@@ -4,6 +4,7 @@
 
 - [Planned for 2.0](#planned-for-20)
 - [Unreleased](#unreleased)
+- [To 1.6.1](#to-161)
 - [To 1.6.0](#to-160)
 - [To 1.5.3](#to-153)
 - [To 1.5.2](#to-152)
@@ -35,6 +36,14 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
    `uploadImage()`.
 
 ## Unreleased
+
+## To 1.6.1
+
+From **1.6.0**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
 
 Hosts on PostgreSQL with DBAL 3 that hit the `NOT NULL` violation on `storage_kit_file_reference.id` (1.0.0–1.6.0) are
 fixed by this release without a migration: no schema or configuration change.
