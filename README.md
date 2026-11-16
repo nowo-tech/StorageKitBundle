@@ -23,31 +23,6 @@ Bucket connections, resolved profiles and per-viewer read decisions are request-
 (and on a `storage` section change), so a bucket saved or switched in one request is used by the next one in every
 worker. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md).
 
-## Screenshots
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/demo/storage-section.webp" alt="Storage settings section: provider choice set to an S3-compatible service, with endpoint, region, bucket, prefix, access key, an encrypted secret shown only as saved, and the Test connection action" />
-      <br /><sub>Settings → Storage: only the selected provider's fields, secret encrypted and never shown again</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/images/demo/notes.webp" alt="Demo notes page: a note with an image uploaded into it and served by the application" />
-      <br /><sub>An image uploaded into a note, stored in a private bucket and served through the application</sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/demo/storage-settings.webp" alt="Instance Storage page: uploads on, usage, last connection test and the Test connection result" />
-      <br /><sub>Storage page: status, usage and a passed connection test</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/images/demo/storage-move.webp" alt="Move page: the new bucket form and a completed, verified copy ready to switch" />
-      <br /><sub>Move to another bucket: a completed and verified copy, ready to switch</sub>
-    </td>
-  </tr>
-</table>
-
 ## Features
 
 - **S3-compatible buckets** over Flysystem + async-aws — providers `aws_s3` (endpoint derived from the region) and
@@ -188,6 +163,31 @@ the purge, scope buckets, quotas, moving to another bucket, adopting an existing
 (`nowo:storage-kit:adopt-instance-bucket`), personal data and audit events: [docs/USAGE.md](docs/USAGE.md). Both host
 kinds are covered: [Standard Symfony host](docs/USAGE.md#standard-symfony-host) (zero configuration) and
 [DDD / hexagonal host](docs/USAGE.md#ddd--hexagonal-host) (ports, dedicated entity manager, no Instance Settings).
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/demo/storage-section.webp" alt="Storage settings section: provider choice set to an S3-compatible service, with endpoint, region, bucket, prefix, access key, an encrypted secret shown only as saved, and the Test connection action" />
+      <br /><sub>Settings → Storage: only the selected provider's fields, secret encrypted and never shown again</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/demo/notes.webp" alt="Demo notes page: a note with an image uploaded into it and served by the application" />
+      <br /><sub>An image uploaded into a note, stored in a private bucket and served through the application</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/demo/storage-settings.webp" alt="Instance Storage page: uploads on, usage, last connection test and the Test connection result" />
+      <br /><sub>Storage page: status, usage and a passed connection test</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/demo/storage-move.webp" alt="Move page: the new bucket form and a completed, verified copy ready to switch" />
+      <br /><sub>Move to another bucket: a completed and verified copy, ready to switch</sub>
+    </td>
+  </tr>
+</table>
 
 ## Demo
 

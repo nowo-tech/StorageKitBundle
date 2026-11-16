@@ -53,6 +53,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- README: `## Screenshots` moved to the mid-body slot after `## Usage` (REQ-DOCS-019)
+- Spec Kit: the six `src/` files added in 1.6.0 are mapped in `code-inventory.md` (REQ-SPECKIT-001)
+
 ## [1.6.1] - 2026-11-15
 
 ### Fixed
