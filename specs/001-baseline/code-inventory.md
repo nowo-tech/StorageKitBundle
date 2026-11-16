@@ -1,6 +1,6 @@
 # Code inventory — 001-baseline
 
-**Last audited**: 2026-11-13
+**Last audited**: 2026-11-16 (sweep: 2026-11-13 baseline + later sources)
 **Scope**: every production file under `src/` (`find src -type f | wc -l`). Tests, demo and generated caches are out of scope.
 
 ## Bundle / DI
@@ -199,6 +199,19 @@
 | `src/Resources/translations/NowoStorageKitBundle.it.yaml` | Translations | FR-I18N-001 |
 | `src/Resources/translations/NowoStorageKitBundle.nl.yaml` | Translations | FR-I18N-001 |
 | `src/Resources/translations/NowoStorageKitBundle.pt.yaml` | Translations | FR-I18N-001 |
+
+## Sources added after the last baseline review (sweep 2026-11-16)
+
+These 6 `src/` files were added by releases after the last review. Each row maps the file to the requirement already used for its neighbours in the same directory; the description comes from the class docblock. With them, every file under `src/` is listed in this inventory.
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Context/SquareImageContextInterface.php` | Contexts and scopes: A file context that holds square images only (1.6: profile pictures, logos). | FR-CTX-001 |
+| `src/Lifecycle/FileRemover.php` | Default FileRemoverInterface (1.6). | FR-PURGE-001 |
+| `src/Lifecycle/FileRemoverInterface.php` | Removal port (1.6, public API, SemVer): drops one stored file of a known context without waiting for the purge — a re... | FR-PURGE-001 |
+| `src/Lifecycle/RemovedFile.php` | What FileRemoverInterface removed or expired (1.6). | FR-PURGE-001 |
+| `src/Upload/SquareImageProcessor.php` | Upload: Square image checks (GD, 1.6) for profile pictures and logos: accepts PNG, JPEG and still WebP by their content — nev... | FR-UP-003 |
+| `src/Upload/SquareImageUploaderInterface.php` | Upload: Port of the square image upload (1.6, public API, SemVer): profile pictures, logos and any other image shown as a squ... | FR-UP-003 |
 
 ## Coverage summary
 
