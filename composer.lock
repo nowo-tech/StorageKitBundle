@@ -1320,16 +1320,16 @@
         },
         {
             "name": "nowo-tech/doctrine-encrypt-bundle",
-            "version": "v2.10.1",
+            "version": "v2.12.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/DoctrineEncryptBundle.git",
-                "reference": "c6290632a051f8d0158b5f78d662c98c60b59cfe"
+                "reference": "22e2f6cd925264c0f9230a856247861532fb6609"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/DoctrineEncryptBundle/zipball/c6290632a051f8d0158b5f78d662c98c60b59cfe",
-                "reference": "c6290632a051f8d0158b5f78d662c98c60b59cfe",
+                "url": "https://api.github.com/repos/nowo-tech/DoctrineEncryptBundle/zipball/22e2f6cd925264c0f9230a856247861532fb6609",
+                "reference": "22e2f6cd925264c0f9230a856247861532fb6609",
                 "shasum": ""
             },
             "require": {
@@ -1417,7 +1417,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-31T21:17:02+00:00"
+            "time": "2026-11-11T14:41:37+00:00",
+            "published-time": "2026-11-11T14:45:46+00:00"
         },
         {
             "name": "nowo-tech/form-kit-bundle",
@@ -8144,22 +8145,24 @@
         },
         {
             "name": "nowo-tech/http-hardening-bundle",
-            "version": "v1.8.0",
+            "version": "v1.10.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/HttpHardeningBundle.git",
-                "reference": "6af3f06763e0a6b6e2d14a98820c5d8382fd6065"
+                "reference": "7baebe60658432e81374f1858e17db7a4cd1a855"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/HttpHardeningBundle/zipball/6af3f06763e0a6b6e2d14a98820c5d8382fd6065",
-                "reference": "6af3f06763e0a6b6e2d14a98820c5d8382fd6065",
+                "url": "https://api.github.com/repos/nowo-tech/HttpHardeningBundle/zipball/7baebe60658432e81374f1858e17db7a4cd1a855",
+                "reference": "7baebe60658432e81374f1858e17db7a4cd1a855",
                 "shasum": ""
             },
             "require": {
                 "php": ">=8.2 <8.6",
                 "symfony/config": "^7.4 || ^8.0",
                 "symfony/dependency-injection": "^7.4 || ^8.0",
+                "symfony/deprecation-contracts": "^3.0",
+                "symfony/event-dispatcher-contracts": "^3.0",
                 "symfony/http-foundation": "^7.4 || ^8.0",
                 "symfony/http-kernel": "^7.4 || ^8.0",
                 "symfony/security-core": "^7.4 || ^8.0"
@@ -8243,7 +8246,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-31T13:39:06+00:00"
+            "time": "2026-11-11T21:27:33+00:00",
+            "published-time": "2026-11-11T21:28:32+00:00"
         },
         {
             "name": "nowo-tech/phpstan-frankenphp",
@@ -11727,5 +11731,5 @@
     "platform-overrides": {
         "php": "8.2.0"
     },
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.11.0"
 }
