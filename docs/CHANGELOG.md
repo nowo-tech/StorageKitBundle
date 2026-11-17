@@ -55,6 +55,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Demo: the shell is UiKit's admin layout with UiKit's default theme (header menu with the active item, UiKit flashes); Bootstrap 5, Bootstrap Icons and the CDN assets are gone, and the demo requires the latest `nowo-tech/ui-kit-bundle` (REQ-DEMO-014). The note form is a FormKit form (profile `demo`) themed by UiKit's form theme instead of Bootstrap's (REQ-DEMO-015).
 - README: `## Screenshots` moved to the mid-body slot after `## Usage` (REQ-DOCS-019)
 - Spec Kit: the six `src/` files added in 1.6.0 are mapped in `code-inventory.md` (REQ-SPECKIT-001)
 
