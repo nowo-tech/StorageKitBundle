@@ -7,16 +7,20 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Functional;
 use LogicException;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\StorageKitBundle\Concurrency\StorageConflicts;
+use Nowo\StorageKitBundle\Doctrine\OwnerLock;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Entity\StoredFile;
+use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Nowo\StorageKitBundle\Repository\StorageSyncRepository;
 use Nowo\StorageKitBundle\Sync\StorageMove;
 use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
+use Nowo\StorageKitBundle\Tests\Support\EarlyCommit;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Tests\Support\StatementHook;
 use Nowo\StorageKitBundle\Tests\Support\StatementHooks;
@@ -24,6 +28,8 @@ use Nowo\StorageKitBundle\Tests\Unit\Concurrency\StorageConflictsTest;
 use Nowo\StorageKitBundle\Ui\ProfileTester;
 use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
+use Nowo\TransactionContract\TransientStorageFailure;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -43,12 +49,16 @@ use function tempnam;
  */
 final class ConcurrentWritesTest extends KernelTestCase
 {
-    private function kernel(): StorageKitTestKernel
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function kernel(array $config = []): StorageKitTestKernel
     {
-        return $this->bootKernel(extra: static function (ContainerConfigurator $container): void {
+        return $this->bootKernel($config, extra: static function (ContainerConfigurator $container): void {
             $services = $container->services();
             $services->set(StatementHooks::class)->public();
             $services->set(StatementHook::class)->args([service(StatementHooks::class)])->tag('doctrine.middleware');
+            $services->set(EarlyCommit::class)->args([service('doctrine')])->public()->tag('kernel.event_listener', ['event' => 'kernel.controller']);
         });
     }
 
@@ -151,6 +161,39 @@ final class ConcurrentWritesTest extends KernelTestCase
         $client->submit($form);
         self::assertStringContainsString('The storage settings were saved.', $this->follow($client));
         self::assertSame(1, $this->rows($kernel, "SELECT COUNT(*) FROM storage_kit_profile WHERE bucket = 'mine'"));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function commitTracking(): iterable
+    {
+        yield 'bundle (default)' => ['bundle', 'CONFLICT_002'];
+        yield 'off' => ['off', 'CONFLICT_001'];
+    }
+
+    #[DataProvider('commitTracking')]
+    public function testAConflictAfterAnEarlierCommitOfTheRequestAnswers002WithoutTransactionDoctrinesBundle(string $tracking, string $code): void
+    {
+        // 1.7.1 (UH-SK-4): transaction-doctrine's bundle is not registered here; the bundle's own commit tracking on
+        // its connection sees the host listener's commit made earlier in the same request (`off`: not seen).
+        $kernel                          = $this->kernel(['conflict_response' => ['commit_tracking' => $tracking]]);
+        $client                          = $this->client($kernel, 'scopeadmin');
+        $form                            = $client->request('GET', '/storage/scopes/acme')->selectButton('Save')->form()->disableValidation();
+        $form['storage_profile[bucket]'] = 'mine';
+
+        $this->service($kernel, EarlyCommit::class)->armed = true;
+        $this->hooks($kernel)->onceBefore('SELECT scope FROM storage_kit_profile WHERE state', static function (): never {
+            throw StorageConflictsTest::storageError(['40001', 1213]);
+        });
+        $client->submit($form);
+
+        $response = $client->getResponse();
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame($code, $response->headers->get('X-Conflict-Code'));
+        self::assertSame($code === 'CONFLICT_001', $response->headers->has('Retry-After'));
+        self::assertFalse($this->service($kernel, EarlyCommit::class)->armed, 'the earlier commit ran');
+        self::assertSame(0, $this->rows($kernel, "SELECT COUNT(*) FROM storage_kit_profile WHERE bucket = 'mine'"));
     }
 
     public function testATargetSavedMeanwhileIsNotOverwritten(): void
@@ -335,6 +378,40 @@ final class ConcurrentWritesTest extends KernelTestCase
 
         self::assertSame(1, $this->rows($kernel, "SELECT COUNT(*) FROM storage_kit_profile WHERE state = 'active' AND scope IS NULL"));
         self::assertSame($this->rows($kernel, 'SELECT MIN(id) FROM storage_kit_profile'), (int) $file->getProfile()->getId());
+    }
+
+    public function testARowTheLockingReadSeesButTheManagerDoesNotIsARetrySafeConflict(): void
+    {
+        $kernel = $this->kernel();
+        $this->service($kernel, InstanceSettingsInterface::class)->save('storage', ['provider' => 's3_compatible', 'endpoint' => 'http://minio:9000', 'region' => 'us-east-1', 'bucket' => 'files', 'prefix' => 'app', 'access_key' => 'test-key', 'path_style' => true, 'secret' => 'test-secret-not-real']);
+        $this->sql($kernel, 'DELETE FROM storage_kit_profile');
+        $profiles = $this->service($kernel, StorageProfiles::class);
+        $profiles->reset();
+
+        // 1.7.1 (UH-SK-2): the locking re-read finds a row the manager's read then misses (on MySQL / MariaDB: your
+        // transaction's snapshot predates the other commit). Creating one would duplicate it: retry-safe conflict.
+        $hooks = $this->hooks($kernel);
+        $hooks->onceBefore('SELECT id FROM storage_kit_profile WHERE scope IS NULL', function () use ($kernel, $hooks): void {
+            $theirs = new StorageProfile();
+            $theirs->useInstanceSettings();
+            $this->storage($kernel)->insert($theirs);
+            $hooks->onceBeforeNth('FROM storage_kit_profile s0_', 1, function () use ($kernel): void {
+                $this->sql($kernel, 'DELETE FROM storage_kit_profile');
+            });
+        });
+        try {
+            $profiles->activeOf(null);
+            self::fail('expected a conflict');
+        } catch (TransientStorageFailure $e) {
+            self::assertSame(OwnerLock::MESSAGE, $e->getMessage());
+            self::assertTrue(StorageConflicts::isConflict($e));
+        }
+        self::assertNull($hooks->hook);
+
+        // The retry creates the one row.
+        $profiles->reset();
+        self::assertInstanceOf(StorageProfile::class, $profiles->activeOf(null));
+        self::assertSame(1, $this->rows($kernel, "SELECT COUNT(*) FROM storage_kit_profile WHERE state = 'active' AND scope IS NULL"));
     }
 
     public function testAFailedFlushNeverResetsAnOpenManagerAndReplacesAClosedOne(): void

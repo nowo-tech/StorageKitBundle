@@ -6,12 +6,13 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Fixed](#fixed)
 - [[1.7.0] - 2026-11-19](#170---2026-11-19)
   - [Added](#added)
-  - [Fixed](#fixed)
+  - [Fixed](#fixed-1)
   - [Changed](#changed)
 - [[1.6.1] - 2026-11-15](#161---2026-11-15)
-  - [Fixed](#fixed-1)
+  - [Fixed](#fixed-2)
   - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
   - [Added](#added-1)
@@ -24,10 +25,10 @@ All notable changes to this project are documented here. The format follows
   - [Tests](#tests-2)
 - [[1.5.2] - 2026-11-13](#152---2026-11-13)
   - [Security](#security-1)
-  - [Fixed](#fixed-2)
+  - [Fixed](#fixed-3)
   - [Tests](#tests-3)
 - [[1.5.1] - 2026-11-12](#151---2026-11-12)
-  - [Fixed](#fixed-3)
+  - [Fixed](#fixed-4)
   - [Tests](#tests-4)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
   - [Added](#added-3)
@@ -36,10 +37,10 @@ All notable changes to this project are documented here. The format follows
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Added](#added-4)
   - [Security](#security-2)
-  - [Fixed](#fixed-4)
+  - [Fixed](#fixed-5)
   - [Changed](#changed-4)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
-  - [Fixed](#fixed-5)
+  - [Fixed](#fixed-6)
   - [Added](#added-5)
   - [Changed](#changed-5)
   - [Deprecated](#deprecated-1)
@@ -50,12 +51,38 @@ All notable changes to this project are documented here. The format follows
 - [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-7)
   - [Changed](#changed-7)
-  - [Fixed](#fixed-6)
+  - [Fixed](#fixed-7)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
   - [Added](#added-8)
   - [Security](#security-4)
 
 ## [Unreleased]
+
+### Fixed
+
+- **Duplicate instance row inside your transaction on MySQL / MariaDB** (audit UH-SK-2; affected: 1.7.0, and every
+  version since 1.4.0). The first use of the instance's `storage` section (or of a config profile's row) made inside a
+  transaction you opened, for example an upload from your own write unit, could still create a second active row: the
+  owner lock `GET_LOCK()` is session-scoped and was released before your commit, and the other request's re-read could
+  not see the uncommitted row. The re-read under the owner lock is now a locking read (`SELECT … FOR UPDATE` on the
+  instance's active rows), so the other request waits for your commit (up to `innodb_lock_wait_timeout`, then
+  `CONFLICT_001`) and reuses the row. When your transaction's snapshot is older than the other request's commit
+  (REPEATABLE READ), the unit fails with a retry-safe conflict instead of inserting a duplicate. PostgreSQL was not
+  affected. Detection and recovery of rows created before: [UPGRADING](UPGRADING.md#duplicate-instance-rows-140161).
+- **The PostgreSQL owner lock waits a bounded time** (audit UH-SK-3). `pg_advisory_xact_lock()` used to wait up to the
+  session's `lock_timeout` (no limit by default). It now waits up to `conflict_response.owner_lock_timeout` (default 5
+  seconds, 0 = no wait), like `GET_LOCK()` on MySQL / MariaDB, through a transaction-local `lock_timeout` set for the
+  lock statement only; your previous value is restored right after it. A timeout answers `CONFLICT_001`.
+- **`CONFLICT_002` without transaction-doctrine's bundle** (audit UH-SK-4). A lock conflict after part of the request
+  had committed (a listener of `StorageAuditEvent`, a `sync://` handler of `RunStorageSyncMessage`) answered
+  `CONFLICT_001` with `Retry-After` unless transaction-doctrine's bundle was registered with `commit_detection`. The
+  bundle now counts the commits of its own connection with transaction-doctrine's commit-tracking DBAL middleware and
+  takes its own commit mark at `kernel.request`. Only the connection of `doctrine.entity_manager` is wrapped, never your
+  other connections; with transaction-doctrine's `commit_detection` on, its request mark is used and nothing is added.
+  New option `conflict_response.commit_tracking` (`bundle`, the default, or `off`).
+- Tests (audit UH-SK-7): two-kernel races of the first use on MySQL 8.4, MariaDB 11.4 and PostgreSQL (the row created
+  inside an open transaction, the row committed just before the owner lock, an older snapshot, a config profile's
+  row). `GET_LOCK()` is re-entrant within one session, so these need two connections.
 
 ## [1.7.0] - 2026-11-19
 

@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Profile;
 
 use InvalidArgumentException;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
+use Nowo\StorageKitBundle\Doctrine\OwnerLock;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
@@ -13,6 +14,7 @@ use Nowo\StorageKitBundle\Scope\ScopeResolverInterface;
 use Nowo\StorageKitBundle\Scope\StorageScope;
 use Nowo\StorageKitBundle\Settings\InstanceStorageSettings;
 use Nowo\StorageKitBundle\Storage\S3Settings;
+use Nowo\TransactionContract\TransientStorageFailure;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
@@ -182,16 +184,15 @@ final class StorageProfiles implements ResetInterface
 
         // 1.7 (REQ-RUNTIME-003 rule 4): created under the instance's owner lock and read again first, so two first
         // uploads at once never create two active rows (a later switch would leave the second one behind).
+        // 1.7.1 (audit UH-SK-2): the re-read is a locking read, so a row created inside another request's open
+        // transaction (released lock, commit still to come) is waited for, not missed.
         // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
         return $this->entityManager->exclusively(function (): StorageProfile {
-            $existing = $this->profiles->activeOf(null);
-            if ($existing instanceof StorageProfile) {
-                return $existing;
-            }
+            $exists  = $this->profiles->lockInstanceRow(null);
             $profile = new StorageProfile();
             $profile->useInstanceSettings();
 
-            return $this->created($profile);
+            return $this->createdOnce($exists, $this->profiles->activeOf(null), $profile);
         }, StorageProfileRepository::ownerLock(null));
     }
 
@@ -208,9 +209,9 @@ final class StorageProfiles implements ResetInterface
             // 1.7 (rule 4): created once, under a lock per config profile.
             // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
             $profile = $this->profiles->configRow($name) ?? $this->entityManager->exclusively(function () use ($name): StorageProfile {
-                $existing = $this->profiles->configRow($name);
+                $exists = $this->profiles->lockInstanceRow($name);
 
-                return $existing ?? $this->created(new StorageProfile(null, StorageProfile::STATE_ACTIVE, $name));
+                return $this->createdOnce($exists, $this->profiles->configRow($name), new StorageProfile(null, StorageProfile::STATE_ACTIVE, $name));
             }, 'config/' . $name);
             // @igor-ignore - Request-scoped memo, cleared by reset() (kernel.reset).
             $this->memo[$key] = $profile;
@@ -218,6 +219,26 @@ final class StorageProfiles implements ResetInterface
         $profile = $this->memo[$key];
 
         return $profile instanceof StorageProfile ? $profile : null;
+    }
+
+    /**
+     * The row the entity manager read again (`$existing`), else `$new` written ({@see self::created()}). When the locking
+     * read found the row (`$exists`) but the entity manager's read did not (1.7.1, audit UH-SK-2: on MySQL / MariaDB
+     * your open transaction's snapshot, REPEATABLE READ, predates the other request's commit), creating one would
+     * duplicate it, so the unit fails as a retry-safe conflict: a new transaction sees the row.
+     *
+     * @throws TransientStorageFailure when the row exists but cannot be read in this transaction
+     */
+    private function createdOnce(bool $exists, ?StorageProfile $existing, StorageProfile $new): StorageProfile
+    {
+        if ($existing instanceof StorageProfile) {
+            return $existing;
+        }
+        if ($exists) {
+            throw new TransientStorageFailure(1, OwnerLock::MESSAGE);
+        }
+
+        return $this->created($new);
     }
 
     /**

@@ -18,7 +18,8 @@ a lock conflict. Worker-mode state (what survives between requests) is covered s
 
 "Unit" is `StorageEntityManager::transactional()` (transaction-doctrine runner, one transaction, the manager flushed
 before the commit) unless noted. "Owner lock" serializes the writes of one storage owner (the instance or one scope):
-MySQL / MariaDB `GET_LOCK()`, PostgreSQL `pg_advisory_xact_lock()`, none on SQLite (one writer).
+MySQL / MariaDB `GET_LOCK()`, PostgreSQL `pg_advisory_xact_lock()` (both wait at most
+`conflict_response.owner_lock_timeout`, PostgreSQL since 1.7.1), none on SQLite (one writer).
 
 | Path | Transaction | Control (rule 4) | Conflict answer |
 | --- | --- | --- | --- |
@@ -32,6 +33,7 @@ MySQL / MariaDB `GET_LOCK()`, PostgreSQL `pg_advisory_xact_lock()`, none on SQLi
 | Copy runner (`StorageSyncer::run`, Messenger handler, `nowo:storage-kit:sync`) | One small transaction per file (progress), no transaction around the bucket I/O | Symfony Lock per sync plus an atomic claim (`UPDATE … WHERE status = queued OR stale`); status changes are compare-and-set from `running`, so a cancel committed meanwhile wins | Console / worker: the failure is rethrown (Messenger retries) |
 | `nowo:storage-kit:adopt-instance-bucket` | Unit | Owner lock (instance) | Console: rethrown |
 | Upload endpoint / `ImageUploaderInterface` | One DBAL `INSERT` (a savepoint inside your transaction) | New random UUID and key per upload (`uniq_storage_kit_file_key`) | 409 JSON `{error: conflict, message, code}`; the objects already written are deleted again |
+| First use: the instance's `storage` row, a config profile's row (`StorageProfiles`, from an upload or the settings listener) | `StorageEntityManager::exclusively()`: a savepoint inside your transaction, else one of its own; no manager flushed | Owner lock, then a locking re-read (1.7.1: `FOR UPDATE` on MySQL / MariaDB, so a row inserted by another open transaction is waited for); a row the locking read sees but your snapshot does not is a retry-safe conflict, never a duplicate | Bundle routes: 409 `CONFLICT_001`; your code: rethrown (`TransientStorageFailure` or the lock wait timeout) |
 | File references (`FileReferencesInterface::sync` / `forget`, the reference listener) | Your transaction (it runs after your flush); the insert in its own savepoint | Unique key `(file_id, source_type, source_id)` + `INSERT … SELECT … NOT EXISTS`; a unique violation (a concurrent save of the same text) is caught and dropped, never mapped to a conflict | Your route: the lock wait is rethrown to your code (the bundle never answers host routes) |
 | Download endpoint | No write | — | 409 `text/plain` if a read meets a lock |
 | Purge (`nowo:storage-kit:purge`) | Keyset batches, one statement or flush per batch | Each batch re-checks that no reference appeared before deleting a row; `orphaned_since` set only when still unreferenced | Console: rethrown |
@@ -48,7 +50,7 @@ A lock conflict, deadlock, lock wait timeout or serialization failure (MySQL / M
 | Code | When | Status | Headers |
 | --- | --- | --- | --- |
 | `CONFLICT_001` | Nothing was committed: retrying is safe | 409 (or 503) | `X-Conflict-Code: CONFLICT_001`, `Retry-After` |
-| `CONFLICT_002` | Part of the request was committed (transaction-doctrine's request commit mark, a Messenger handler that already completed, a lost savepoint): read again, do not repeat | 409 (or 503) | `X-Conflict-Code: CONFLICT_002`, no `Retry-After` |
+| `CONFLICT_002` | Part of the request was committed (transaction-doctrine's request commit mark, or the bundle's own mark on its connection since 1.7.1; a Messenger handler that already completed; a lost savepoint): read again, do not repeat | 409 (or 503) | `X-Conflict-Code: CONFLICT_002`, no `Retry-After` |
 
 - The Storage and Move pages become an `HttpException` with that status and those headers, rendered by your error page.
 - The upload endpoint keeps its JSON error shape and adds the code: `{"error": "conflict", "message": "…", "code": "CONFLICT_001"}`.
@@ -56,8 +58,12 @@ A lock conflict, deadlock, lock wait timeout or serialization failure (MySQL / M
 - Not conflicts, never mapped: unique (and other constraint) violations and lost connections. They stay real errors.
 - Host routes are never answered: a lock wait inside the reference listener or an upload called from your code is
   rethrown to you (rule 8: never swallowed).
-- "Part committed" needs transaction-doctrine's commit detection (its bundle, `commit_detection: true`) to see commits
-  made earlier in the same request by your code or another bundle; without it the failure alone decides.
+- "Part committed" (1.7.1, audit UH-SK-4): with transaction-doctrine's bundle and `commit_detection: true`, its
+  request mark sees every commit made earlier in the same request (your code, another bundle). Without it the bundle
+  counts the commits of its own connection (`conflict_response.commit_tracking: bundle`, the default): transaction-
+  doctrine's commit-tracking DBAL middleware wraps the connection of `doctrine.entity_manager` only, and
+  `StorageKitConflictListener::onRequest()` takes the bundle's mark at `kernel.request` (priority 4096). A commit on
+  another connection is then not seen. `commit_tracking: off`: the failure alone decides.
 
 The listener is `StorageKitConflictListener` (`kernel.exception`, priority -64: after your own exception listeners,
 before the framework's error listener).
@@ -69,11 +75,13 @@ nowo_storage_kit:
     conflict_response:
         status: 409               # or 503 for hosts that keep a Service Unavailable answer
         retry_after: 1            # seconds, CONFLICT_001 only
-        owner_lock_timeout: 5     # seconds a Storage / Move write waits for another one of the same owner (MySQL / MariaDB)
+        owner_lock_timeout: 5     # seconds a write waits for another one of the same owner (0 = no wait)
+        commit_tracking: bundle   # bundle (the connection of doctrine.entity_manager) or off
 ```
 
-On PostgreSQL the owner lock waits up to the session's `lock_timeout` (set it, for example `SET lock_timeout = '5s'` in
-your connection's `options` or a DBAL middleware; the default 0 waits without limit). Cross-origin API clients that
+Since 1.7.1 the PostgreSQL owner lock waits `owner_lock_timeout` too: a transaction-local `lock_timeout` is set for the
+lock statement only and your previous value is restored right after it (0 uses `pg_try_advisory_xact_lock()`).
+Cross-origin API clients that
 read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (the bundle's routes are same-origin).
 
 ## Entity managers
@@ -95,6 +103,11 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
   a real lock wait on the switch (409 + `CONFLICT_001` + `Retry-After`, nothing changed, retry succeeds), two saves of
   the same text reference (one row; the same failure after an earlier commit answers `CONFLICT_002`). Lock waits are
   capped at one second.
+- `tests/Integration/Concurrency/FirstUseRaceTest.php` (1.7.1): two kernels race the first use of the instance row and
+  of a config profile's row: the row created inside an open transaction (the other connection waits and answers
+  `CONFLICT_001`, then reuses it), the row committed just before the owner lock (read again and reused; `GET_LOCK()`
+  is re-entrant within one session, so only a second connection proves it) and a snapshot older than the commit
+  (MySQL / MariaDB: retry-safe conflict, never a duplicate).
 - `tests/Integration/Functional/ConcurrentWritesTest.php`: the same re-checks on one connection (SQLite and the three
   databases) with a statement hook as the other writer, plus a deadlock on the settings page and on the upload insert.
 - `tests/Unit/Concurrency`, `tests/Unit/EventListener/StorageKitConflictListenerTest.php`,
@@ -106,11 +119,13 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
 - **Stale form, last writer wins.** Two admins editing the same existing bucket both save; the second save overwrites
   the first (both are audited with the changed field names). The owner lock prevents duplicates, not this.
 - **Owner lock inside your transaction.** If you call a Move / Storage write inside a transaction you opened, the
-  MySQL / MariaDB lock is released when the bundle's unit ends, before your commit. `GET_LOCK()` is session-scoped,
-  not transaction-scoped: a first upload made inside your transaction (which creates the instance `storage` row on
-  first use) can therefore still race another one and create a duplicate instance row until your commit. The fix
-  (holding the lock until the outer commit) is planned for a later patch; detection and recovery are in
-  [UPGRADING](UPGRADING.md#duplicate-instance-rows-140161).
+  MySQL / MariaDB lock is released when the bundle's unit ends, before your commit (`GET_LOCK()` is session-scoped).
+  The Storage / Move writes are the bundle's own pages, which open no transaction around them. The first-use rows,
+  which your code can reach inside its transaction (an upload), are protected since 1.7.1 by the locking re-read: the
+  instance's active rows stay locked until your commit, so a concurrent first use (of the instance row or of a config
+  profile's row) waits up to `innodb_lock_wait_timeout` and answers `CONFLICT_001`; two such first uses inside two
+  long transactions can deadlock (one gets `CONFLICT_001`). Rows duplicated by earlier versions: detection and
+  recovery in [UPGRADING](UPGRADING.md#duplicate-instance-rows-140161).
 - **PostgreSQL REPEATABLE READ.** With a REPEATABLE READ default, the re-check inside a unit reads the snapshot taken at
   its first statement (the lock), so a change committed while waiting for the lock is not seen. READ COMMITTED (the
   default) is not affected.

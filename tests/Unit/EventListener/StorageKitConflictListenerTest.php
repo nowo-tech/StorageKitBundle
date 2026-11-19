@@ -18,7 +18,9 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
+use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
@@ -72,6 +74,56 @@ final class StorageKitConflictListenerTest extends TestCase
         self::assertSame(503, $exception->getStatusCode());
         self::assertSame(['X-Conflict-Code' => 'CONFLICT_002'], $exception->getHeaders());
         self::assertSame(StorageKitConflictListener::COMMITTED_MESSAGE, $exception->getMessage());
+    }
+
+    public function testTheBundlesOwnMarkTurnsAConflictAfterACommitInto002(): void
+    {
+        // 1.7.1 (UH-SK-4): without transaction-doctrine's bundle, the listener's own mark on the bundle's ledger.
+        $ledger   = new CommitLedger();
+        $stack    = new RequestStack();
+        $listener = new StorageKitConflictListener(new ConflictResponsePolicy(), null, $ledger, $stack);
+        $kernel   = $this->createStub(HttpKernelInterface::class);
+        $main     = new Request();
+        $listener->onRequest(new RequestEvent($kernel, $main, HttpKernelInterface::MAIN_REQUEST));
+        $mark = $main->attributes->get(StorageKitConflictListener::MARK_ATTRIBUTE);
+        self::assertInstanceOf(CommitMark::class, $mark);
+        $sub = new Request();
+        $listener->onRequest(new RequestEvent($kernel, $sub, HttpKernelInterface::SUB_REQUEST));
+        self::assertFalse($sub->attributes->has(StorageKitConflictListener::MARK_ATTRIBUTE), 'a sub-request reads the main request\'s mark');
+
+        $main->attributes->set('_controller', StorageSettingsController::class . '::instance');
+        $event = new ExceptionEvent($kernel, $main, HttpKernelInterface::MAIN_REQUEST, $this->deadlock());
+        $listener($event);
+        self::assertSame(['X-Conflict-Code' => 'CONFLICT_001', 'Retry-After' => '1'], $this->headers($event));
+
+        // Something committed on the bundle's connection (an audit listener, a sync:// handler): 002, even in a
+        // sub-request of the same main request.
+        $ledger->record();
+        $event = new ExceptionEvent($kernel, $main, HttpKernelInterface::MAIN_REQUEST, $this->deadlock());
+        $listener($event);
+        self::assertSame(['X-Conflict-Code' => 'CONFLICT_002'], $this->headers($event));
+        $stack->push($main);
+        $sub->attributes->set('_controller', StorageMoveController::class . '::instanceAction');
+        $event = new ExceptionEvent($kernel, $sub, HttpKernelInterface::SUB_REQUEST, $this->deadlock());
+        $listener($event);
+        self::assertSame(['X-Conflict-Code' => 'CONFLICT_002'], $this->headers($event));
+
+        // Without a ledger (transaction-doctrine's commit_detection, or commit_tracking: off) no mark is taken.
+        $other = new Request();
+        (new StorageKitConflictListener())->onRequest(new RequestEvent($kernel, $other, HttpKernelInterface::MAIN_REQUEST));
+        self::assertFalse($other->attributes->has(StorageKitConflictListener::MARK_ATTRIBUTE));
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function headers(ExceptionEvent $event): array
+    {
+        $exception = $event->getThrowable();
+        self::assertInstanceOf(HttpException::class, $exception);
+
+        /* @var array<string, string> */
+        return $exception->getHeaders();
     }
 
     public function testTheUploadEndpointKeepsItsJsonShapeAndAddsTheCode(): void

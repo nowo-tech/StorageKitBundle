@@ -7,6 +7,7 @@ namespace Nowo\StorageKitBundle\Concurrency;
 use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\ConflictCode;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
+use Nowo\TransactionDoctrine\WriteUnit\CommitMark;
 use Symfony\Component\HttpFoundation\Request;
 use Throwable;
 
@@ -42,10 +43,16 @@ final class StorageConflicts
      * (anything the host or a bundle committed earlier in the same request), when the chain proves a commit (a
      * committed ConcurrencyConflict, a Messenger HandlerFailedException carrying a HandledStamp, any
      * DelayedMessageHandlingException) or for a lost savepoint; CONFLICT_001 otherwise.
+     *
+     * The request's mark is transaction-doctrine's (its bundle with `commit_detection`). 1.7.1 (audit UH-SK-4): `$own`,
+     * the bundle's own mark on the commits of its connection, counts too, so a commit earlier in the request answers
+     * CONFLICT_002 without that bundle.
      */
-    public static function code(Request $request, Throwable $failure): ConflictCode
+    public static function code(Request $request, Throwable $failure, ?CommitMark $own = null): ConflictCode
     {
-        return ConflictCode::forRequest($request, $failure);
+        $code = ConflictCode::forRequest($request, $failure);
+
+        return $code->retrySafe() && $own?->committedSince() === true ? ConflictCode::Committed : $code;
     }
 
     /**

@@ -11,9 +11,14 @@ use Nowo\StorageKitBundle\Controller\StorageSettingsController;
 use Nowo\StorageKitBundle\NowoStorageKitBundle;
 use Nowo\TransactionDoctrine\ConflictCode;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use Nowo\TransactionDoctrine\WriteUnit\CommitMark;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
+use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 use function is_string;
@@ -26,13 +31,16 @@ use function str_starts_with;
  * The answer is **409** (`conflict_response.status: 503` for hosts that want it) with `X-Conflict-Code`:
  * `CONFLICT_001` and `Retry-After` when nothing was committed, `CONFLICT_002` and no `Retry-After` when part of the
  * request was ({@see StorageConflicts::code()}: the request commit mark of transaction-doctrine >= 1.6, a Messenger
- * handler that already completed, a committed ConcurrencyConflict). The Storage and Move pages get an HttpException
- * with that status and those headers, rendered by your error page; the upload endpoint keeps its JSON error shape
- * `{error, message}` and adds `code`; the download endpoint gets a `text/plain` answer.
+ * handler that already completed, a committed ConcurrencyConflict). Without transaction-doctrine's `commit_detection`
+ * the bundle takes its own mark on the main request (1.7.1, audit UH-SK-4, {@see self::onRequest()}), on the ledger its
+ * commit-tracking middleware feeds from the bundle's connection (`conflict_response.commit_tracking`). The Storage and
+ * Move pages get an HttpException with that status and those headers, rendered by your error page; the upload endpoint
+ * keeps its JSON error shape `{error, message}` and adds `code`; the download endpoint gets a `text/plain` answer.
  *
  * Not conflicts, never mapped: unique violations and lost connections (they stay real errors). Host routes are never
  * answered (the `_controller` must be one of the bundle's). Priority -64: after the application's own exception
- * listeners, before the framework's error listener (-128). Stateless.
+ * listeners, before the framework's error listener (-128). Stateless: the mark lives on the request and the ledger is
+ * a monotonic counter read by difference (FrankenPHP worker mode with kernel reset off).
  */
 final readonly class StorageKitConflictListener
 {
@@ -45,15 +53,37 @@ final readonly class StorageKitConflictListener
     /** Generic, client-safe text when part of the request was committed (also the translation fallback). */
     public const COMMITTED_MESSAGE = 'Part of the request was saved before a conflict. Reload before trying again.';
 
+    /** 1.7.1: request attribute of the bundle's own commit mark. */
+    public const MARK_ATTRIBUTE = '_nowo_storage_kit_commit_mark';
+
+    /** 1.7.1: kernel.request priority of {@see self::onRequest()} (before routing, the firewall and your listeners). */
+    public const REQUEST_PRIORITY = 4096;
+
     private const CONTROLLER_PREFIX = 'Nowo\\StorageKitBundle\\Controller\\';
 
     /**
      * @param ConflictResponsePolicy $policy status (409 or 503) and Retry-After (`conflict_response`)
+     * @param CommitLedger|null $ledger commits of the bundle's connection (null: transaction-doctrine's mark, or none)
+     * @param RequestStack|null $requestStack the main request's mark for a sub-request
      */
     public function __construct(
         private ConflictResponsePolicy $policy = new ConflictResponsePolicy(),
         private ?TranslatorInterface $translator = null,
+        private ?CommitLedger $ledger = null,
+        private ?RequestStack $requestStack = null,
     ) {
+    }
+
+    /**
+     * Takes the bundle's commit mark on the main request (1.7.1; only registered without transaction-doctrine's
+     * `commit_detection`).
+     */
+    public function onRequest(RequestEvent $event): void
+    {
+        if ($this->ledger instanceof CommitLedger && $event->isMainRequest()) {
+            // @igor-ignore - Per-request Request attribute; not shared worker state.
+            $event->getRequest()->attributes->set(self::MARK_ATTRIBUTE, new CommitMark($this->ledger));
+        }
     }
 
     /**
@@ -70,7 +100,7 @@ final readonly class StorageKitConflictListener
         if (!StorageConflicts::isConflict($failure)) {
             return;
         }
-        $code    = StorageConflicts::code($request, $failure);
+        $code    = StorageConflicts::code($request, $failure, $this->ownMark($request));
         $hint    = StorageConflicts::retryAfterHint($failure);
         $message = $this->message($code);
         if (str_starts_with($controller, StorageSettingsController::class) || str_starts_with($controller, StorageMoveController::class)) {
@@ -88,6 +118,16 @@ final readonly class StorageKitConflictListener
             return;
         }
         $event->setResponse(new Response($message, $this->policy->status, $headers + ['Content-Type' => 'text/plain; charset=utf-8']));
+    }
+
+    /**
+     * The bundle's mark of the request, or of the main request for a sub-request; null when none was taken.
+     */
+    private function ownMark(Request $request): ?CommitMark
+    {
+        $mark = $request->attributes->get(self::MARK_ATTRIBUTE) ?? $this->requestStack?->getMainRequest()?->attributes->get(self::MARK_ATTRIBUTE);
+
+        return $mark instanceof CommitMark ? $mark : null;
     }
 
     private function message(ConflictCode $code): string

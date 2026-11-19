@@ -12,14 +12,17 @@ use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Doctrine\DBAL\Types\Types;
 use Nowo\StorageKitBundle\Doctrine\OwnerLock;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
+use Nowo\StorageKitBundle\Tests\Unit\Concurrency\StorageConflictsTest;
 use Nowo\TransactionContract\TransientStorageFailure;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 use function strlen;
 
 /**
  * 1.7 (REQ-RUNTIME-003 rule 4): the owner lock per platform — GET_LOCK on MySQL / MariaDB, a transaction-scoped
- * advisory lock on PostgreSQL, none elsewhere; a lock not obtained in time is a transient failure.
+ * advisory lock on PostgreSQL (bounded by the owner lock timeout since 1.7.1), none elsewhere; a lock not obtained in
+ * time is a transient failure.
  */
 final class OwnerLockTest extends TestCase
 {
@@ -67,20 +70,72 @@ final class OwnerLockTest extends TestCase
         }
     }
 
-    public function testPostgreSqlTakesATransactionScopedAdvisoryLock(): void
+    public function testPostgreSqlTakesATransactionScopedAdvisoryLockWithABoundedWait(): void
     {
         $key = OwnerLock::key('owner/instance');
         self::assertGreaterThan(0, $key);
         self::assertNotSame($key, OwnerLock::key('owner/scope/acme'));
 
+        // 1.7.1 (UH-SK-3): lock_timeout is set for the lock statement only, then your previous value comes back.
         $connection = $this->createMock(Connection::class);
         $connection->method('getDatabasePlatform')->willReturn(new PostgreSQLPlatform());
-        $connection->expects(self::never())->method('fetchOne');
+        $calls = [];
+        $connection->method('fetchOne')->willReturnCallback(static function (string $sql, array $params = []) use (&$calls): string {
+            $calls[] = [$sql, $params];
+
+            return $sql === "SELECT current_setting('lock_timeout')" ? '250ms' : 'x';
+        });
         $connection->expects(self::once())->method('executeQuery')->with('SELECT pg_advisory_xact_lock(?)', [$key], [Types::BIGINT]);
 
         self::assertNull(OwnerLock::acquire($connection, 'owner/instance', 5));
-        OwnerLock::acquireInside($connection, 'owner/instance');
+        OwnerLock::acquireInside($connection, 'owner/instance', 3);
         OwnerLock::release($connection, null);
+        self::assertSame([
+            ["SELECT current_setting('lock_timeout')", []],
+            ["SELECT set_config('lock_timeout', ?, true)", ['3000ms']],
+            ["SELECT set_config('lock_timeout', ?, true)", ['250ms']],
+        ], $calls);
+    }
+
+    public function testAPostgreSqlLockTimeoutIsTransientAndOtherErrorsStayAsTheyAre(): void
+    {
+        $timeout = StorageConflictsTest::storageError(['55P03', 7]);
+        $other   = new RuntimeException('connection refused');
+        foreach ([[$timeout, true], [$other, false]] as [$error, $transient]) {
+            $connection = $this->createStub(Connection::class);
+            $connection->method('getDatabasePlatform')->willReturn(new PostgreSQLPlatform());
+            $connection->method('fetchOne')->willReturn('0');
+            $connection->method('executeQuery')->willThrowException($error);
+            try {
+                OwnerLock::acquireInside($connection, 'owner/instance', 1);
+                self::fail('expected a failure');
+            } catch (TransientStorageFailure $e) {
+                self::assertTrue($transient);
+                self::assertSame(OwnerLock::MESSAGE, $e->getMessage());
+                self::assertSame($error, $e->getPrevious());
+            } catch (RuntimeException $e) {
+                self::assertFalse($transient);
+                self::assertSame($other, $e);
+            }
+        }
+    }
+
+    public function testAPostgreSqlTimeoutOfZeroTriesOnceWithoutWaiting(): void
+    {
+        $key = OwnerLock::key('owner/instance');
+        foreach ([[true, true], ['t', true], [false, false]] as [$result, $taken]) {
+            $connection = $this->createMock(Connection::class);
+            $connection->method('getDatabasePlatform')->willReturn(new PostgreSQLPlatform());
+            $connection->expects(self::once())->method('fetchOne')->with('SELECT pg_try_advisory_xact_lock(?)', [$key], [Types::BIGINT])->willReturn($result);
+            $connection->expects(self::never())->method('executeQuery');
+            try {
+                OwnerLock::acquireInside($connection, 'owner/instance', 0);
+                self::assertTrue($taken);
+            } catch (TransientStorageFailure $e) {
+                self::assertFalse($taken);
+                self::assertSame(1, $e->retryAfterSeconds());
+            }
+        }
     }
 
     public function testOtherPlatformsAndNoOwnerTakeNothing(): void

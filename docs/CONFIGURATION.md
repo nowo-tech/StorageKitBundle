@@ -86,7 +86,8 @@ nowo_storage_kit:
     conflict_response:            # 1.7 (REQ-RUNTIME-003)
         status: 409               # or 503
         retry_after: 1            # seconds, CONFLICT_001 answers only
-        owner_lock_timeout: 5     # seconds (MySQL / MariaDB GET_LOCK; PostgreSQL uses lock_timeout)
+        owner_lock_timeout: 5     # seconds (MySQL / MariaDB GET_LOCK; PostgreSQL advisory lock since 1.7.1)
+        commit_tracking: bundle   # 1.7.1: bundle or off (CONFLICT_002 without transaction-doctrine's bundle)
     web_ui:
         enabled: true
         path_prefix: /admin/storage
@@ -294,7 +295,8 @@ timeout or serialization failure (REQ-RUNTIME-003 rule 6). Write paths, codes an
 | --- | --- | --- |
 | `status` | `409` | `409` or `503`. Every conflict answer carries `X-Conflict-Code`: `CONFLICT_001` (nothing committed, retry) or `CONFLICT_002` (part committed, read again). |
 | `retry_after` | `1` | 0–3600 seconds, sent as `Retry-After` on `CONFLICT_001` answers only. |
-| `owner_lock_timeout` | `5` | 0–60 seconds a Storage / Move write waits for another write of the same owner on MySQL / MariaDB (`GET_LOCK`); then `CONFLICT_001`. PostgreSQL waits up to the session's `lock_timeout` (set one: its default 0 waits without limit). |
+| `owner_lock_timeout` | `5` | 0–60 seconds a Storage / Move write, or a first-use row creation, waits for another write of the same owner; then `CONFLICT_001`. MySQL / MariaDB: `GET_LOCK`. PostgreSQL (since 1.7.1): `pg_advisory_xact_lock` under a transaction-local `lock_timeout` set for the lock statement only, your previous value restored after it; 0 = `pg_try_advisory_xact_lock` (no wait). |
+| `commit_tracking` | `bundle` | 1.7.1. How commits made earlier in the request are seen for `CONFLICT_002` when transaction-doctrine's bundle is not registered with `commit_detection`: `bundle` (transaction-doctrine's commit-tracking DBAL middleware on the connection of `doctrine.entity_manager` only, plus a `kernel.request` listener that takes the bundle's mark) or `off` (nothing added; the failure alone decides). With `commit_detection` on, its request mark is used and nothing is added. |
 
 ## web_ui
 

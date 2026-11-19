@@ -9,9 +9,12 @@ use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Types\Types;
 use Nowo\TransactionContract\TransientStorageFailure;
+use Nowo\TransactionDoctrine\TransientFailureClassifier;
+use Throwable;
 
 use function hash;
 use function hexdec;
+use function in_array;
 use function substr;
 
 /**
@@ -21,7 +24,9 @@ use function substr;
  * - MySQL / MariaDB: `GET_LOCK()` taken before the transaction ({@see self::acquire()}) and released after it
  *   ({@see self::release()}), waiting at most the given seconds;
  * - PostgreSQL: `pg_advisory_xact_lock()` taken inside the transaction ({@see self::acquireInside()}), released by its
- *   commit or rollback, waiting at most the session's `lock_timeout` (55P03 otherwise);
+ *   commit or rollback, waiting at most the same seconds (1.7.1, audit UH-SK-3: a transaction-local `lock_timeout`
+ *   set for the lock statement only, the previous value restored right after it; 0 = `pg_try_advisory_xact_lock()`,
+ *   no wait);
  * - other platforms (SQLite: one writer at a time): none.
  *
  * A lock not obtained in time throws {@see TransientStorageFailure} (the bundle routes answer CONFLICT_001).
@@ -54,13 +59,40 @@ final class OwnerLock
     }
 
     /**
-     * PostgreSQL: takes the transaction-scoped advisory lock of the owner (call it inside the transaction).
+     * PostgreSQL: takes the transaction-scoped advisory lock of the owner (call it inside the transaction), waiting at
+     * most `$timeout` seconds (1.7.1, audit UH-SK-3). The wait is bounded by a transaction-local `lock_timeout` set for
+     * the lock statement only: the previous value (the session's, or one your transaction set) is restored right after
+     * it, so your own statements later in the same transaction keep their timeout. 0 tries once without waiting.
+     *
+     * @throws TransientStorageFailure when the lock is not obtained within `$timeout` seconds
      */
-    public static function acquireInside(Connection $connection, ?string $owner): void
+    public static function acquireInside(Connection $connection, ?string $owner, int $timeout = StorageEntityManager::OWNER_LOCK_TIMEOUT): void
     {
-        if ($owner !== null && $connection->getDatabasePlatform() instanceof PostgreSQLPlatform) {
-            $connection->executeQuery('SELECT pg_advisory_xact_lock(?)', [self::key($owner)], [Types::BIGINT]);
+        if ($owner === null || !$connection->getDatabasePlatform() instanceof PostgreSQLPlatform) {
+            return;
         }
+        $key = self::key($owner);
+        if ($timeout <= 0) {
+            // pdo_pgsql returns a bool; other drivers may return 't' / 1.
+            if (!in_array($connection->fetchOne('SELECT pg_try_advisory_xact_lock(?)', [$key], [Types::BIGINT]), [true, 1, '1', 't'], true)) {
+                throw new TransientStorageFailure(1, self::MESSAGE);
+            }
+
+            return;
+        }
+        $previous = (string) $connection->fetchOne("SELECT current_setting('lock_timeout')");
+        $connection->fetchOne("SELECT set_config('lock_timeout', ?, true)", [($timeout * 1000) . 'ms']);
+        try {
+            $connection->executeQuery('SELECT pg_advisory_xact_lock(?)', [$key], [Types::BIGINT]);
+        } catch (Throwable $e) {
+            // 55P03: the transaction (or the unit's savepoint) is aborted; its rollback also undoes the set_config().
+            if ((new TransientFailureClassifier())->isTransient($e)) {
+                throw new TransientStorageFailure(1, self::MESSAGE, $e);
+            }
+
+            throw $e;
+        }
+        $connection->fetchOne("SELECT set_config('lock_timeout', ?, true)", [$previous]);
     }
 
     /**

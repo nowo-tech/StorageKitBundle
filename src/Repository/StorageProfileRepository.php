@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Repository;
 
+use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\ORM\QueryBuilder;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
@@ -132,6 +133,25 @@ final readonly class StorageProfileRepository
         }
 
         return true;
+    }
+
+    /**
+     * Whether the instance's active row for the `storage` section (`$configName` null) or the row of config profile
+     * `$configName` exists (1.7.1, audit UH-SK-2), read with DBAL and, on MySQL / MariaDB, as a locking read
+     * (`FOR UPDATE`): a row another request inserted and has not committed yet is waited for (up to
+     * `innodb_lock_wait_timeout`; a timeout is a retry-safe conflict), never missed. Run it under the owner lock
+     * ({@see StorageEntityManager::exclusively()}) before creating the row: there `GET_LOCK()` alone is not enough when
+     * the first use runs inside your open transaction, because it is released before your commit. The rows locked are
+     * the instance's few active rows (index `scope, state`), until your transaction ends.
+     */
+    public function lockInstanceRow(?string $configName): bool
+    {
+        $connection = $this->entityManager->connection();
+        $sql        = 'SELECT id FROM ' . $this->entityManager->table(StorageProfile::class)
+            . ' WHERE scope IS NULL AND state = ? AND ' . ($configName === null ? 'config_name IS NULL' : 'config_name = ?')
+            . ($connection->getDatabasePlatform() instanceof AbstractMySQLPlatform ? ' FOR UPDATE' : '');
+
+        return $connection->fetchFirstColumn($sql, $configName === null ? [StorageProfile::STATE_ACTIVE] : [StorageProfile::STATE_ACTIVE, $configName]) !== [];
     }
 
     /**
