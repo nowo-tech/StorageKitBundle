@@ -4,6 +4,7 @@
 
 - [Planned for 2.0](#planned-for-20)
 - [Unreleased](#unreleased)
+- [To 1.7.0](#to-170)
   - [Duplicate instance rows (1.4.0–1.6.1)](#duplicate-instance-rows-140161)
 - [To 1.6.1](#to-161)
 - [To 1.6.0](#to-160)
@@ -37,6 +38,14 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
    `uploadImage()`.
 
 ## Unreleased
+
+## To 1.7.0
+
+From **1.6.1**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
 
 Next minor (1.7.0), from **1.6.x**:
 
