@@ -144,21 +144,25 @@ final class StorageMoveController extends AbstractController
         $form->handleRequest($request);
         if (!$running && $form->isSubmitted() && $form->isValid()) {
             /** @var array{provider: string|null, endpoint: string|null, public_endpoint: string|null, region: string|null, bucket: string|null, prefix: string|null, access_key: string|null, secret: string|null, path_style: bool|null} $data */
-            $data   = $form->getData();
-            $before = $this->snapshot($target);
-            $target->configure((string) $data['provider'], false, $data['endpoint'], $data['public_endpoint'], (string) $data['region'], (string) $data['bucket'], (string) $data['prefix'], (string) $data['access_key'], $data['secret'], $data['path_style'] === true);
-            if ($target->isComplete()) {
-                $fields = StorageSettingsController::changed($before, $this->snapshot($target));
+            $data      = $form->getData();
+            $configure = static function (StorageProfile $profile) use ($data): void {
+                $profile->configure((string) $data['provider'], false, $data['endpoint'], $data['public_endpoint'], (string) $data['region'], (string) $data['bucket'], (string) $data['prefix'], (string) $data['access_key'], $data['secret'], $data['path_style'] === true);
+            };
+            // 1.7: the submitted fields are checked on a copy; the target itself changes only inside the write unit.
+            $submitted = clone $target;
+            $configure($submitted);
+            if ($submitted->isComplete()) {
+                $fields = StorageSettingsController::changed($this->snapshot($target), $this->snapshot($submitted));
                 if ($data['secret'] !== null && $data['secret'] !== '') {
                     $fields[] = 'secret';
                 }
-                $this->move->saveTarget($target, $this->guard->user(), $fields);
-                $this->addFlash('success', $this->trans('move.flash.saved'));
+                $saved = $this->move->saveTarget($target, $this->guard->user(), $fields, $configure);
+                $this->addFlash($saved ? 'success' : 'error', $this->trans($saved ? 'move.flash.saved' : 'move.flash.unavailable'));
 
                 return $this->redirectToRoute(...self::route($scope));
             }
             // Root errors are not part of the scaffold's child loop: attach it to the first missing field.
-            $missing = $target->getBucket() === '' ? 'bucket' : ($target->getAccessKey() === '' ? 'access_key' : 'secret');
+            $missing = $submitted->getBucket() === '' ? 'bucket' : ($submitted->getAccessKey() === '' ? 'access_key' : 'secret');
             // @igor-ignore - Request-scoped form built in this action.
             $form->get($missing)->addError(new FormError($this->trans('profile.error.incomplete')));
         }
@@ -257,6 +261,9 @@ final class StorageMoveController extends AbstractController
             return ['error', $this->trans('move.flash.unavailable')];
         }
         $started = $this->move->start($active, $target, $actor);
+        if (!$started instanceof StorageSync) {
+            return ['error', $this->trans('move.flash.unavailable')];
+        }
 
         return ['success', $this->trans($this->move->runsInBackground() ? 'move.flash.started' : 'move.flash.started_cli', ['%from%' => $active->getUuid(), '%to%' => $target->getUuid(), '%sync%' => $started->getUuid()])];
     }
@@ -269,7 +276,9 @@ final class StorageMoveController extends AbstractController
         if (!$sync instanceof StorageSync || !$sync->isOpen()) {
             return ['error', $this->trans('move.flash.unavailable')];
         }
-        $this->move->cancel($sync, $actor);
+        if (!$this->move->cancel($sync, $actor)) {
+            return ['error', $this->trans('move.flash.unavailable')];
+        }
 
         return ['success', $this->trans('move.flash.cancelled')];
     }
@@ -292,7 +301,9 @@ final class StorageMoveController extends AbstractController
         if ($sync instanceof StorageSync && $sync->isOpen()) {
             return ['error', $this->trans('move.flash.unavailable')];
         }
-        $this->move->discard($target, $actor);
+        if (!$this->move->discard($target, $actor)) {
+            return ['error', $this->trans('move.flash.unavailable')];
+        }
 
         return ['success', $this->trans('move.flash.discarded')];
     }

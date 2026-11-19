@@ -14,12 +14,16 @@ use Doctrine\ORM\Mapping\ToOneOwningSideMapping;
 use Doctrine\Persistence\ManagerRegistry;
 use LogicException;
 use Nowo\DoctrineEncryptBundle\Configuration\Encrypted;
+use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
+use Nowo\TransactionContract\TransientStorageFailure;
+use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use ReflectionException;
 use ReflectionProperty;
 use Throwable;
 
 use function array_chunk;
 use function bin2hex;
+use function count;
 use function implode;
 use function in_array;
 use function is_array;
@@ -42,12 +46,17 @@ final readonly class StorageEntityManager
     /** Identifiers per `UPDATE … IN (…)` statement of {@see self::updateRows()} (bound-parameter limits). */
     public const UPDATE_CHUNK = 1000;
 
+    /** Default seconds {@see self::transactional()} waits for the owner lock on MySQL / MariaDB (`conflict_response.owner_lock_timeout`). */
+    public const OWNER_LOCK_TIMEOUT = 5;
+
     /**
      * @param string|null $name entity manager name
+     * @param int $ownerLockTimeout seconds to wait for the owner lock on MySQL / MariaDB
      */
     public function __construct(
         private ManagerRegistry $registry,
         private ?string $name = null,
+        private int $ownerLockTimeout = self::OWNER_LOCK_TIMEOUT,
     ) {
     }
 
@@ -212,13 +221,17 @@ final readonly class StorageEntityManager
      * host's transaction stays usable (PostgreSQL aborts a whole transaction on a failed statement); otherwise a
      * transaction of its own.
      *
+     * `$guard` (1.7, one identifier only): `[field, allowed values]`; the row is written (and aligned) only while its
+     * field still holds one of them, see {@see self::updateIf()}.
+     *
      * @param class-string $class bundle entity class
      * @param list<int|string> $ids identifiers
      * @param array<string, mixed> $values field name => value
+     * @param array{0: string, 1: list<string>}|null $guard
      *
      * @throws LogicException when a field is unknown, an identifier or encrypted
      */
-    public function updateRows(string $class, array $ids, array $values): int
+    public function updateRows(string $class, array $ids, array $values, ?array $guard = null): int
     {
         if ($ids === [] || $values === []) {
             return 0;
@@ -246,15 +259,28 @@ final readonly class StorageEntityManager
         $idType  = (string) $metadata->getTypeOfField($idField);
         $sql     = 'UPDATE ' . $quoteStrategy->getTableName($metadata, $platform) . ' SET ' . implode(', ', $set)
             . ' WHERE ' . $quoteStrategy->getColumnName($idField, $metadata, $platform) . ' IN (?)';
-        $idsType = in_array($idType, [Types::INTEGER, Types::BIGINT, Types::SMALLINT], true) ? ArrayParameterType::INTEGER : ArrayParameterType::STRING;
-        $changed = $this->atomically(static function (Connection $connection) use ($sql, $ids, $parameters, $types, $idsType): int {
+        $idsType     = in_array($idType, [Types::INTEGER, Types::BIGINT, Types::SMALLINT], true) ? ArrayParameterType::INTEGER : ArrayParameterType::STRING;
+        $guardParams = [];
+        $guardTypes  = [];
+        if ($guard !== null) {
+            if (count($ids) !== 1 || !$metadata->hasField($guard[0]) || $guard[1] === []) {
+                throw new LogicException(sprintf('%s::$%s is not a mapped field to guard a write with, or more than one row was given.', $class, $guard[0]));
+            }
+            $sql .= ' AND ' . $quoteStrategy->getColumnName($guard[0], $metadata, $platform) . ' IN (?)';
+            $guardParams = [$guard[1]];
+            $guardTypes  = [ArrayParameterType::STRING];
+        }
+        $changed = $this->atomically(static function (Connection $connection) use ($sql, $ids, $parameters, $types, $idsType, $guardParams, $guardTypes): int {
             $changed = 0;
             foreach (array_chunk($ids, self::UPDATE_CHUNK) as $chunk) {
-                $changed += (int) $connection->executeStatement($sql, [...$parameters, $chunk], [...$types, $idsType]);
+                $changed += (int) $connection->executeStatement($sql, [...$parameters, $chunk, ...$guardParams], [...$types, $idsType, ...$guardTypes]);
             }
 
             return $changed;
         }, 'update');
+        if ($guard !== null && $changed === 0) {
+            return 0;
+        }
         $unitOfWork = $manager->getUnitOfWork();
         foreach ($ids as $id) {
             $managed = $unitOfWork->tryGetById($id, $metadata->rootEntityName);
@@ -308,6 +334,138 @@ final readonly class StorageEntityManager
         }
 
         return $result;
+    }
+
+    /**
+     * Runs `$work` as one write unit (1.7, REQ-RUNTIME-003 rules 1–3) through transaction-doctrine's runner: one
+     * transaction, the manager flushed before the commit, the connection's nesting level repaired after a failure.
+     *
+     * - A dedicated manager (`doctrine.entity_manager` names one other than the default) is the bundle's own:
+     *   {@see DoctrineTransactionRunner::forEntityManager()} resets it after a storage failure.
+     * - With the host's manager (null, the default and unchanged) the runner is the DBAL one
+     *   ({@see DoctrineTransactionRunner::forConnection()}) and the unit flushes the manager itself, as these pages did
+     *   before 1.7 (REQ-ARCH-001 rule 6, major only; use a dedicated manager to keep your pending changes out). An
+     *   open host manager is never cleared or reset; one a failed flush closed is replaced through the registry.
+     *   `forHostEntityManager()` is not used: DoctrineEncrypt decrypts the bucket secret in place after loading, so a
+     *   loaded profile always looks changed to its pending-changes check.
+     *
+     * `$ownerLock` (an owner key, {@see StorageProfileRepository::ownerLock()}) serializes the writes of one storage
+     * owner ({@see OwnerLock}: MySQL / MariaDB `GET_LOCK()` waits up to `conflict_response.owner_lock_timeout`
+     * seconds, PostgreSQL `pg_advisory_xact_lock()` up to the session's `lock_timeout`). A lock not obtained in time
+     * throws {@see TransientStorageFailure}: the bundle routes answer CONFLICT_001.
+     *
+     * A deadlock, lock wait timeout or serialization failure is rethrown as TransientStorageFailure (the storage error
+     * as previous); anything else unchanged.
+     *
+     * @template T
+     *
+     * @param callable(): T $work
+     *
+     * @throws TransientStorageFailure when the storage failed transiently or the owner lock was not obtained in time
+     *
+     * @return T
+     */
+    public function transactional(callable $work, ?string $ownerLock = null): mixed
+    {
+        $manager    = $this->manager();
+        $connection = $manager->getConnection();
+        $own        = $this->ownsManager();
+        $runner     = $own
+            ? DoctrineTransactionRunner::forEntityManager($manager, $this->registry, $this->name)
+            : DoctrineTransactionRunner::forConnection($connection);
+        $named = OwnerLock::acquire($connection, $ownerLock, $this->ownerLockTimeout);
+        try {
+            // @igor-ignore - The closure runs synchronously inside the runner; nothing is kept on the service.
+            return $runner->run(static function () use ($connection, $manager, $own, $ownerLock, $work): mixed {
+                OwnerLock::acquireInside($connection, $ownerLock);
+                $result = $work();
+                if (!$own) {
+                    $manager->flush();
+                }
+
+                return $result;
+            });
+        } catch (Throwable $e) {
+            // A failed flush closes the manager: only a closed one is replaced, an open host manager is never reset.
+            $this->resetIfClosed();
+
+            throw $e;
+        } finally {
+            OwnerLock::release($connection, $named);
+        }
+    }
+
+    /**
+     * Runs `$work` as one unit ({@see self::atomically()}: a savepoint inside your transaction, else a transaction of
+     * its own) under the owner lock of `$ownerLock` ({@see OwnerLock}), flushing no manager (1.7, rule 4): for the rows
+     * the bundle creates on first use from host-called code (the instance's `storage` section row, a config profile's
+     * row), so two first uploads at once create one row. Read the row again inside `$work` before creating it.
+     *
+     * @template T
+     *
+     * @param callable(): T $work
+     *
+     * @throws TransientStorageFailure when the owner lock is not obtained in time
+     *
+     * @return T
+     */
+    public function exclusively(callable $work, string $ownerLock): mixed
+    {
+        $connection = $this->connection();
+        $named      = OwnerLock::acquire($connection, $ownerLock, $this->ownerLockTimeout);
+        try {
+            // @igor-ignore - The closure runs synchronously inside the unit; nothing is kept on the service.
+            return $this->atomically(static function (Connection $connection) use ($ownerLock, $work): mixed {
+                OwnerLock::acquireInside($connection, $ownerLock);
+
+                return $work();
+            }, 'owner');
+        } finally {
+            OwnerLock::release($connection, $named);
+        }
+    }
+
+    /**
+     * Writes the current value of `$fields` of one bundle entity only while `$guardField` still holds one of
+     * `$expected` in the database (1.7, rule 4: a compare-and-set, so a status another request changed meanwhile is
+     * never overwritten). True when the row was written; the managed instance is then aligned like
+     * {@see self::update()}. False when the guard no longer matched: nothing was written and the entity is refreshed
+     * from the database (its unsaved changes are dropped). No manager is flushed.
+     *
+     * @param list<string> $fields mapped field names (never an encrypted one)
+     * @param list<string> $expected values of `$guardField` the write is allowed from
+     *
+     * @throws LogicException when the entity has no identifier yet, or a field is unknown or encrypted
+     */
+    public function updateIf(object $entity, array $fields, string $guardField, array $expected): bool
+    {
+        $manager  = $this->manager();
+        $metadata = $manager->getClassMetadata($entity::class);
+        $id       = $metadata->getIdentifierValues($entity)[$metadata->getSingleIdentifierFieldName()] ?? null;
+        if (!is_int($id) && !is_string($id)) {
+            throw new LogicException(sprintf('%s has no identifier yet: insert it first.', $entity::class));
+        }
+        $values = [];
+        foreach ($fields as $field) {
+            $values[$field] = $metadata->getFieldValue($entity, $field);
+        }
+        if ($this->updateRows($entity::class, [$id], $values, [$guardField, $expected]) === 1) {
+            return true;
+        }
+        if ($manager->contains($entity)) {
+            $manager->refresh($entity);
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the bundle entities live on a manager of their own (`doctrine.entity_manager` names one other than the
+     * host's default): only then may a failed unit reset it.
+     */
+    public function ownsManager(): bool
+    {
+        return $this->name !== null && $this->name !== $this->registry->getDefaultManagerName();
     }
 
     /**

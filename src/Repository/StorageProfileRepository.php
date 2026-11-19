@@ -10,6 +10,7 @@ use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Identifier\ExactIdentifier;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
+use Nowo\StorageKitBundle\Scope\StorageScope;
 
 use function array_filter;
 use function array_values;
@@ -107,6 +108,39 @@ final readonly class StorageProfileRepository
             ->getOneOrNullResult();
 
         return $profile;
+    }
+
+    /**
+     * Whether `$profile` is still the owner's profile in `$state` (1.7, read with DBAL, so a change committed by
+     * another request is seen inside a write unit): a saved profile still holds that state; a new one (no id) has no
+     * database profile of the owner in that state yet. Run it under the owner lock ({@see self::ownerLock()}).
+     */
+    public function isCurrent(StorageProfile $profile, ?string $scope, string $state): bool
+    {
+        $connection = $this->entityManager->connection();
+        $table      = $this->entityManager->table(StorageProfile::class);
+        $id         = $profile->getId();
+        if ($id !== null) {
+            return $connection->fetchOne('SELECT state FROM ' . $table . ' WHERE id = ?', [$id]) === $state;
+        }
+        // One statement, re-checked byte for byte: a look-alike scope's profile does not count (REQ-SEC-006).
+        $exact = $scope === null ? 'scope IS NULL' : 'scope = ? AND ' . ExactIdentifier::sql($connection->getDatabasePlatform(), 'scope') . ' = ?';
+        foreach ($connection->fetchFirstColumn('SELECT scope FROM ' . $table . ' WHERE state = ? AND config_name IS NULL AND ' . $exact, $scope === null ? [$state] : [$state, $scope, $scope]) as $stored) {
+            if ($scope === null || ExactIdentifier::same($stored, $scope)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The key of the lock that serializes the writes of one owner's profiles and syncs (1.7,
+     * {@see StorageEntityManager::transactional()}): `owner/instance` or `owner/scope/<key>`.
+     */
+    public static function ownerLock(?string $scope): string
+    {
+        return 'owner/' . StorageScope::suffix($scope);
     }
 
     /**

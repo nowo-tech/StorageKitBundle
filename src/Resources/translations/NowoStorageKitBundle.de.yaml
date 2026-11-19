@@ -14,6 +14,7 @@ settings:
         edit: 'Verbindung bearbeiten'
     flash:
         saved: 'Die Speichereinstellungen wurden gespeichert.'
+        changed: 'Jemand anderes hat diesen Bucket inzwischen geändert. Prüfen Sie ihn und speichern Sie erneut.'
     section:
         config: 'Konfiguration'
     field:
@@ -191,3 +192,6 @@ section:
         off: 'Kein Anbieter gewählt: Bild-Uploads sind aus.'
         incomplete: 'Beim gewählten Anbieter fehlt ein Feld (Bucket, Zugriffsschlüssel, geheimer Schlüssel oder Endpunkt) oder ein Feld ist ungültig: Uploads bleiben aus.'
         test_failed: 'Der letzte Verbindungstest ist fehlgeschlagen. Prüfen Sie die Felder und führen Sie Verbindung testen erneut aus.'
+conflict:
+    retry: 'Dieselben Daten wurden gleichzeitig geändert. Versuchen Sie es erneut.'
+    committed: 'Ein Teil der Anfrage wurde vor einem Konflikt gespeichert. Laden Sie neu, bevor Sie es erneut versuchen.'

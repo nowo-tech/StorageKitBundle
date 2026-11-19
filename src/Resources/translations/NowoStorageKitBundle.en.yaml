@@ -14,6 +14,7 @@ settings:
         edit: 'Edit connection'
     flash:
         saved: 'The storage settings were saved.'
+        changed: 'Someone else changed this bucket meanwhile. Review it and save again.'
     section:
         config: 'Configuration'
     field:
@@ -191,3 +192,6 @@ section:
         off: 'No provider is selected: image uploads are off.'
         incomplete: 'The selected provider is missing a field (bucket, access key, secret key or endpoint), or a field is not valid: uploads stay off.'
         test_failed: 'The last connection test failed. Check the fields and run Test connection again.'
+conflict:
+    retry: 'The same data was being changed at the same time. Try again.'
+    committed: 'Part of the request was saved before a conflict. Reload before trying again.'

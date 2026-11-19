@@ -20,6 +20,7 @@ compiled; the defaults are the safe choice. Source of truth: `src/DependencyInje
 - [doctrine](#doctrine)
   - [Standard Symfony host](#standard-symfony-host)
   - [DDD / hexagonal host (and new installs)](#ddd--hexagonal-host-and-new-installs)
+- [conflict_response (1.7)](#conflict_response-17)
 - [web_ui](#web_ui)
 - [security](#security)
 - [The `storage` Instance Settings section](#the-storage-instance-settings-section)
@@ -82,6 +83,10 @@ nowo_storage_kit:
     doctrine:
         table_prefix: ''
         entity_manager: null      # 1.5: a dedicated manager name (recommended for new installs; the 2.0 default)
+    conflict_response:            # 1.7 (REQ-RUNTIME-003)
+        status: 409               # or 503
+        retry_after: 1            # seconds, CONFLICT_001 answers only
+        owner_lock_timeout: 5     # seconds (MySQL / MariaDB GET_LOCK; PostgreSQL uses lock_timeout)
     web_ui:
         enabled: true
         path_prefix: /admin/storage
@@ -278,6 +283,18 @@ nowo_storage_kit:
 No bundle write flushes your manager then, admin and CLI included. Use the same connection, so uploads and
 references join your transactions; reference the files by `uuid`, never with a Doctrine relation (see
 [USAGE](USAGE.md#a-dedicated-entity-manager-15)).
+
+## conflict_response (1.7)
+
+The answer of the bundle's own routes (Storage / Move pages, upload, download) to a lock conflict, deadlock, lock wait
+timeout or serialization failure (REQ-RUNTIME-003 rule 6). Write paths, codes and residual risks:
+[CONCURRENCY](CONCURRENCY.md).
+
+| Key | Default | Validation / effect |
+| --- | --- | --- |
+| `status` | `409` | `409` or `503`. Every conflict answer carries `X-Conflict-Code`: `CONFLICT_001` (nothing committed, retry) or `CONFLICT_002` (part committed, read again). |
+| `retry_after` | `1` | 0–3600 seconds, sent as `Retry-After` on `CONFLICT_001` answers only. |
+| `owner_lock_timeout` | `5` | 0–60 seconds a Storage / Move write waits for another write of the same owner on MySQL / MariaDB (`GET_LOCK`); then `CONFLICT_001`. PostgreSQL waits up to the session's `lock_timeout` (set one: its default 0 waits without limit). |
 
 ## web_ui
 

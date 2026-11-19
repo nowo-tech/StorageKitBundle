@@ -60,6 +60,9 @@ final readonly class StorageSyncer
     /** Objects listed from the target bucket by {@see self::check()} at most. */
     public const CHECK_SCAN_LIMIT = 100_000;
 
+    /** Fields a status change writes (1.7: with a compare-and-set on the status, never with a flush). */
+    public const STATUS_FIELDS = ['status', 'error', 'finishedAt', 'updatedAt'];
+
     private LockFactory $locks;
 
     /**
@@ -122,14 +125,18 @@ final readonly class StorageSyncer
     }
 
     /**
-     * Stops an open sync.
+     * Stops an open sync. 1.7 (REQ-RUNTIME-003 rule 4): the status is written only while the database still holds
+     * queued or running, so a runner that completed or failed it meanwhile is not overwritten; false then (the entity
+     * is refreshed). No manager is flushed.
      */
-    public function cancel(StorageSync $sync): void
+    public function cancel(StorageSync $sync): bool
     {
-        if ($sync->isOpen()) {
-            $sync->cancel();
-            $this->entityManager->manager()->flush();
+        if (!$sync->isOpen()) {
+            return false;
         }
+        $sync->cancel();
+
+        return $this->entityManager->updateIf($sync, self::STATUS_FIELDS, 'status', [StorageSync::QUEUED, StorageSync::RUNNING]);
     }
 
     /**
@@ -202,7 +209,7 @@ final readonly class StorageSyncer
             $to   = $this->connect($sync->getTo());
         } catch (RuntimeException $e) {
             $sync->fail($e->getMessage());
-            $manager->flush();
+            $this->finish($sync);
 
             return true;
         }
@@ -220,7 +227,7 @@ final readonly class StorageSyncer
             $files = $this->nextBatch($sync);
             if ($files === []) {
                 $sync->complete();
-                $manager->flush();
+                $this->finish($sync);
 
                 return true;
             }
@@ -231,7 +238,7 @@ final readonly class StorageSyncer
                     [$reason, $status] = ErrorScrubber::reason($e);
                     $this->logger->warning('Storage move {sync} stopped at file {file}: {error}', ['sync' => $sync->getUuid(), 'file' => $file['uuid'], 'error' => ErrorScrubber::message($e, $from->settings(), $to->settings())]);
                     $sync->fail($file['uuid'] . ': ' . ($e instanceof SyncFailure ? $e->getMessage() : $reason . ($status === null ? '' : ' ' . $status)));
-                    $manager->flush();
+                    $this->finish($sync);
 
                     return true;
                 }
@@ -244,11 +251,21 @@ final readonly class StorageSyncer
             }
             if ($deadline !== null && time() >= $deadline) {
                 $sync->queue();
-                $manager->flush();
+                $this->finish($sync);
 
                 return true;
             }
         }
+    }
+
+    /**
+     * Writes the runner's status change of the slice (completed, failed, queued for the next slice; 1.7, rule 4) only
+     * while the database still says running: a cancel committed by another request meanwhile wins (the entity is
+     * refreshed and stays cancelled). The progress was flushed after each file, so nothing else is pending.
+     */
+    private function finish(StorageSync $sync): void
+    {
+        $this->entityManager->updateIf($sync, self::STATUS_FIELDS, 'status', [StorageSync::RUNNING]);
     }
 
     /**

@@ -14,6 +14,7 @@ settings:
         edit: 'Modifier la connexion'
     flash:
         saved: 'Les paramètres de stockage ont été enregistrés.'
+        changed: 'Quelqu’un d’autre a modifié ce bucket entre-temps. Vérifiez-le et enregistrez à nouveau.'
     section:
         config: 'Configuration'
     field:
@@ -191,3 +192,6 @@ section:
         off: 'Aucun fournisseur n’est choisi : les envois d’images sont désactivés.'
         incomplete: 'Il manque un champ au fournisseur choisi (bucket, clé d’accès, clé secrète ou endpoint), ou un champ n’est pas valide : les envois restent désactivés.'
         test_failed: 'Le dernier test de connexion a échoué. Vérifiez les champs et relancez Tester la connexion.'
+conflict:
+    retry: 'Les mêmes données étaient modifiées en même temps. Réessayez.'
+    committed: 'Une partie de la requête a été enregistrée avant un conflit. Rechargez avant de réessayer.'

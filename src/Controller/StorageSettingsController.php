@@ -153,8 +153,8 @@ final class StorageSettingsController extends AbstractController
         if ($form instanceof FormInterface) {
             $form->handleRequest($request);
             if ($form->isSubmitted() && $form->isValid()) {
-                $this->save($form, $profile, $scope);
-                $this->addFlash('success', $this->trans('settings.flash.saved'));
+                $saved = $this->save($form, $profile, $scope);
+                $this->addFlash($saved ? 'success' : 'error', $this->trans($saved ? 'settings.flash.saved' : 'settings.flash.changed'));
 
                 return $this->redirectToRoute(...self::route($scope));
             }
@@ -188,34 +188,51 @@ final class StorageSettingsController extends AbstractController
     }
 
     /**
+     * One write unit under the owner lock (1.7, REQ-RUNTIME-003): the owner's active profile is read again inside it,
+     * so two first saves of the same owner never create two active profiles, and a profile switched away meanwhile is
+     * not edited. False (nothing written) when the owner changed since the page was read; the audit event is recorded
+     * after the commit.
+     *
      * @param FormInterface<mixed> $form
      */
-    private function save(FormInterface $form, StorageProfile $profile, ?string $scope): void
+    private function save(FormInterface $form, StorageProfile $profile, ?string $scope): bool
     {
         /** @var array{provider: string|null, enabled: bool|null, endpoint: string|null, public_endpoint: string|null, region: string|null, bucket: string|null, prefix: string|null, access_key: string|null, secret: string|null, path_style: bool|null} $data */
-        $data   = $form->getData();
-        $before = $this->snapshot($profile);
-        $profile->configure(
-            (string) $data['provider'],
-            $data['enabled'] === true,
-            $data['endpoint'],
-            $data['public_endpoint'],
-            (string) $data['region'],
-            (string) $data['bucket'],
-            (string) $data['prefix'],
-            (string) $data['access_key'],
-            $data['secret'],
-            $data['path_style'] === true,
-        );
-        $changed = self::changed($before, $this->snapshot($profile));
-        if ($data['secret'] !== null && trim($data['secret']) !== '') {
-            $changed[] = 'secret';
-        }
-        $manager = $this->entityManager->manager();
-        $manager->persist($profile);
-        $manager->flush();
+        $data = $form->getData();
+        // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
+        $changed = $this->entityManager->transactional(function () use ($data, $profile, $scope): ?array {
+            if (!$this->profiles->isCurrent($profile, $scope, StorageProfile::STATE_ACTIVE)) {
+                return null;
+            }
+            $before = $this->snapshot($profile);
+            $profile->configure(
+                (string) $data['provider'],
+                $data['enabled'] === true,
+                $data['endpoint'],
+                $data['public_endpoint'],
+                (string) $data['region'],
+                (string) $data['bucket'],
+                (string) $data['prefix'],
+                (string) $data['access_key'],
+                $data['secret'],
+                $data['path_style'] === true,
+            );
+            $changed = self::changed($before, $this->snapshot($profile));
+            if ($data['secret'] !== null && trim($data['secret']) !== '') {
+                $changed[] = 'secret';
+            }
+            // @igor-ignore - Entity manager of the current unit of work (reset between requests by Doctrine).
+            $this->entityManager->manager()->persist($profile);
+
+            return $changed;
+        }, StorageProfileRepository::ownerLock($scope));
         $this->resolver->reset();
+        if ($changed === null) {
+            return false;
+        }
         $this->audit->record(StorageAuditEvent::PROFILE_SAVED, $scope, $this->guard->user(), ['profile' => $profile->getUuid(), 'fields' => implode(',', $changed)]);
+
+        return true;
     }
 
     private function test(Request $request, ?string $scope): RedirectResponse

@@ -4,6 +4,7 @@
 
 - [Planned for 2.0](#planned-for-20)
 - [Unreleased](#unreleased)
+  - [Duplicate instance rows (1.4.0–1.6.1)](#duplicate-instance-rows-140161)
 - [To 1.6.1](#to-161)
 - [To 1.6.0](#to-160)
 - [To 1.5.3](#to-153)
@@ -36,6 +37,91 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
    `uploadImage()`.
 
 ## Unreleased
+
+Next minor (1.7.0), from **1.6.x**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
+
+No schema change. New dependencies `nowo-tech/transaction-contract` ^1.0 and `nowo-tech/transaction-doctrine` ^1.6.1
+(installed with the bundle; you do not have to register transaction-doctrine's own bundle). Behaviour changes
+(REQ-RUNTIME-003, [CONCURRENCY](CONCURRENCY.md)):
+
+1. **Lock conflicts answer 409 instead of 500.** A deadlock, lock wait timeout or serialization failure on the Storage /
+   Move pages, the upload endpoint or the download endpoint answers **409** with `X-Conflict-Code: CONFLICT_001` and
+   `Retry-After` (nothing committed: retry), or `CONFLICT_002` without `Retry-After` (part of the request committed:
+   reload). Pages go through your error page (an `HttpException`); the upload JSON keeps `error` / `message` and adds
+   `code` (`error` is `conflict`). To keep a 503, set `nowo_storage_kit.conflict_response.status: 503`. Unique
+   violations and lost connections are not mapped and stay errors. Your own routes are never answered by the bundle.
+2. **Uploads rethrow lock conflicts.** `ImageUploaderInterface::uploadImage()` / `SquareImageUploaderInterface`
+   (and the deprecated `ImageUploader::upload()`) used to turn every insert failure into `UploadRefused` (`storage`,
+   503). A deadlock or lock wait timeout of the insert is now rethrown as the DBAL exception (a `RetryableException`),
+   after the objects written are deleted again, so your transaction can roll back and replay. Catch it (or let
+   transaction-doctrine / your retry layer handle it) if you call the uploader from your own code.
+3. **Owner lock on PostgreSQL.** Storage / Move writes take `pg_advisory_xact_lock()` and wait up to the session's
+   `lock_timeout`. With the PostgreSQL default (0: no limit) a stuck writer makes the next one wait; set a
+   `lock_timeout` on the connection (for example 5s). On MySQL / MariaDB the wait is `conflict_response.owner_lock_timeout`
+   (default 5 seconds, `GET_LOCK`).
+4. **`StorageMove` / `StorageSyncer` return types (public services, see
+   [CONFIGURATION](CONFIGURATION.md#container-parameters-and-services)).** BC note for code that calls them directly:
+   - `StorageMove::saveTarget()`, `cancel()`, `discard()` and `StorageSyncer::cancel()`: `void` → `bool`;
+   - `StorageMove::start()`: `StorageSync` → `?StorageSync`; callers must handle `null`;
+   - `false` / `null` mean **nothing was written**: the owner changed meanwhile (another target saved, the target
+     switched to or discarded, a sync already open, or a sync that completed or failed before the cancel). The pages
+     show "This action is not available now.";
+   - `saveTarget()` takes an optional fourth argument, a callable that applies the form to the target inside the unit.
+5. **Default entity manager.** With `doctrine.entity_manager: null` the Storage / Move units still flush your default
+   manager (as before; REQ-ARCH-001 rule 6 changes in 2.0) but inside one transaction-doctrine unit; a failed flush no
+   longer leaves a closed manager behind (it is replaced) and an open one is never cleared or reset. The switch and
+   `nowo:storage-kit:adopt-instance-bucket` no longer use `wrapInTransaction()`, which closed it on any failure. The
+   bundle does not use transaction-doctrine's `forHostEntityManager()` (it would throw `LogicException` on the
+   decrypted bucket secret, which always looks like a pending change); with a dedicated manager the units use
+   `forEntityManager()`.
+
+### Duplicate instance rows (1.4.0–1.6.1)
+
+From 1.4.0 to 1.6.1 two first uploads at the same time (or the first selection of a provider in the `storage`
+section racing an upload) could create two active instance rows that read the `storage` section; config profiles
+could get two rows the same way. 1.7 creates these rows once, under a lock, but does not repair existing duplicates.
+Check once after upgrading (`<prefix>` is `doctrine.table_prefix`, empty by default):
+
+```sql
+-- More than one row: the instance has duplicate active rows
+SELECT id, source FROM <prefix>storage_kit_profile
+ WHERE scope IS NULL AND config_name IS NULL AND state = 'active' ORDER BY id;
+
+-- Config profiles with more than one row
+SELECT config_name, COUNT(*) FROM <prefix>storage_kit_profile
+ WHERE config_name IS NOT NULL GROUP BY config_name HAVING COUNT(*) > 1;
+
+-- Files per row
+SELECT profile_id, COUNT(*) FROM <prefix>storage_kit_file GROUP BY profile_id;
+```
+
+**No switch since the duplicate** (no `retired` instance row newer than the extra one): both rows read the same
+section, so re-pointing is safe. Keep the oldest active row (`<keep>`, lowest id) and, for each extra row `<extra>`:
+
+```sql
+UPDATE <prefix>storage_kit_file SET profile_id = <keep> WHERE profile_id = <extra>;
+DELETE FROM <prefix>storage_kit_profile WHERE id = <extra>;
+```
+
+**A switch happened since the duplicate:** the switch moved only the oldest row's files; the extra row still reads
+the section, which now names the NEW bucket, but its files are still in the OLD bucket (they do not download). The
+old connection is kept on the `retired` instance row the switch created (`source = 'database'`, `state = 'retired'`,
+the one whose bucket is the old one). Re-point the extra row's files to that retired row `<retired>`, delete the extra
+row, then run a new move (Move page or `nowo:storage-kit:sync`) to copy them to the new bucket and switch again:
+
+```sql
+UPDATE <prefix>storage_kit_file SET profile_id = <retired> WHERE profile_id = <extra>;
+DELETE FROM <prefix>storage_kit_profile WHERE id = <extra>;
+```
+
+Do not forget previous buckets (`nowo:storage-kit:forget-retired`) before that move has completed.
+
+**Config-profile duplicates** are harmless: every row of a `config_name` resolves to the same `profiles` entry.
+Clean-up only: re-point the files of the extra rows to the oldest row of that name and delete the extra rows, as above.
 
 ## To 1.6.1
 

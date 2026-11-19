@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\DependencyInjection;
 
+use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Lifecycle\FilePurger;
 use Nowo\StorageKitBundle\MessageHandler\RunStorageSyncHandler;
 use Nowo\StorageKitBundle\Profile\ConfigProfiles;
@@ -13,6 +14,7 @@ use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Ui\StorageKitPages;
 use Nowo\StorageKitBundle\Upload\ImageProcessor;
 use Nowo\StorageKitBundle\Upload\SquareImageProcessor;
+use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
@@ -214,6 +216,29 @@ final class Configuration implements ConfigurationInterface
                                 ->ifTrue(static fn (mixed $v): bool => $v !== null && (!is_string($v) || preg_match('/^\\w+$/', $v) !== 1))
                                 ->thenInvalid('nowo_storage_kit.doctrine.entity_manager must be an entity manager name or null, got %s.')
                             ->end()
+                        ->end()
+                    ->end()
+                ->end()
+                ->arrayNode('conflict_response')
+                    ->info('REQ-RUNTIME-003 rule 6 (1.7): the answer of the bundle\'s own routes (Storage / Move pages, upload, download) to a lock conflict, deadlock or serialization failure: X-Conflict-Code CONFLICT_001 (with Retry-After) or CONFLICT_002 (part committed, no Retry-After).')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->enumNode('status')
+                            ->info('409 (platform default) or 503 (hosts that keep a Service Unavailable answer).')
+                            ->values([ConflictResponsePolicy::STATUS_CONFLICT, ConflictResponsePolicy::STATUS_SERVICE_UNAVAILABLE])
+                            ->defaultValue(ConflictResponsePolicy::STATUS_CONFLICT)
+                        ->end()
+                        ->integerNode('retry_after')
+                            ->info('Retry-After seconds of a CONFLICT_001 answer.')
+                            ->defaultValue(ConflictResponsePolicy::DEFAULT_RETRY_AFTER)
+                            ->min(0)
+                            ->max(3600)
+                        ->end()
+                        ->integerNode('owner_lock_timeout')
+                            ->info('Seconds a Storage / Move page write waits for another write of the same owner (MySQL / MariaDB GET_LOCK; PostgreSQL waits up to its lock_timeout) before answering CONFLICT_001.')
+                            ->defaultValue(StorageEntityManager::OWNER_LOCK_TIMEOUT)
+                            ->min(0)
+                            ->max(60)
                         ->end()
                     ->end()
                 ->end()

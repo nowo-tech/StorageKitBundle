@@ -7,6 +7,7 @@ namespace Nowo\StorageKitBundle\Upload;
 use DateTimeImmutable;
 use Nowo\StorageKitBundle\Audit\AuditRecorder;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\StorageKitBundle\Concurrency\StorageConflicts;
 use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
 use Nowo\StorageKitBundle\Context\SquareImageContextInterface;
@@ -187,6 +188,11 @@ final readonly class ImageUploader implements ImageUploaderInterface, SquareImag
             $this->entityManager->insert($file);
         } catch (Throwable $e) {
             $this->discard($connection, $written);
+            if (StorageConflicts::isConflict($e)) {
+                // 1.7 (REQ-RUNTIME-003 rule 8): a deadlock / lock wait on the insert is rethrown, never swallowed as a
+                // bucket failure: the objects are gone again, so the upload endpoint answers CONFLICT_001 (retry).
+                throw $e;
+            }
             $this->logger->warning('Image upload failed: {error}', ['error' => ErrorScrubber::message($e, $settings)]);
 
             throw new UploadRefused(UploadRefused::STORAGE);

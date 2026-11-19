@@ -37,6 +37,7 @@ use Nowo\StorageKitBundle\Download\StoredImageResolverInterface;
 use Nowo\StorageKitBundle\EventListener\InstanceSettingsListener;
 use Nowo\StorageKitBundle\EventListener\RequestBoundaryListener;
 use Nowo\StorageKitBundle\EventListener\StorageKitAccessListener;
+use Nowo\StorageKitBundle\EventListener\StorageKitConflictListener;
 use Nowo\StorageKitBundle\Form\Extension\StorageSettingsSectionTypeExtension;
 use Nowo\StorageKitBundle\Form\StorageProfileType;
 use Nowo\StorageKitBundle\Http\StorageCspSources;
@@ -90,6 +91,7 @@ use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\SquareImageProcessor;
 use Nowo\StorageKitBundle\Upload\SquareImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
+use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Console\ConsoleEvents;
 use Symfony\Component\DependencyInjection\Argument\IteratorArgument;
@@ -217,7 +219,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $config = $this->processConfiguration(new Configuration(), $configs);
         $this->assertLiteralBooleans($config);
 
-        /* @var array{profiles: array<string, array{dsn: string|null, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string|null, prefix: string, access_key: string|null, secret: string|null, path_style: bool, delivery: string}>, config_profile_provider: string|null, instance_profile: string|null, uri_scheme: string, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, upload: array{enabled: bool, path_prefix: string, access_roles: list<string>, max_bytes: int, max_pixels: int, variants: array<string, int>, square: array{max_bytes: int, max_pixels: int, size: int}, rate_limit: int, rate_interval: string}, download: array{url_ttl: int, disposition: string}, purge: array{retention_days: int, batch_size: int, max_batches: int}, sync: array{batch_size: int, slice_seconds: int, stale_seconds: int}, scopes: array{enabled: bool, resolver: string|null, access_checker: string|null, path_prefix: string}, limits: array{upload_limit: string|null}, personal_data: array{uploader_key_resolver: string|null, user_provider: string}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
+        /* @var array{profiles: array<string, array{dsn: string|null, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string|null, prefix: string, access_key: string|null, secret: string|null, path_style: bool, delivery: string}>, config_profile_provider: string|null, instance_profile: string|null, uri_scheme: string, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, upload: array{enabled: bool, path_prefix: string, access_roles: list<string>, max_bytes: int, max_pixels: int, variants: array<string, int>, square: array{max_bytes: int, max_pixels: int, size: int}, rate_limit: int, rate_interval: string}, download: array{url_ttl: int, disposition: string}, purge: array{retention_days: int, batch_size: int, max_batches: int}, sync: array{batch_size: int, slice_seconds: int, stale_seconds: int}, scopes: array{enabled: bool, resolver: string|null, access_checker: string|null, path_prefix: string}, limits: array{upload_limit: string|null}, personal_data: array{uploader_key_resolver: string|null, user_provider: string}, doctrine: array{table_prefix: string, entity_manager: string|null}, conflict_response: array{status: int, retry_after: int, owner_lock_timeout: int}, web_ui: array{enabled: bool, path_prefix: string, layout_template: string|null, templates: array<string, string>}, security: array{access_roles: list<string>, access_checker: string|null, allow_unauthenticated: bool}} $config */
         if (!$this->hasBundle($container, 'NowoDoctrineEncryptBundle') && !$container->hasExtension('nowo_doctrine_encrypt')) {
             throw new LogicException('NowoStorageKitBundle requires nowo-tech/doctrine-encrypt-bundle (bucket secrets are encrypted at rest): register Nowo\DoctrineEncryptBundle\NowoDoctrineEncryptBundle in config/bundles.php.');
         }
@@ -241,6 +243,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $this->registerLifecycle($container, $config);
         $this->registerAccess($container, $config);
         $this->registerHttp($container, $config);
+        $this->registerConflictResponse($container, $config);
 
         // 1.4 (FrankenPHP worker, kernel kept alive): the memos are cleared at the request boundary too, not only by
         // the services resetter (kernel.reset).
@@ -278,6 +281,24 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
     }
 
     /**
+     * 1.7 (REQ-RUNTIME-003 rule 6): the conflict answer of the bundle's own routes (409 or 503, Retry-After,
+     * X-Conflict-Code).
+     *
+     * @param array<string, mixed> $config
+     */
+    private function registerConflictResponse(ContainerBuilder $container, array $config): void
+    {
+        /** @var array{conflict_response: array{status: int, retry_after: int}} $config */
+        $conflict = $config['conflict_response'];
+        $container->setDefinition(StorageKitConflictListener::class, (new Definition(StorageKitConflictListener::class, [
+            new Definition(ConflictResponsePolicy::class, [$conflict['status'], $conflict['retry_after']]),
+            new Reference('translator', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]))
+            ->setPublic(true)
+            ->addTag('kernel.event_listener', ['event' => KernelEvents::EXCEPTION, 'priority' => -64]));
+    }
+
+    /**
      * Default FormKit profile of the bundle forms: bundle translation domain, no auto help / placeholder keys, no
      * framework classes (the UiKit scaffolds paint the fields through their slots, REQ-UI-003).
      *
@@ -300,13 +321,13 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
      */
     private function registerStorage(ContainerBuilder $container, array $config): void
     {
-        /** @var array{profiles: array<string, array<string, mixed>>, config_profile_provider: string|null, instance_profile: string|null, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, scopes: array{enabled: bool, resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, web_ui: array{enabled: bool}} $config */
+        /** @var array{profiles: array<string, array<string, mixed>>, config_profile_provider: string|null, instance_profile: string|null, endpoints: array{guard_instance_profile: bool, allowed_hosts: list<string>, allow_private: bool, resolve_dns: bool, dns_timeout: float, request_timeout: float}, scopes: array{enabled: bool, resolver: string|null}, doctrine: array{table_prefix: string, entity_manager: string|null}, conflict_response: array{owner_lock_timeout: int}, web_ui: array{enabled: bool}} $config */
         $logger         = new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE);
         $endpoints      = $config['endpoints'];
         $settingsBacked = $config['instance_profile'] === null;
         $webUi          = $config['web_ui']['enabled'];
 
-        $container->setDefinition(StorageEntityManager::class, new Definition(StorageEntityManager::class, [new Reference('doctrine'), $config['doctrine']['entity_manager']]));
+        $container->setDefinition(StorageEntityManager::class, new Definition(StorageEntityManager::class, [new Reference('doctrine'), $config['doctrine']['entity_manager'], $config['conflict_response']['owner_lock_timeout']]));
         $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$config['doctrine']['table_prefix']]))
             ->addTag('doctrine.event_listener', ['event' => 'loadClassMetadata']));
         $container->setDefinition(UploaderCollationListener::class, (new Definition(UploaderCollationListener::class, [new Reference(StorageEntityManager::class), $logger]))

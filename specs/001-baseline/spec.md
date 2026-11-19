@@ -228,6 +228,10 @@ becomes the settings-backed active profile; existing files keep downloading.
   unusable, matched with exact SQL and `===`, binary NO PAD collation on MySQL / MariaDB with a logged fallback.
 - **FR-RUN-001** — `RequestBoundaryListener`, `UnitOfWorkFrames` (1.4 / 1.5.1, REQ-RUNTIME-002): memos and the
   dedicated entity manager cleared at every request, message and console boundary in worker mode.
+- **FR-RUN-002** — `StorageConflicts`, `StorageKitConflictListener`, `OwnerLock`, `StorageEntityManager::transactional()`
+  / `exclusively()` / `updateIf()` (1.7, REQ-RUNTIME-003): one unit per Storage / Move write under an owner lock with
+  the owner read again inside it, compare-and-set sync status changes, and the bundle routes' conflict answer (409 or
+  503, `X-Conflict-Code` `CONFLICT_001` with `Retry-After` / `CONFLICT_002` without); see `docs/CONCURRENCY.md`.
 
 ### Personal data and audit
 

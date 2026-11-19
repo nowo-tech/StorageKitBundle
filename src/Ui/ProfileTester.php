@@ -46,7 +46,10 @@ final readonly class ProfileTester
         }
         $result = $this->probe->run($settings);
         $profile->recordTest($result->ok(), $result->publicRead);
-        $this->entityManager->manager()->flush();
+        // 1.7 (REQ-RUNTIME-003 rule 2): one DBAL UPDATE of the test fields; no manager is flushed.
+        if ($profile->getId() !== null) {
+            $this->entityManager->update($profile, StorageProfile::TEST_FIELDS);
+        }
         $this->audit->record(StorageAuditEvent::PROFILE_TESTED, $profile->getScope(), $actor, [
             'profile' => $profile->getUuid(),
             'ok'      => $result->ok(),

@@ -14,6 +14,7 @@ settings:
         edit: 'Verbinding bewerken'
     flash:
         saved: 'De opslaginstellingen zijn opgeslagen.'
+        changed: 'Iemand anders heeft deze bucket intussen gewijzigd. Controleer hem en sla opnieuw op.'
     section:
         config: 'Configuratie'
     field:
@@ -191,3 +192,6 @@ section:
         off: 'Geen provider gekozen: het uploaden van afbeeldingen staat uit.'
         incomplete: 'Bij de gekozen provider ontbreekt een veld (bucket, toegangssleutel, geheime sleutel of endpoint) of een veld is ongeldig: uploads blijven uit.'
         test_failed: 'De laatste verbindingstest is mislukt. Controleer de velden en voer Verbinding testen opnieuw uit.'
+conflict:
+    retry: 'Dezelfde gegevens werden tegelijk gewijzigd. Probeer het opnieuw.'
+    committed: 'Een deel van het verzoek is vóór een conflict opgeslagen. Laad opnieuw voordat u het opnieuw probeert.'

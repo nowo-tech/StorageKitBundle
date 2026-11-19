@@ -6,52 +6,70 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
-- [[1.6.1] - 2026-11-15](#161---2026-11-15)
+  - [Added](#added)
   - [Fixed](#fixed)
+  - [Changed](#changed)
+- [[1.6.1] - 2026-11-15](#161---2026-11-15)
+  - [Fixed](#fixed-1)
   - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
-  - [Added](#added)
-  - [Changed](#changed)
+  - [Added](#added-1)
+  - [Changed](#changed-1)
   - [Tests](#tests-1)
 - [[1.5.3] - 2026-11-13](#153---2026-11-13)
   - [Security](#security)
-  - [Added](#added-1)
-  - [Changed](#changed-1)
+  - [Added](#added-2)
+  - [Changed](#changed-2)
   - [Tests](#tests-2)
 - [[1.5.2] - 2026-11-13](#152---2026-11-13)
   - [Security](#security-1)
-  - [Fixed](#fixed-1)
+  - [Fixed](#fixed-2)
   - [Tests](#tests-3)
 - [[1.5.1] - 2026-11-12](#151---2026-11-12)
-  - [Fixed](#fixed-2)
+  - [Fixed](#fixed-3)
   - [Tests](#tests-4)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
-  - [Added](#added-2)
-  - [Changed](#changed-2)
+  - [Added](#added-3)
+  - [Changed](#changed-3)
   - [Deprecated](#deprecated)
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
-  - [Added](#added-3)
-  - [Security](#security-2)
-  - [Fixed](#fixed-3)
-  - [Changed](#changed-3)
-- [[1.3.0] - 2026-11-11](#130---2026-11-11)
-  - [Fixed](#fixed-4)
   - [Added](#added-4)
+  - [Security](#security-2)
+  - [Fixed](#fixed-4)
   - [Changed](#changed-4)
+- [[1.3.0] - 2026-11-11](#130---2026-11-11)
+  - [Fixed](#fixed-5)
+  - [Added](#added-5)
+  - [Changed](#changed-5)
   - [Deprecated](#deprecated-1)
 - [[1.2.0] - 2026-11-10](#120---2026-11-10)
   - [Security](#security-3)
-  - [Added](#added-5)
-  - [Changed](#changed-5)
-- [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-6)
   - [Changed](#changed-6)
-  - [Fixed](#fixed-5)
-- [[1.0.0] - 2026-11-03](#100---2026-11-03)
+- [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-7)
+  - [Changed](#changed-7)
+  - [Fixed](#fixed-6)
+- [[1.0.0] - 2026-11-03](#100---2026-11-03)
+  - [Added](#added-8)
   - [Security](#security-4)
 
 ## [Unreleased]
+
+### Added
+
+- Concurrency (REQ-RUNTIME-003 rule 6): a lock conflict, deadlock, lock wait timeout or serialization failure on one of the bundle's own routes answers **409** (`conflict_response.status: 503` for hosts that want it) with `X-Conflict-Code: CONFLICT_001` and `Retry-After` when nothing was committed, or `CONFLICT_002` without `Retry-After` when part of the request was (transaction-doctrine 1.6 request commit mark, a Messenger handler that already completed). The Storage / Move pages render it through your error page; the upload endpoint keeps `{error, message}` and adds `code`. Unique violations and lost connections are not mapped. New option `conflict_response` (`status`, `retry_after`, `owner_lock_timeout`).
+- `docs/CONCURRENCY.md`: the write-path table (transaction, control, conflict answer), the codes, the host options and the residual risks.
+- Two-connection race tests on MySQL 8.4, MariaDB 11.4 and PostgreSQL (two first saves of a bucket, a cancel racing the copy runner, a lock wait on the switch, two saves of the same text reference) in the required "Lifecycle on …" CI job, plus a "Dependency floor (nowo-tech/transaction-* lowest, demo lock)" CI job and `.scripts/check-demo-lock.py`.
+- `StorageEntityManager::transactional()`, `exclusively()` and `updateIf()` (write unit through transaction-doctrine's runner, owner lock, compare-and-set); requires `nowo-tech/transaction-contract` ^1.0 and `nowo-tech/transaction-doctrine` ^1.6.1.
+
+### Fixed
+
+- Storage / Move pages: every write (save the bucket or the new bucket, start, switch, forget) is one transaction under a per-owner lock (MySQL / MariaDB `GET_LOCK`, PostgreSQL advisory lock) and reads the owner again inside it. Two first saves of the same owner could create two active buckets, two "start copying" clicks two open syncs; a save racing a switch could edit a retired bucket. The *Test connection* result is a DBAL update and no longer flushes the entity manager.
+- Copy runner: a cancel committed while a slice ended was overwritten by the runner's "queued for the next slice" (or "completed"/"failed"), and a cancel could overwrite a sync that had just completed; status changes are now compare-and-set.
+- First use of the instance `storage` section (and of a config profile): two first uploads at once could create two active instance rows; a later switch moved the files of the first one only. The row is now created once, under a lock. Affected: 1.4.0–1.6.1. Existing duplicates are not repaired automatically: see [UPGRADING, Duplicate instance rows](UPGRADING.md#duplicate-instance-rows-140161) for the detection queries and the recovery.
+- Upload: a deadlock or lock wait timeout on the insert is rethrown (the objects written are deleted again) instead of being swallowed as a bucket failure (`503 {error: storage}`); the endpoint answers `409 CONFLICT_001`.
+- The switch and `nowo:storage-kit:adopt-instance-bucket` no longer use `EntityManager::wrapInTransaction()`, which closed the default entity manager on any failure.
 
 ### Changed
 

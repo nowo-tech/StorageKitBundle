@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Upload;
 
+use Doctrine\DBAL\Exception as DBALException;
+use Doctrine\DBAL\Exception\RetryableException;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\TransactionContract\TransientStorageFailure;
 
 /**
  * Port of the image upload (1.3, public API, SemVer; architecture bar rule 1): aliased to {@see ImageUploader};
@@ -25,6 +28,11 @@ interface ImageUploaderInterface
      * @param object $user security user (writes are checked by the context)
      *
      * @throws UploadRefused
+     * @throws RetryableException a deadlock or lock wait timeout on the insert (1.7: rethrown, no longer an
+     *                            UploadRefused; the objects written are deleted again, so a retry is safe)
+     * @throws TransientStorageFailure a runner's transient failure or the owner lock not obtained in time (1.7:
+     *                                 rethrown the same way)
+     * @throws DBALException a lost savepoint (commit outcome unknown, CONFLICT_002; 1.7: rethrown the same way)
      */
     public function uploadImage(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFileView;
 
