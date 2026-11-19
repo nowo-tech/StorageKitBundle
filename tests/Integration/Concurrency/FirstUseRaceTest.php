@@ -6,21 +6,26 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Concurrency;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
+use Doctrine\DBAL\Types\Types;
 use Nowo\InstanceSettingsBundle\Settings\InstanceSettingsInterface;
 use Nowo\StorageKitBundle\Concurrency\StorageConflicts;
+use Nowo\StorageKitBundle\Doctrine\OwnerLock;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
+use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\StatementHook;
 use Nowo\StorageKitBundle\Tests\Support\StatementHooks;
+use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\ConflictCode;
 use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\Request;
 use Throwable;
 
+use function microtime;
 use function str_starts_with;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 
@@ -173,6 +178,92 @@ final class FirstUseRaceTest extends KernelTestCase
             self::assertSame($mine->getId(), $this->profiles($this->b)->activeOf(null)?->getId());
         }
         self::assertSame(1, $this->instanceRows());
+        $this->assertUsable($this->b);
+    }
+
+    public function testInsideYourTransactionTheLosingFirstUseRetriesInsteadOfReusingTheRow(): void
+    {
+        // UH2-SK-4: B's first use runs inside B's own transaction. Its lookup before the owner lock already opened its
+        // snapshot (MySQL / MariaDB REPEATABLE READ), so when A commits the row while B waits, B cannot read the row
+        // it now sees locked: it always fails retry-safe and never reuses it (a new transaction does). PostgreSQL
+        // (READ COMMITTED) reads A's row once it gets the lock.
+        $a = $this->connection($this->a);
+        $b = $this->connection($this->b);
+        $a->beginTransaction();
+        $mine = $this->profiles($this->a)->activeOf(null);
+        self::assertInstanceOf(StorageProfile::class, $mine);
+        $hooks = $this->service($this->b, StatementHooks::class);
+        $hooks->onceBefore($this->postgres() ? "SELECT set_config('lock_timeout'" : 'SELECT id FROM storage_kit_profile WHERE scope IS NULL', static function () use ($a): void {
+            $a->commit();
+        });
+
+        $b->beginTransaction();
+        if ($this->postgres()) {
+            self::assertSame($mine->getId(), $this->profiles($this->b)->activeOf(null)?->getId());
+            $b->commit();
+        } else {
+            $this->expectConflict(fn (): ?StorageProfile => $this->profiles($this->b)->activeOf(null));
+            self::assertTrue($b->isTransactionActive(), 'your transaction is left to you');
+            $b->rollBack();
+            $this->profiles($this->b)->reset();
+            self::assertSame($mine->getId(), $this->profiles($this->b)->activeOf(null)?->getId());
+        }
+        self::assertNull($hooks->hook, 'A committed while B waited');
+        self::assertSame(1, $this->instanceRows());
+        $this->assertUsable($this->a);
+        $this->assertUsable($this->b);
+    }
+
+    public function testTheRowLockWaitOfTheFirstUseIsBoundedByTheOwnerLockTimeout(): void
+    {
+        if ($this->postgres()) {
+            self::markTestSkipped('MySQL / MariaDB only: PostgreSQL waits on the advisory lock (lock_timeout).');
+        }
+        // UH2-SK-2: B's session keeps a long innodb_lock_wait_timeout; the locking re-read, taken while B holds the
+        // owner lock, waits only owner_lock_timeout (1 s here), and B's session value is restored afterwards.
+        $b = $this->connection($this->b);
+        $b->executeStatement('SET SESSION innodb_lock_wait_timeout = 20');
+        $a = $this->connection($this->a);
+        $a->beginTransaction();
+        self::assertInstanceOf(StorageProfile::class, $this->profiles($this->a)->activeOf(null));
+
+        $started = microtime(true);
+        $this->expectConflict(fn (): ?StorageProfile => $this->profiles($this->b)->activeOf(null));
+        self::assertLessThan(10.0, microtime(true) - $started, 'bounded by owner_lock_timeout, not the session value');
+        self::assertSame(20, (int) $b->fetchOne('SELECT @@SESSION.innodb_lock_wait_timeout'));
+        $a->rollBack();
+        $this->assertUsable($this->b);
+    }
+
+    public function testAPostgreSqlLockTimeoutInsideYourTransactionKeepsYourWorkAndYourLockTimeout(): void
+    {
+        if (!$this->postgres()) {
+            self::markTestSkipped('PostgreSQL only.');
+        }
+        // UH2-SK-7: A holds the instance's owner lock; B's first use inside B's transaction times out (55P03). The
+        // bundle's savepoint is rolled back: B's own earlier write and B's SET LOCAL survive, and B can commit.
+        $a = $this->connection($this->a);
+        $a->beginTransaction();
+        $a->executeQuery('SELECT pg_advisory_xact_lock(?)', [OwnerLock::key(StorageProfileRepository::ownerLock(null))], [Types::BIGINT]);
+
+        $b = $this->connection($this->b);
+        $b->executeStatement('CREATE TEMPORARY TABLE host_write (id INT)');
+        $b->beginTransaction();
+        $b->executeStatement('INSERT INTO host_write (id) VALUES (1)');
+        $b->executeStatement("SET LOCAL lock_timeout = '7s'");
+        try {
+            $this->profiles($this->b)->activeOf(null);
+            self::fail('expected the owner lock timeout');
+        } catch (TransientStorageFailure $e) {
+            self::assertSame(OwnerLock::MESSAGE, $e->getMessage());
+        }
+        self::assertTrue($b->isTransactionActive());
+        self::assertSame('7s', $b->fetchOne("SELECT current_setting('lock_timeout')"));
+        self::assertSame(1, (int) $b->fetchOne('SELECT COUNT(*) FROM host_write'));
+        $b->commit();
+        $a->rollBack();
+        self::assertSame(1, (int) $b->fetchOne('SELECT COUNT(*) FROM host_write'));
+        self::assertSame(0, $this->instanceRows());
         $this->assertUsable($this->b);
     }
 

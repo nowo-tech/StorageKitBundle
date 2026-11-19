@@ -19,7 +19,7 @@ use function sprintf;
  * 1.7.1 (REQ-RUNTIME-003 rule 6, audit UH-SK-4): scopes the commit tracking of the conflict answer.
  *
  * - nowo-tech/transaction-doctrine's bundle registered with `commit_detection` (its {@see CommitLedger} service
- *   exists): its middleware already counts every commit and its request mark is read by the conflict listener, so the
+ *   and its `doctrine.middleware`-tagged commit-tracking middleware exist): its middleware already counts every commit and its request mark is read by the conflict listener, so the
  *   bundle's middleware and ledger are removed and the listener takes no mark of its own. No connection is wrapped
  *   twice.
  * - Otherwise (`conflict_response.commit_tracking: bundle`): the middleware wraps only the connection of the bundle's
@@ -32,6 +32,9 @@ use function sprintf;
  */
 final class StorageKitCommitTrackingPass implements CompilerPassInterface
 {
+    /** transaction-doctrine's commit-tracking middleware (registered by its bundle with `commit_detection`). */
+    public const TRANSACTION_DOCTRINE_MIDDLEWARE = 'nowo_transaction_doctrine.commit_tracking_middleware';
+
     /**
      * Drops or scopes the bundle's commit-tracking middleware.
      */
@@ -40,7 +43,7 @@ final class StorageKitCommitTrackingPass implements CompilerPassInterface
         if (!$container->hasDefinition(NowoStorageKitExtension::COMMIT_TRACKING_MIDDLEWARE)) {
             return;
         }
-        if ($container->has(CommitLedger::class)) {
+        if ($this->transactionDoctrineTracks($container)) {
             $container->removeDefinition(NowoStorageKitExtension::COMMIT_TRACKING_MIDDLEWARE);
             $container->removeDefinition(NowoStorageKitExtension::COMMIT_LEDGER_SERVICE);
             if ($container->hasDefinition(StorageKitConflictListener::class)) {
@@ -59,6 +62,18 @@ final class StorageKitCommitTrackingPass implements CompilerPassInterface
         $container->getDefinition(NowoStorageKitExtension::COMMIT_TRACKING_MIDDLEWARE)
             ->clearTag('doctrine.middleware')
             ->addTag('doctrine.middleware', ['connection' => $this->bundleConnection($container)]);
+    }
+
+    /**
+     * Whether transaction-doctrine's bundle counts commits itself (UH2-SK-6): its {@see CommitLedger} service and its
+     * commit-tracking middleware, tagged `doctrine.middleware`. A stray CommitLedger service alone (registered by your
+     * code, with no middleware feeding it) does not count, so the bundle keeps its own tracking.
+     */
+    private function transactionDoctrineTracks(ContainerBuilder $container): bool
+    {
+        return $container->has(CommitLedger::class)
+            && $container->hasDefinition(self::TRANSACTION_DOCTRINE_MIDDLEWARE)
+            && $container->getDefinition(self::TRANSACTION_DOCTRINE_MIDDLEWARE)->hasTag('doctrine.middleware');
     }
 
     /**

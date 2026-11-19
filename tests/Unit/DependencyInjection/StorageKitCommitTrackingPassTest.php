@@ -37,6 +37,36 @@ final class StorageKitCommitTrackingPassTest extends TestCase
         return $container->getDefinition(NowoStorageKitExtension::COMMIT_TRACKING_MIDDLEWARE)->getTag('doctrine.middleware');
     }
 
+    private function transactionDoctrine(ContainerBuilder $container, bool $tagged = true): ContainerBuilder
+    {
+        $container->setDefinition(CommitLedger::class, new Definition(CommitLedger::class));
+        $middleware = new Definition(CommitTrackingMiddleware::class, [new Reference(CommitLedger::class)]);
+        if ($tagged) {
+            $middleware->addTag('doctrine.middleware');
+        }
+        $container->setDefinition(StorageKitCommitTrackingPass::TRANSACTION_DOCTRINE_MIDDLEWARE, $middleware);
+
+        return $container;
+    }
+
+    public function testAStrayCommitLedgerWithoutTransactionDoctrinesMiddlewareKeepsTheBundlesTracking(): void
+    {
+        // UH2-SK-6: a CommitLedger service alone, or with an untagged middleware, is not transaction-doctrine's
+        // commit detection.
+        foreach ([false, true] as $withUntaggedMiddleware) {
+            $container = $this->container();
+            if ($withUntaggedMiddleware) {
+                $this->transactionDoctrine($container, false);
+            } else {
+                $container->setDefinition(CommitLedger::class, new Definition(CommitLedger::class));
+            }
+            $container->setParameter('doctrine.default_connection', 'default');
+            (new StorageKitCommitTrackingPass())->process($container);
+            self::assertTrue($container->hasDefinition(NowoStorageKitExtension::COMMIT_LEDGER_SERVICE));
+            self::assertSame([['connection' => 'default']], $this->middlewareTags($container));
+        }
+    }
+
     public function testNothingToDoWhenTrackingIsOff(): void
     {
         $container = new ContainerBuilder();
@@ -46,8 +76,7 @@ final class StorageKitCommitTrackingPassTest extends TestCase
 
     public function testTransactionDoctrinesCommitDetectionReplacesTheBundlesTracking(): void
     {
-        $container = $this->container();
-        $container->setDefinition(CommitLedger::class, new Definition(CommitLedger::class));
+        $container = $this->transactionDoctrine($this->container());
         $container->setDefinition(StorageKitConflictListener::class, (new Definition(StorageKitConflictListener::class, [null, null, new Reference(NowoStorageKitExtension::COMMIT_LEDGER_SERVICE), null]))
             ->addTag('kernel.event_listener', ['event' => 'kernel.exception', 'priority' => -64])
             ->addTag('kernel.event_listener', ['event' => 'kernel.request', 'method' => 'onRequest', 'priority' => StorageKitConflictListener::REQUEST_PRIORITY]));
@@ -61,8 +90,7 @@ final class StorageKitCommitTrackingPassTest extends TestCase
         self::assertSame([['event' => 'kernel.exception', 'priority' => -64]], $listener->getTag('kernel.event_listener'));
 
         // The same without the listener (nothing else to rewire).
-        $container = $this->container();
-        $container->setDefinition(CommitLedger::class, new Definition(CommitLedger::class));
+        $container = $this->transactionDoctrine($this->container());
         (new StorageKitCommitTrackingPass())->process($container);
         self::assertFalse($container->hasDefinition(NowoStorageKitExtension::COMMIT_TRACKING_MIDDLEWARE));
     }

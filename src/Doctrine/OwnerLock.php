@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Doctrine;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\ConnectionException;
 use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Types\Types;
@@ -93,6 +94,39 @@ final class OwnerLock
             throw $e;
         }
         $connection->fetchOne("SELECT set_config('lock_timeout', ?, true)", [$previous]);
+    }
+
+    /**
+     * Runs `$statement` (a row-locking read taken while the owner lock is held) with the MySQL / MariaDB row lock wait
+     * bounded by `$timeout` seconds (1.7.1, audit UH2-SK-2) instead of the session's `innodb_lock_wait_timeout` (50 by
+     * default): the session value is lowered for this statement only and restored right after it, also when it fails.
+     * Left as it is on other platforms, for a timeout of 0, or when the session value is already lower or equal. A
+     * failed restore is swallowed only when the connection is gone (the session, and its setting, went with it).
+     *
+     * @template T
+     *
+     * @param callable(): T $statement
+     *
+     * @return T
+     */
+    public static function boundedRowLockWait(Connection $connection, int $timeout, callable $statement): mixed
+    {
+        $session = $timeout > 0 && $connection->getDatabasePlatform() instanceof AbstractMySQLPlatform
+            ? (int) $connection->fetchOne('SELECT @@SESSION.innodb_lock_wait_timeout')
+            : 0;
+        if ($session <= $timeout) {
+            return $statement();
+        }
+        $connection->executeStatement('SET SESSION innodb_lock_wait_timeout = ' . $timeout);
+        try {
+            return $statement();
+        } finally {
+            try {
+                $connection->executeStatement('SET SESSION innodb_lock_wait_timeout = ' . $session);
+            } catch (ConnectionException) {
+                // The connection is gone, and the session with it.
+            }
+        }
     }
 
     /**

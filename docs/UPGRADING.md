@@ -56,10 +56,12 @@ No schema change, no new dependency. Behaviour changes ([CONCURRENCY](CONCURRENC
 2. **First use inside your transaction on MySQL / MariaDB.** The re-read of the instance's `storage` row (or of a
    config profile's row) under the owner lock is a locking read (`FOR UPDATE` on the instance's few active rows,
    index `scope, state`). Inside a transaction you opened, those rows stay locked until your commit, so another
-   request's first use waits for it (up to `innodb_lock_wait_timeout`) instead of creating a duplicate. When your
-   transaction's snapshot (REPEATABLE READ) is older than another request's commit of that row, the call throws a
-   retry-safe `TransientStorageFailure` (a `RetryableException`): roll back and replay, as for a deadlock. Run first
-   uploads outside long transactions where you can. Rows created before 1.7.1:
+   request's first use waits for it (at most `conflict_response.owner_lock_timeout`: the session's
+   `innodb_lock_wait_timeout` is lowered for that statement only and restored after it) instead of creating a
+   duplicate. A first use made inside your own transaction that loses this race always throws a retry-safe
+   `TransientStorageFailure` (a `RetryableException`): its snapshot (REPEATABLE READ) was opened before the lock and
+   cannot see the other request's row. Roll back and replay, as for a deadlock. Run first uploads outside long
+   transactions where you can. Rows created before 1.7.1:
    [Duplicate instance rows](#duplicate-instance-rows-140161).
 3. **Commit tracking for `CONFLICT_002`.** Without transaction-doctrine's bundle (or with its `commit_detection`
    off), the bundle registers transaction-doctrine's commit-tracking DBAL middleware on the connection of
@@ -68,6 +70,13 @@ No schema change, no new dependency. Behaviour changes ([CONCURRENCY](CONCURRENC
    answers `CONFLICT_002` without `Retry-After`. Your other connections are never wrapped. To keep the 1.7.0
    behaviour (no middleware), set `nowo_storage_kit.conflict_response.commit_tracking: off`. With transaction-doctrine's
    `commit_detection` on, nothing is added.
+
+   **DBAL 3 note.** With `commit_tracking: bundle` (the default) the bundle's connection (your default connection when
+   `doctrine.entity_manager` is `null`) is wrapped by transaction-doctrine's commit-tracking driver connection, whose
+   `commit()` returns nothing. On DBAL 3, `Doctrine\DBAL\Connection::commit()` therefore returns `null` instead of
+   `true` on that connection (DBAL 4's is `void` anyway). The ORM is not affected (it only checks `=== false`). If your
+   own code tests the return value of `commit()`, set `commit_tracking: off`, or register transaction-doctrine's bundle
+   with `commit_detection`.
 
 ## To 1.7.0
 

@@ -65,10 +65,13 @@ All notable changes to this project are documented here. The format follows
   transaction you opened, for example an upload from your own write unit, could still create a second active row: the
   owner lock `GET_LOCK()` is session-scoped and was released before your commit, and the other request's re-read could
   not see the uncommitted row. The re-read under the owner lock is now a locking read (`SELECT … FOR UPDATE` on the
-  instance's active rows), so the other request waits for your commit (up to `innodb_lock_wait_timeout`, then
-  `CONFLICT_001`) and reuses the row. When your transaction's snapshot is older than the other request's commit
-  (REPEATABLE READ), the unit fails with a retry-safe conflict instead of inserting a duplicate. PostgreSQL was not
-  affected. Detection and recovery of rows created before: [UPGRADING](UPGRADING.md#duplicate-instance-rows-140161).
+  instance's active rows), so the other request waits for your commit (at most `conflict_response.owner_lock_timeout`,
+  then `CONFLICT_001`) instead of inserting a duplicate. A first use made outside any transaction then reuses the row.
+  A first use made inside a transaction of its own on MySQL / MariaDB always fails with a retry-safe conflict and
+  never reuses the row: its lookup before the owner lock already opened its snapshot (REPEATABLE READ), which cannot
+  see the other request's commit; the retry in a new transaction reuses it. PostgreSQL under READ COMMITTED (the
+  default) was not affected. Detection and recovery of rows created before:
+  [UPGRADING](UPGRADING.md#duplicate-instance-rows-140161).
 - **The PostgreSQL owner lock waits a bounded time** (audit UH-SK-3). `pg_advisory_xact_lock()` used to wait up to the
   session's `lock_timeout` (no limit by default). It now waits up to `conflict_response.owner_lock_timeout` (default 5
   seconds, 0 = no wait), like `GET_LOCK()` on MySQL / MariaDB, through a transaction-local `lock_timeout` set for the

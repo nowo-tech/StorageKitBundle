@@ -51,7 +51,7 @@ final readonly class StorageEntityManager
 
     /**
      * @param string|null $name entity manager name
-     * @param int $ownerLockTimeout seconds to wait for the owner lock on MySQL / MariaDB
+     * @param int $ownerLockTimeout seconds to wait for the owner lock (`conflict_response.owner_lock_timeout`)
      */
     public function __construct(
         private ManagerRegistry $registry,
@@ -73,6 +73,14 @@ final readonly class StorageEntityManager
         }
 
         return $manager;
+    }
+
+    /**
+     * Seconds a write waits for the owner lock (`conflict_response.owner_lock_timeout`; 0 = no wait).
+     */
+    public function ownerLockTimeout(): int
+    {
+        return $this->ownerLockTimeout;
     }
 
     /**

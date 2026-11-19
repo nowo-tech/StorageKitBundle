@@ -235,7 +235,7 @@ final class Configuration implements ConfigurationInterface
                             ->max(3600)
                         ->end()
                         ->integerNode('owner_lock_timeout')
-                            ->info('Seconds a Storage / Move page write or a first-use row creation waits for another write of the same owner (MySQL / MariaDB GET_LOCK; PostgreSQL pg_advisory_xact_lock under a lock_timeout of this value since 1.7.1; 0 = no wait) before answering CONFLICT_001.')
+                            ->info('Seconds a Storage / Move page write or a first-use row creation waits for another write of the same owner (MySQL / MariaDB GET_LOCK, and since 1.7.1 the row-lock wait of the first-use re-read; PostgreSQL pg_advisory_xact_lock under a lock_timeout of this value since 1.7.1; 0 = no wait) before answering CONFLICT_001.')
                             ->defaultValue(StorageEntityManager::OWNER_LOCK_TIMEOUT)
                             ->min(0)
                             ->max(60)
