@@ -51,7 +51,7 @@ final readonly class StorageEntityManager
 
     /**
      * @param string|null $name entity manager name
-     * @param int $ownerLockTimeout seconds to wait for the owner lock on MySQL / MariaDB
+     * @param int $ownerLockTimeout seconds to wait for the owner lock (`conflict_response.owner_lock_timeout`)
      */
     public function __construct(
         private ManagerRegistry $registry,
@@ -73,6 +73,14 @@ final readonly class StorageEntityManager
         }
 
         return $manager;
+    }
+
+    /**
+     * Seconds a write waits for the owner lock (`conflict_response.owner_lock_timeout`; 0 = no wait).
+     */
+    public function ownerLockTimeout(): int
+    {
+        return $this->ownerLockTimeout;
     }
 
     /**
@@ -350,9 +358,9 @@ final readonly class StorageEntityManager
      *   loaded profile always looks changed to its pending-changes check.
      *
      * `$ownerLock` (an owner key, {@see StorageProfileRepository::ownerLock()}) serializes the writes of one storage
-     * owner ({@see OwnerLock}: MySQL / MariaDB `GET_LOCK()` waits up to `conflict_response.owner_lock_timeout`
-     * seconds, PostgreSQL `pg_advisory_xact_lock()` up to the session's `lock_timeout`). A lock not obtained in time
-     * throws {@see TransientStorageFailure}: the bundle routes answer CONFLICT_001.
+     * owner ({@see OwnerLock}: MySQL / MariaDB `GET_LOCK()` and, since 1.7.1, PostgreSQL `pg_advisory_xact_lock()` wait
+     * up to `conflict_response.owner_lock_timeout` seconds). A lock not obtained in time throws
+     * {@see TransientStorageFailure}: the bundle routes answer CONFLICT_001.
      *
      * A deadlock, lock wait timeout or serialization failure is rethrown as TransientStorageFailure (the storage error
      * as previous); anything else unchanged.
@@ -373,11 +381,12 @@ final readonly class StorageEntityManager
         $runner     = $own
             ? DoctrineTransactionRunner::forEntityManager($manager, $this->registry, $this->name)
             : DoctrineTransactionRunner::forConnection($connection);
-        $named = OwnerLock::acquire($connection, $ownerLock, $this->ownerLockTimeout);
+        $timeout = $this->ownerLockTimeout;
+        $named   = OwnerLock::acquire($connection, $ownerLock, $timeout);
         try {
             // @igor-ignore - The closure runs synchronously inside the runner; nothing is kept on the service.
-            return $runner->run(static function () use ($connection, $manager, $own, $ownerLock, $work): mixed {
-                OwnerLock::acquireInside($connection, $ownerLock);
+            return $runner->run(static function () use ($connection, $manager, $own, $ownerLock, $timeout, $work): mixed {
+                OwnerLock::acquireInside($connection, $ownerLock, $timeout);
                 $result = $work();
                 if (!$own) {
                     $manager->flush();
@@ -401,6 +410,11 @@ final readonly class StorageEntityManager
      * the bundle creates on first use from host-called code (the instance's `storage` section row, a config profile's
      * row), so two first uploads at once create one row. Read the row again inside `$work` before creating it.
      *
+     * Inside your open transaction on MySQL / MariaDB the session lock `GET_LOCK()` is released when `$work` returns,
+     * before your transaction commits (PostgreSQL's transaction lock is held until then). Re-read with a locking read
+     * there (1.7.1, audit UH-SK-2: {@see StorageProfileRepository::lockInstanceRow()}): it waits for a row another
+     * request inserted and has not committed yet, instead of missing it.
+     *
      * @template T
      *
      * @param callable(): T $work
@@ -412,11 +426,12 @@ final readonly class StorageEntityManager
     public function exclusively(callable $work, string $ownerLock): mixed
     {
         $connection = $this->connection();
-        $named      = OwnerLock::acquire($connection, $ownerLock, $this->ownerLockTimeout);
+        $timeout    = $this->ownerLockTimeout;
+        $named      = OwnerLock::acquire($connection, $ownerLock, $timeout);
         try {
             // @igor-ignore - The closure runs synchronously inside the unit; nothing is kept on the service.
-            return $this->atomically(static function (Connection $connection) use ($ownerLock, $work): mixed {
-                OwnerLock::acquireInside($connection, $ownerLock);
+            return $this->atomically(static function (Connection $connection) use ($ownerLock, $timeout, $work): mixed {
+                OwnerLock::acquireInside($connection, $ownerLock, $timeout);
 
                 return $work();
             }, 'owner');

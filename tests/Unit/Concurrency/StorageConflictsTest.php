@@ -92,6 +92,17 @@ final class StorageConflictsTest extends TestCase
         self::assertSame(ConflictCode::Committed, StorageConflicts::code($request, self::storageError(['40001', 1213])));
     }
 
+    public function testACommitSeenByTheBundlesOwnMarkIsCommitted(): void
+    {
+        // 1.7.1 (UH-SK-4): without transaction-doctrine's request mark, the bundle's own mark decides.
+        $ledger = new CommitLedger();
+        $own    = new CommitMark($ledger);
+        self::assertSame(ConflictCode::RetrySafe, StorageConflicts::code(new Request(), self::storageError(['40001', 1213]), $own));
+        $ledger->record();
+        self::assertSame(ConflictCode::Committed, StorageConflicts::code(new Request(), self::storageError(['40001', 1213]), $own));
+        self::assertSame(ConflictCode::RetrySafe, StorageConflicts::code(new Request(), self::storageError(['40001', 1213])));
+    }
+
     public function testCommittedWrappersAreCommitted(): void
     {
         $deadlock = self::storageError(['40001', 1213]);
