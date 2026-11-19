@@ -168,6 +168,7 @@ final class DedicatedEntityManagerKernelTest extends KernelTestCase
         // Admin and CLI writes that flush the bundle manager: profile test, bucket move, purge.
         $this->service($kernel, ProfileTester::class)->test($from, null);
         $sync = $this->service($kernel, StorageMove::class)->start($from, $to, null);
+        self::assertInstanceOf(StorageSync::class, $sync);
         self::assertTrue($this->service($kernel, StorageSyncer::class)->run($sync));
         self::assertSame(StorageSync::COMPLETED, $sync->getStatus());
         self::assertSame(2, $this->service($kernel, StoredFilesPersonalDataInterface::class)->erase('alice'));

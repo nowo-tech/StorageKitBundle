@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Upload;
 
+use Doctrine\DBAL\Exception\RetryableException;
+
 /**
  * Port of the square image upload (1.6, public API, SemVer): profile pictures, logos and any other image shown as a
  * square. Aliased to {@see ImageUploader}; type-hint this interface.
@@ -22,6 +24,8 @@ interface SquareImageUploaderInterface
      * @param object $user security user (writes are checked by the context)
      *
      * @throws UploadRefused
+     * @throws RetryableException a deadlock or lock wait timeout on the insert (1.7: rethrown, no longer an
+     *                            UploadRefused; the objects written are deleted again, so a retry is safe)
      */
     public function uploadSquareImage(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFileView;
 }

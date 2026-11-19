@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Repository;
 
+use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\DBAL\Types\Types;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StorageSync;
@@ -27,6 +29,19 @@ final readonly class StorageSyncRepository
     public function forPair(StorageProfile $from, StorageProfile $to): ?StorageSync
     {
         return $this->entityManager->manager()->getRepository(StorageSync::class)->findOneBy(['from' => $from, 'to' => $to], ['id' => 'DESC']);
+    }
+
+    /**
+     * Whether a sync to `$target` is queued or running in the database (1.7, read with DBAL: a sync another request
+     * started is seen inside a write unit).
+     */
+    public function hasOpenTo(StorageProfile $target): bool
+    {
+        return $target->getId() !== null && (int) $this->entityManager->connection()->fetchOne(
+            'SELECT COUNT(*) FROM ' . $this->entityManager->table(StorageSync::class) . ' WHERE to_id = ? AND status IN (?)',
+            [$target->getId(), [StorageSync::QUEUED, StorageSync::RUNNING]],
+            [Types::INTEGER, ArrayParameterType::STRING],
+        ) > 0;
     }
 
     /**

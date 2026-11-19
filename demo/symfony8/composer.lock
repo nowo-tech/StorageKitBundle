@@ -1794,7 +1794,7 @@
             "dist": {
                 "type": "path",
                 "url": "/var/storage-kit-bundle",
-                "reference": "e6c2dcf95a766b321dba3eae8e6723f321287061"
+                "reference": "ad901ef12578cf00427b641c371697c4476cf1fc"
             },
             "require": {
                 "async-aws/core": "^1.27",
@@ -1810,6 +1810,8 @@
                 "nowo-tech/form-kit-bundle": "^2.17",
                 "nowo-tech/instance-settings-bundle": "^1.3.1",
                 "nowo-tech/outbound-url-guard-bundle": "^1.3",
+                "nowo-tech/transaction-contract": "^1.0",
+                "nowo-tech/transaction-doctrine": "^1.6.1",
                 "nowo-tech/ui-kit-bundle": "^2.23",
                 "php": ">=8.2 <8.6",
                 "psr/log": "^2.0 || ^3.0",
@@ -2049,40 +2051,69 @@
         },
         {
             "name": "nowo-tech/transaction-doctrine",
-            "version": "v1.1.0",
+            "version": "v1.6.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/transaction-doctrine.git",
-                "reference": "c9e26d12a120427c2c643af20140989bafacdf1a"
+                "reference": "2508e7689c0051c28ca8532a4cdf31ca7bfff311"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/transaction-doctrine/zipball/c9e26d12a120427c2c643af20140989bafacdf1a",
-                "reference": "c9e26d12a120427c2c643af20140989bafacdf1a",
+                "url": "https://api.github.com/repos/nowo-tech/transaction-doctrine/zipball/2508e7689c0051c28ca8532a4cdf31ca7bfff311",
+                "reference": "2508e7689c0051c28ca8532a4cdf31ca7bfff311",
                 "shasum": ""
             },
             "require": {
                 "doctrine/dbal": "^3.8.2 || ^4.0",
                 "nowo-tech/transaction-contract": "^1.0",
-                "php": ">=8.2 <8.6"
+                "php": ">=8.2 <8.6",
+                "psr/log": "^1.0 || ^2.0 || ^3.0"
+            },
+            "conflict": {
+                "symfony/http-kernel": "<6.4",
+                "symfony/messenger": "<6.4"
             },
             "require-dev": {
                 "doctrine/orm": "^3.0",
                 "doctrine/persistence": "^3.1 || ^4.0",
                 "friendsofphp/php-cs-fixer": "^3.0",
+                "igor-php/igor-php": "^0.10.0",
+                "nowo-tech/phpstan-frankenphp": "^1.0",
+                "phpstan/extension-installer": "^1.4",
                 "phpstan/phpstan": "^2.0",
                 "phpstan/phpstan-phpunit": "^2.0",
                 "phpunit/phpunit": "^10.0 || ^11.0",
-                "rector/rector": "^2.0"
+                "rector/rector": "^2.0",
+                "symfony/clock": "^6.4 || ^7.0 || ^8.0",
+                "symfony/config": "^6.4 || ^7.0 || ^8.0",
+                "symfony/dependency-injection": "^6.4 || ^7.0 || ^8.0",
+                "symfony/event-dispatcher": "^6.4 || ^7.0 || ^8.0",
+                "symfony/framework-bundle": "^6.4 || ^7.0 || ^8.0",
+                "symfony/http-foundation": "^6.4 || ^7.0 || ^8.0",
+                "symfony/http-kernel": "^6.4 || ^7.0 || ^8.0",
+                "symfony/messenger": "^6.4 || ^7.0 || ^8.0",
+                "symfony/property-access": "^6.4 || ^7.0 || ^8.0",
+                "symfony/security-core": "^6.4 || ^7.0 || ^8.0",
+                "symfony/serializer": "^6.4 || ^7.0 || ^8.0",
+                "symfony/translation": "^6.4 || ^7.0 || ^8.0",
+                "symfony/twig-bundle": "^6.4 || ^7.0 || ^8.0",
+                "symfony/yaml": "^6.4 || ^7.0 || ^8.0",
+                "twig/twig": "^3.0"
             },
             "suggest": {
-                "doctrine/orm": "For DoctrineTransactionRunner::forEntityManager()",
-                "doctrine/persistence": "To reset a closed entity manager through a ManagerRegistry"
+                "doctrine/orm": "For DoctrineTransactionRunner::forEntityManager() and write units on entity managers",
+                "doctrine/persistence": "To reset a closed entity manager through a ManagerRegistry (required by WriteUnit)",
+                "nowo-tech/ui-kit-bundle": "The conflict page extends UiKit's error page when UiKit is installed",
+                "psr/event-dispatcher": "To dispatch WriteUnitRetryEvent before each write-unit replay (Symfony's event_dispatcher)",
+                "symfony/clock": "To pause between write-unit attempts through the Symfony clock (testable)",
+                "symfony/http-kernel": "For the optional NowoTransactionDoctrineBundle (#[AsWriteUnit], 409 conflict responder, worker hygiene)",
+                "symfony/messenger": "For WriteUnitMiddleware (replays a consumed message after a lock conflict)",
+                "twig/twig": "For the branded HTML conflict page (overridable template)"
             },
             "type": "library",
             "extra": {
                 "branch-alias": {
-                    "dev-main": "1.0.x-dev"
+                    "dev-main": "1.3.x-dev"
                 }
             },
             "autoload": {
@@ -2106,7 +2137,7 @@
                     "homepage": "https://nowo.tech"
                 }
             ],
-            "description": "Safe plain-Doctrine default for nowo-tech/transaction-contract: a one-attempt TransactionRunnerInterface that never leaves a poisoned connection (close instead of a failing rollback after a nested deadlock), plus the transient-failure classifier and connection repairer. No Symfony.",
+            "description": "Safe plain-Doctrine default for nowo-tech/transaction-contract: a one-attempt TransactionRunnerInterface that never leaves a poisoned connection (close instead of a failing rollback after a nested deadlock), the transient-failure classifier and connection repairer, and write units that replay a deadlock or lock wait timeout. Optional Symfony bundle: #[AsWriteUnit], Messenger middleware, 409 + Retry-After conflict responder, worker connection hygiene.",
             "homepage": "https://github.com/nowo-tech/transaction-doctrine",
             "keywords": [
                 "dbal",
@@ -2115,15 +2146,18 @@
                 "frankenphp",
                 "orm",
                 "savepoint",
+                "symfony",
                 "transaction",
-                "worker"
+                "worker",
+                "write-unit"
             ],
             "support": {
+                "docs": "https://github.com/nowo-tech/transaction-doctrine#documentation",
                 "issues": "https://github.com/nowo-tech/transaction-doctrine/issues",
                 "source": "https://github.com/nowo-tech/transaction-doctrine"
             },
-            "time": "2026-11-15T08:15:49+00:00",
-            "published-time": "2026-11-15T08:18:10+00:00"
+            "time": "2026-11-18T23:35:00+00:00",
+            "published-time": "2026-11-18T23:37:46+00:00"
         },
         {
             "name": "nowo-tech/ui-kit-bundle",
@@ -2230,16 +2264,16 @@
         },
         {
             "name": "paragonie/constant_time_encoding",
-            "version": "v3.1.4",
+            "version": "v3.1.5",
             "source": {
                 "type": "git",
                 "url": "https://github.com/paragonie/constant_time_encoding.git",
-                "reference": "5efef6e6cb43e088ccab7d0c1e2f2ab25b9e8b54"
+                "reference": "ceed38ba49d98b85808edfc4f04750ff61eb9739"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/paragonie/constant_time_encoding/zipball/5efef6e6cb43e088ccab7d0c1e2f2ab25b9e8b54",
-                "reference": "5efef6e6cb43e088ccab7d0c1e2f2ab25b9e8b54",
+                "url": "https://api.github.com/repos/paragonie/constant_time_encoding/zipball/ceed38ba49d98b85808edfc4f04750ff61eb9739",
+                "reference": "ceed38ba49d98b85808edfc4f04750ff61eb9739",
                 "shasum": ""
             },
             "require": {
@@ -2295,8 +2329,8 @@
                 "issues": "https://github.com/paragonie/constant_time_encoding/issues",
                 "source": "https://github.com/paragonie/constant_time_encoding"
             },
-            "time": "2026-11-06T20:31:19+00:00",
-            "published-time": "2026-11-06T20:39:39+00:00"
+            "time": "2026-11-18T13:55:22+00:00",
+            "published-time": "2026-11-18T13:55:46+00:00"
         },
         {
             "name": "paragonie/halite",
@@ -6355,16 +6389,16 @@
         },
         {
             "name": "symfony/security-bundle",
-            "version": "v8.1.10",
+            "version": "v8.1.11",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/security-bundle.git",
-                "reference": "7768dea6c579e9f6483d50be2463aabe9e33d55d"
+                "reference": "635b3773dc240a8f6e50e62efec5645e5b65ccf9"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/security-bundle/zipball/7768dea6c579e9f6483d50be2463aabe9e33d55d",
-                "reference": "7768dea6c579e9f6483d50be2463aabe9e33d55d",
+                "url": "https://api.github.com/repos/symfony/security-bundle/zipball/635b3773dc240a8f6e50e62efec5645e5b65ccf9",
+                "reference": "635b3773dc240a8f6e50e62efec5645e5b65ccf9",
                 "shasum": ""
             },
             "require": {
@@ -6375,7 +6409,7 @@
                 "symfony/config": "^7.4|^8.0",
                 "symfony/dependency-injection": "^7.4|^8.0",
                 "symfony/event-dispatcher": "^7.4|^8.0",
-                "symfony/http-foundation": "^7.4|^8.0",
+                "symfony/http-foundation": "^7.4.23|^8.1.11",
                 "symfony/http-kernel": "^7.4|^8.0",
                 "symfony/password-hasher": "^7.4|^8.0",
                 "symfony/security-core": "^8.1.10",
@@ -6433,7 +6467,7 @@
             "description": "Provides a tight integration of the Security component into the Symfony full-stack framework",
             "homepage": "https://symfony.com",
             "support": {
-                "source": "https://github.com/symfony/security-bundle/tree/v8.1.10"
+                "source": "https://github.com/symfony/security-bundle/tree/v8.1.11"
             },
             "funding": [
                 {
@@ -6453,8 +6487,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-27T13:53:09+00:00",
-            "published-time": "2026-10-28T18:24:35+00:00"
+            "time": "2026-11-04T08:39:20+00:00",
+            "published-time": "2026-11-04T11:31:29+00:00"
         },
         {
             "name": "symfony/security-core",
@@ -6615,16 +6649,16 @@
         },
         {
             "name": "symfony/security-http",
-            "version": "v8.1.10",
+            "version": "v8.1.11",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/security-http.git",
-                "reference": "0076dbc980eeadd9faadb802e2c19afc134333ee"
+                "reference": "ad71cde1a58b7f4f8badbced425fb9c157761e33"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/security-http/zipball/0076dbc980eeadd9faadb802e2c19afc134333ee",
-                "reference": "0076dbc980eeadd9faadb802e2c19afc134333ee",
+                "url": "https://api.github.com/repos/symfony/security-http/zipball/ad71cde1a58b7f4f8badbced425fb9c157761e33",
+                "reference": "ad71cde1a58b7f4f8badbced425fb9c157761e33",
                 "shasum": ""
             },
             "require": {
@@ -6680,7 +6714,7 @@
             "description": "Symfony Security Component - HTTP Integration",
             "homepage": "https://symfony.com",
             "support": {
-                "source": "https://github.com/symfony/security-http/tree/v8.1.10"
+                "source": "https://github.com/symfony/security-http/tree/v8.1.11"
             },
             "funding": [
                 {
@@ -6700,8 +6734,8 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-10-28T10:55:21+00:00",
-            "published-time": "2026-10-28T18:24:52+00:00"
+            "time": "2026-11-04T08:39:20+00:00",
+            "published-time": "2026-11-04T11:31:07+00:00"
         },
         {
             "name": "symfony/service-contracts",

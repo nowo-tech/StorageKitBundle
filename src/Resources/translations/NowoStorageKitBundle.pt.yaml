@@ -14,6 +14,7 @@ settings:
         edit: 'Editar a ligação'
     flash:
         saved: 'As definições de armazenamento foram guardadas.'
+        changed: 'Outra pessoa alterou este bucket entretanto. Reveja-o e guarde novamente.'
     section:
         config: 'Configuração'
     field:
@@ -191,3 +192,6 @@ section:
         off: 'Nenhum fornecedor selecionado: os carregamentos de imagens estão desativados.'
         incomplete: 'Falta um campo ao fornecedor selecionado (bucket, chave de acesso, chave secreta ou endpoint), ou um campo não é válido: os carregamentos continuam desativados.'
         test_failed: 'O último teste de ligação falhou. Verifique os campos e execute novamente Testar a ligação.'
+conflict:
+    retry: 'Os mesmos dados estavam a ser alterados ao mesmo tempo. Tente novamente.'
+    committed: 'Parte do pedido foi guardada antes de um conflito. Recarregue antes de tentar novamente.'

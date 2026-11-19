@@ -14,6 +14,7 @@ settings:
         edit: 'Editar la conexión'
     flash:
         saved: 'Se ha guardado la configuración del almacenamiento.'
+        changed: 'Otra persona ha cambiado este bucket mientras tanto. Revísalo y vuelve a guardar.'
     section:
         config: 'Configuración'
     field:
@@ -191,3 +192,6 @@ section:
         off: 'No hay ningún proveedor seleccionado: las subidas de imágenes están desactivadas.'
         incomplete: 'Al proveedor seleccionado le falta un campo (bucket, clave de acceso, clave secreta o endpoint), o un campo no es válido: las subidas siguen desactivadas.'
         test_failed: 'La última prueba de conexión falló. Revisa los campos y vuelve a ejecutar Probar la conexión.'
+conflict:
+    retry: 'Se estaban cambiando los mismos datos a la vez. Vuelve a intentarlo.'
+    committed: 'Parte de la petición se guardó antes de un conflicto. Recarga antes de volver a intentarlo.'

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Sync;
 
 use Doctrine\DBAL\Types\Types;
-use Doctrine\ORM\EntityManagerInterface;
 use Nowo\InstanceSettingsBundle\Exception\InvalidSettingValueException;
 use Nowo\StorageKitBundle\Audit\AuditRecorder;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
@@ -93,142 +92,213 @@ final readonly class StorageMove
     }
 
     /**
-     * Saves the target bucket.
+     * Saves the target bucket (1.7: one write unit under the owner lock). `$configure` applies the form to the target
+     * inside the unit; false (nothing written) when the owner's target changed since the page was read (another target
+     * saved, or this one discarded or switched to).
      *
      * @param list<string> $fields names of the changed fields
+     * @param (callable(StorageProfile): void)|null $configure applies the submitted fields (null: already applied
+     *                                                         to an unsaved target)
      */
-    public function saveTarget(StorageProfile $target, ?object $actor, array $fields): void
+    public function saveTarget(StorageProfile $target, ?object $actor, array $fields, ?callable $configure = null): bool
     {
-        $manager = $this->entityManager->manager();
-        $manager->persist($target);
-        $manager->flush();
-        $this->audit->record(StorageAuditEvent::MOVE_TARGET_SAVED, $target->getScope(), $actor, ['profile' => $target->getUuid(), 'fields' => implode(',', $fields)]);
+        $scope = $target->getScope();
+        // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
+        $saved = $this->entityManager->transactional(function () use ($target, $scope, $configure): bool {
+            if (!$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET)) {
+                return false;
+            }
+            if ($configure !== null) {
+                $configure($target);
+            }
+            // @igor-ignore - Entity manager of the current unit of work (reset between requests by Doctrine).
+            $this->entityManager->manager()->persist($target);
+
+            return true;
+        }, StorageProfileRepository::ownerLock($scope));
+        if ($saved) {
+            $this->audit->record(StorageAuditEvent::MOVE_TARGET_SAVED, $scope, $actor, ['profile' => $target->getUuid(), 'fields' => implode(',', $fields)]);
+        }
+
+        return $saved;
     }
 
     /**
-     * Queues the sync (new or resumed) and dispatches it when a bus is available.
+     * Queues the sync (new or resumed) and dispatches it when a bus is available, after the commit (1.7: one write
+     * unit under the owner lock). Null (nothing queued) when the pair is no longer the owner's active and target
+     * profiles, or a sync of the pair is already open.
      */
-    public function start(StorageProfile $active, StorageProfile $target, ?object $actor): StorageSync
+    public function start(StorageProfile $active, StorageProfile $target, ?object $actor): ?StorageSync
     {
-        $sync = $this->syncer->open($active, $target);
-        // @igor-ignore - Doctrine entity of the current unit of work, not a shared service.
-        $sync->setStartedBy($actor instanceof UserInterface ? mb_substr($actor->getUserIdentifier(), 0, 180) : null);
-        $this->entityManager->manager()->flush();
-        $this->audit->record(StorageAuditEvent::MOVE_SYNC_STARTED, $target->getScope(), $actor, ['sync' => $sync->getUuid(), 'from' => $active->getUuid(), 'to' => $target->getUuid()]);
+        $scope = $target->getScope();
+        // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
+        $sync = $this->entityManager->transactional(function () use ($active, $target, $scope, $actor): ?StorageSync {
+            if (!$this->profiles->isCurrent($active, $scope, StorageProfile::STATE_ACTIVE) || !$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET)) {
+                return null;
+            }
+            $existing = $this->syncs->forPair($active, $target);
+            if ($existing instanceof StorageSync) {
+                // Another request may have queued or run it since it was loaded.
+                $this->entityManager->manager()->refresh($existing);
+                if ($existing->isOpen()) {
+                    return null;
+                }
+            }
+            $sync = $this->syncer->open($active, $target);
+            // @igor-ignore - Doctrine entity of the current unit of work, not a shared service.
+            $sync->setStartedBy($actor instanceof UserInterface ? mb_substr($actor->getUserIdentifier(), 0, 180) : null);
+
+            return $sync;
+        }, StorageProfileRepository::ownerLock($scope));
+        if (!$sync instanceof StorageSync) {
+            return null;
+        }
+        $this->audit->record(StorageAuditEvent::MOVE_SYNC_STARTED, $scope, $actor, ['sync' => $sync->getUuid(), 'from' => $active->getUuid(), 'to' => $target->getUuid()]);
         $this->bus?->dispatch(new RunStorageSyncMessage((int) $sync->getId()));
 
         return $sync;
     }
 
     /**
-     * Cancels an open sync.
+     * Cancels an open sync. False when it was no longer open (it completed or failed meanwhile: 1.7, the status is
+     * written only from queued / running).
      */
-    public function cancel(StorageSync $sync, ?object $actor): void
+    public function cancel(StorageSync $sync, ?object $actor): bool
     {
-        $this->syncer->cancel($sync);
+        if (!$this->syncer->cancel($sync)) {
+            return false;
+        }
         $this->audit->record(StorageAuditEvent::MOVE_SYNC_CANCELLED, $sync->getTo()->getScope(), $actor, ['sync' => $sync->getUuid()]);
+
+        return true;
     }
 
     /**
-     * Forgets the target (and its syncs); objects already copied stay in that bucket.
+     * Forgets the target (and its syncs); objects already copied stay in that bucket. 1.7: one write unit under the
+     * owner lock; false (nothing deleted) when it is no longer the owner's target or a sync to it is open.
      */
-    public function discard(StorageProfile $target, ?object $actor): void
+    public function discard(StorageProfile $target, ?object $actor): bool
     {
-        $uuid    = $target->getUuid();
-        $manager = $this->entityManager->manager();
-        // @igor-ignore - Entity manager of the current unit of work (reset between requests by Doctrine).
-        $manager->remove($target);
-        $manager->flush();
-        $this->audit->record(StorageAuditEvent::MOVE_TARGET_DISCARDED, $target->getScope(), $actor, ['profile' => $uuid]);
+        $uuid  = $target->getUuid();
+        $scope = $target->getScope();
+        // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
+        $discarded = $this->entityManager->transactional(function () use ($target, $scope): bool {
+            if (!$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET) || $this->syncs->hasOpenTo($target)) {
+                return false;
+            }
+            // @igor-ignore - Entity manager of the current unit of work (reset between requests by Doctrine).
+            $this->entityManager->manager()->remove($target);
+
+            return true;
+        }, StorageProfileRepository::ownerLock($scope));
+        if ($discarded) {
+            $this->audit->record(StorageAuditEvent::MOVE_TARGET_DISCARDED, $scope, $actor, ['profile' => $uuid]);
+        }
+
+        return $discarded;
     }
 
     /**
-     * Switches the owner to the target bucket.
+     * Switches the owner to the target bucket: one write unit under the owner lock (1.7), the sync, its remaining files
+     * and both profiles' states read again inside it.
      *
      * @return self::ENV_MANAGED|self::NEW_FILES|self::NOT_SYNCED|self::SETTINGS_REFUSED|self::SWITCHED
      */
     public function switch(StorageProfile $active, StorageProfile $target, ?object $actor): string
     {
-        if ($this->resolver->isEnvManaged($active->getScope())) {
+        $scope = $active->getScope();
+        if ($this->resolver->isEnvManaged($scope)) {
             return self::ENV_MANAGED;
         }
-        $sync = $this->sync($active, $target);
-        if (!$sync instanceof StorageSync || !$sync->isCompleted()) {
-            return self::NOT_SYNCED;
-        }
-        if ($this->syncer->remaining($sync) > 0) {
-            return self::NEW_FILES;
-        }
-        $manager  = $this->entityManager->manager();
-        $files    = $this->entityManager->table(StoredFile::class);
-        $moved    = 0;
         $settings = $active->isSettingsBacked() ? $this->instanceSettings : null;
         $previous = $settings?->connection();
         $secret   = $settings?->secret();
         try {
-            $this->swap($manager, $files, $active, $target, $sync, $settings, $previous, $secret, $moved);
+            // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
+            $result = $this->entityManager->transactional(function () use ($active, $target, $scope, $settings, $previous, $secret): array {
+                $sync = $this->sync($active, $target);
+                if ($sync instanceof StorageSync) {
+                    $this->entityManager->manager()->refresh($sync);
+                }
+                if (!$sync instanceof StorageSync || !$sync->isCompleted() || !$this->profiles->isCurrent($active, $scope, StorageProfile::STATE_ACTIVE) || !$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET)) {
+                    return [self::NOT_SYNCED, 0];
+                }
+                if ($this->syncer->remaining($sync) > 0) {
+                    return [self::NEW_FILES, 0];
+                }
+
+                return [self::SWITCHED, $this->swap($active, $target, $sync, $settings, $previous, $secret)];
+            }, StorageProfileRepository::ownerLock($scope));
         } catch (InvalidSettingValueException) {
             // The section validates again (an endpoint or an allow-list may have changed since the target was saved):
             // the transaction was rolled back before any row changed, every file still reads from the active bucket.
-            $this->entityManager->resetIfClosed();
             $this->resolver->reset();
 
             return self::SETTINGS_REFUSED;
         }
         $this->resolver->reset();
-        $this->audit->record(StorageAuditEvent::MOVE_SWITCHED, $target->getScope(), $actor, ['from' => $active->getUuid(), 'to' => $target->getUuid(), 'files' => $moved]);
+        if ($result[0] === self::SWITCHED) {
+            $this->audit->record(StorageAuditEvent::MOVE_SWITCHED, $target->getScope(), $actor, ['from' => $active->getUuid(), 'to' => $target->getUuid(), 'files' => $result[1]]);
+        }
 
-        return self::SWITCHED;
+        return $result[0];
     }
 
     /**
      * Deletes the owner's retired profiles no file points at any more (their encrypted credentials go with them; the
      * syncs that used them are deleted by the foreign keys). Objects in those buckets are never touched. Returns the
-     * number of profiles forgotten. `$all`: every owner's (console).
+     * number of profiles forgotten. `$all`: every owner's (console). 1.7: one write unit (under the owner lock unless
+     * `$all`).
      */
     public function forgetRetired(?string $scope, ?object $actor, bool $all = false): int
     {
-        $manager   = $this->entityManager->manager();
-        $forgotten = [];
-        foreach ($this->profiles->retiredUnreferenced($scope, $all) as $profile) {
-            $forgotten[] = $profile->getUuid();
-            // @igor-ignore - Entity manager of the current unit of work (reset between requests by Doctrine).
-            $manager->remove($profile);
-        }
+        // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
+        $forgotten = $this->entityManager->transactional(function () use ($scope, $all): array {
+            $manager   = $this->entityManager->manager();
+            $forgotten = [];
+            foreach ($this->profiles->retiredUnreferenced($scope, $all) as $profile) {
+                $forgotten[] = $profile->getUuid();
+                // @igor-ignore - Entity manager of the current unit of work (reset between requests by Doctrine).
+                $manager->remove($profile);
+            }
+
+            return $forgotten;
+        }, $all ? null : StorageProfileRepository::ownerLock($scope));
         if ($forgotten === []) {
             return 0;
         }
-        $manager->flush();
         $this->audit->record(StorageAuditEvent::PROFILES_FORGOTTEN, $scope, $actor, ['profiles' => implode(',', $forgotten)]);
 
         return count($forgotten);
     }
 
     /**
+     * The switch itself, inside the unit: returns the number of files re-pointed.
+     *
      * @param array{provider: string, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string, prefix: string, access_key: string, path_style: bool}|null $previous
      */
-    private function swap(EntityManagerInterface $manager, string $files, StorageProfile $active, StorageProfile $target, StorageSync $sync, ?InstanceStorageSettings $settings, ?array $previous, ?string $secret, int &$moved): void
+    private function swap(StorageProfile $active, StorageProfile $target, StorageSync $sync, ?InstanceStorageSettings $settings, ?array $previous, ?string $secret): int
     {
-        // @igor-ignore - The closure runs synchronously inside the transaction; it is not stored.
-        $manager->wrapInTransaction(static function () use ($manager, $files, $active, $target, $sync, $settings, $previous, $secret, &$moved): void {
-            if ($settings instanceof InstanceStorageSettings && $previous !== null) {
-                // The instance bucket lives in the `storage` section: the section takes the target's connection first
-                // (validated again; a refusal changes nothing), the retired row keeps a copy of the old connection
-                // (encrypted by DoctrineEncrypt) so its files stay readable, and the target row reads the section.
-                $settings->write(self::connectionOf($target), (string) $target->getSecret());
-                $active->keepConnection($previous, $secret);
-                $target->useInstanceSettings();
-            }
-            $moved = (int) $manager->getConnection()->executeStatement(
-                'UPDATE ' . $files . ' SET profile_id = ? WHERE profile_id = ? AND id <= ?',
-                [$target->getId(), $active->getId(), $sync->getCursor()],
-                [Types::INTEGER, Types::INTEGER, Types::INTEGER],
-            );
-            $active->retire();
-            $manager->flush();
-            $target->activate();
-            $manager->flush();
-        });
+        $manager = $this->entityManager->manager();
+        if ($settings instanceof InstanceStorageSettings && $previous !== null) {
+            // The instance bucket lives in the `storage` section: the section takes the target's connection first
+            // (validated again; a refusal changes nothing), the retired row keeps a copy of the old connection
+            // (encrypted by DoctrineEncrypt) so its files stay readable, and the target row reads the section.
+            $settings->write($this->connectionOf($target), (string) $target->getSecret());
+            $active->keepConnection($previous, $secret);
+            $target->useInstanceSettings();
+        }
+        $moved = (int) $manager->getConnection()->executeStatement(
+            'UPDATE ' . $this->entityManager->table(StoredFile::class) . ' SET profile_id = ? WHERE profile_id = ? AND id <= ?',
+            [$target->getId(), $active->getId(), $sync->getCursor()],
+            [Types::INTEGER, Types::INTEGER, Types::INTEGER],
+        );
+        $active->retire();
+        $manager->flush();
+        $target->activate();
+        $manager->flush();
+
+        return $moved;
     }
 
     /**
@@ -236,7 +306,7 @@ final readonly class StorageMove
      *
      * @return array{provider: string, endpoint: string|null, public_endpoint: string|null, region: string, bucket: string, prefix: string, access_key: string, path_style: bool}
      */
-    private static function connectionOf(StorageProfile $profile): array
+    private function connectionOf(StorageProfile $profile): array
     {
         return [
             'provider'        => $profile->getProvider(),

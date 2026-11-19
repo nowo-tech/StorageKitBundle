@@ -14,6 +14,7 @@ settings:
         edit: 'Modifica la connessione'
     flash:
         saved: 'Le impostazioni di archiviazione sono state salvate.'
+        changed: 'Qualcun altro ha modificato questo bucket nel frattempo. Controllalo e salva di nuovo.'
     section:
         config: 'Configurazione'
     field:
@@ -191,3 +192,6 @@ section:
         off: 'Nessun provider selezionato: i caricamenti di immagini sono disattivati.'
         incomplete: 'Al provider selezionato manca un campo (bucket, chiave di accesso, chiave segreta o endpoint), oppure un campo non è valido: i caricamenti restano disattivati.'
         test_failed: 'L’ultimo test di connessione non è riuscito. Controlla i campi ed esegui di nuovo Prova la connessione.'
+conflict:
+    retry: 'Gli stessi dati venivano modificati nello stesso momento. Riprova.'
+    committed: 'Parte della richiesta è stata salvata prima di un conflitto. Ricarica prima di riprovare.'

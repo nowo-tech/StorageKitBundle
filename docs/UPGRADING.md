@@ -37,6 +37,44 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
 
 ## Unreleased
 
+Next minor (1.7.0), from **1.6.x**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
+
+No schema change. New dependencies `nowo-tech/transaction-contract` ^1.0 and `nowo-tech/transaction-doctrine` ^1.6.1
+(installed with the bundle; you do not have to register transaction-doctrine's own bundle). Behaviour changes
+(REQ-RUNTIME-003, [CONCURRENCY](CONCURRENCY.md)):
+
+1. **Lock conflicts answer 409 instead of 500.** A deadlock, lock wait timeout or serialization failure on the Storage /
+   Move pages, the upload endpoint or the download endpoint answers **409** with `X-Conflict-Code: CONFLICT_001` and
+   `Retry-After` (nothing committed: retry), or `CONFLICT_002` without `Retry-After` (part of the request committed:
+   reload). Pages go through your error page (an `HttpException`); the upload JSON keeps `error` / `message` and adds
+   `code` (`error` is `conflict`). To keep a 503, set `nowo_storage_kit.conflict_response.status: 503`. Unique
+   violations and lost connections are not mapped and stay errors. Your own routes are never answered by the bundle.
+2. **Uploads rethrow lock conflicts.** `ImageUploaderInterface::uploadImage()` / `SquareImageUploaderInterface`
+   (and the deprecated `ImageUploader::upload()`) used to turn every insert failure into `UploadRefused` (`storage`,
+   503). A deadlock or lock wait timeout of the insert is now rethrown as the DBAL exception (a `RetryableException`),
+   after the objects written are deleted again, so your transaction can roll back and replay. Catch it (or let
+   transaction-doctrine / your retry layer handle it) if you call the uploader from your own code.
+3. **Owner lock on PostgreSQL.** Storage / Move writes take `pg_advisory_xact_lock()` and wait up to the session's
+   `lock_timeout`. With the PostgreSQL default (0: no limit) a stuck writer makes the next one wait; set a
+   `lock_timeout` on the connection (for example 5s). On MySQL / MariaDB the wait is `conflict_response.owner_lock_timeout`
+   (default 5 seconds, `GET_LOCK`).
+4. **`StorageMove` results.** `start()` returns `?StorageSync` (null: not queued, the pair changed or a sync is already
+   open), `saveTarget()`, `cancel()` and `discard()` return `bool` (false: nothing written because the owner changed
+   meanwhile; the pages show "This action is not available now."). `StorageSyncer::cancel()` returns `bool`.
+   `saveTarget()` takes an optional fourth argument, a callable that applies the form to the target inside the unit.
+   These are internal services of the pages; adapt only if you call them directly.
+5. **Default entity manager.** With `doctrine.entity_manager: null` the Storage / Move units still flush your default
+   manager (as before; REQ-ARCH-001 rule 6 changes in 2.0) but inside one transaction-doctrine unit; a failed flush no
+   longer leaves a closed manager behind (it is replaced) and an open one is never cleared or reset. The switch and
+   `nowo:storage-kit:adopt-instance-bucket` no longer use `wrapInTransaction()`, which closed it on any failure. The
+   bundle does not use transaction-doctrine's `forHostEntityManager()` (it would throw `LogicException` on the
+   decrypted bucket secret, which always looks like a pending change); with a dedicated manager the units use
+   `forEntityManager()`.
+
 ## To 1.6.1
 
 From **1.6.0**:

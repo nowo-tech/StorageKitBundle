@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Upload;
 
+use Doctrine\DBAL\Exception\RetryableException;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
 
 /**
@@ -25,6 +26,8 @@ interface ImageUploaderInterface
      * @param object $user security user (writes are checked by the context)
      *
      * @throws UploadRefused
+     * @throws RetryableException a deadlock or lock wait timeout on the insert (1.7: rethrown, no longer an
+     *                            UploadRefused; the objects written are deleted again, so a retry is safe)
      */
     public function uploadImage(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFileView;
 

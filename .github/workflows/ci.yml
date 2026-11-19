@@ -140,11 +140,53 @@ jobs:
         if: matrix.db.dbal != ''
         run: composer require "doctrine/dbal:${{ matrix.db.dbal }}" --with-all-dependencies --no-interaction --no-progress --prefer-dist
 
-      - name: Lifecycle and architecture-bar tests (purge, references, moves, adoption, DBAL upload insert)
+      - name: Lifecycle, architecture-bar and concurrency tests (purge, references, moves, adoption, DBAL upload insert, two-connection races)
+        timeout-minutes: 15
         run: |
           export STORAGE_KIT_TEST_DATABASE_URL="${{ matrix.db.scheme }}://${{ matrix.db.user }}:${DB_CI_PASSWORD}@127.0.0.1:${{ matrix.db.port }}/storagekit?${{ matrix.db.query }}"
           vendor/bin/phpunit --no-coverage tests/Integration/Lifecycle
           vendor/bin/phpunit --no-coverage tests/Integration/Functional/ArchitectureBarTest.php
+          vendor/bin/phpunit --no-coverage tests/Integration/Concurrency
+          vendor/bin/phpunit --no-coverage tests/Integration/Functional/ConcurrentWritesTest.php
+
+  # Dependency floor: the code must work with the LOWEST nowo-tech/transaction-* versions composer.json allows (a host
+  # can run `composer update nowo-tech/storage-kit-bundle` without updating them), and the demo lock must install
+  # what the bundle requires (the demo installs from its lock, so a requirement added later is never installed and
+  # Demo smoke fails with "class not found").
+  deps-floor:
+    name: Dependency floor (nowo-tech/transaction-* lowest, demo lock)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Demo lock satisfies the bundle's nowo-tech requirements
+        run: python3 .scripts/check-demo-lock.py . --only 'nowo-tech/*'
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: json, pdo_sqlite, sodium, gd
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: |
+          composer config platform.php 8.4.1
+          composer update --prefer-dist --no-progress --no-interaction
+
+      - name: Downgrade nowo-tech/transaction-* to the lowest allowed versions
+        run: |
+          composer update 'nowo-tech/transaction-*' --prefer-lowest --prefer-dist --no-progress --no-interaction
+          composer show 'nowo-tech/transaction-*'
+
+      - name: PHPStan at the floor
+        run: composer phpstan
+
+      - name: Test suite at the floor
+        timeout-minutes: 15
+        run: vendor/bin/phpunit --no-coverage
 
   code-style:
     name: Code Style

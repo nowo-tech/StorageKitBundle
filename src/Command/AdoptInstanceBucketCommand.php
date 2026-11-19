@@ -92,15 +92,15 @@ final class AdoptInstanceBucketCommand extends Command
             'path_style'      => $profile->isPathStyle(),
         ];
         $secret   = (string) $profile->getSecret();
-        $manager  = $this->entityManager->manager();
         $settings = $this->settings;
         try {
+            // 1.7: one write unit (transaction-doctrine runner, the host manager is never closed) under the instance
+            // owner lock.
             // @igor-ignore - The closure runs synchronously inside the transaction; it is not stored.
-            $manager->wrapInTransaction(static function () use ($manager, $settings, $profile, $connection, $secret): void {
+            $this->entityManager->transactional(static function () use ($settings, $profile, $connection, $secret): void {
                 $settings->write($connection, $secret);
                 $profile->useInstanceSettings();
-                $manager->flush();
-            });
+            }, StorageProfileRepository::ownerLock(null));
         } catch (InvalidSettingValueException $e) {
             $io->error(sprintf('The "storage" section refused the connection (fields: %s). Nothing was changed.', implode(', ', array_keys($e->violations))));
 

@@ -21,6 +21,9 @@
 | `src/DependencyInjection/Compiler/FileDeliveryPortsPass.php` | Bundle / DI | FR-DI-010 |
 | `src/EventListener/RequestBoundaryListener.php` | Bundle / DI | FR-RUN-001 |
 | `src/EventListener/UnitOfWorkFrames.php` | Bundle / DI | FR-RUN-001 |
+| `src/Concurrency/StorageConflicts.php` | Bundle / DI | FR-RUN-002 |
+| `src/EventListener/StorageKitConflictListener.php` | Bundle / DI | FR-RUN-002 |
+| `src/Doctrine/OwnerLock.php` | Bundle / DI | FR-RUN-002 |
 
 ## Storage
 
@@ -145,7 +148,7 @@
 | `src/Entity/StoredFile.php` | Files data | FR-DATA-001 |
 | `src/Entity/StoredFileReference.php` | Files data | FR-DATA-001, FR-REF-003 |
 | `src/Repository/StoredFileRepository.php` | Files data | FR-DATA-001 |
-| `src/Doctrine/StorageEntityManager.php` | Files data | FR-DATA-002 |
+| `src/Doctrine/StorageEntityManager.php` | Files data | FR-DATA-002, FR-RUN-002 |
 | `src/Doctrine/TablePrefixListener.php` | Files data | FR-DATA-002 |
 | `src/Identifier/ExactIdentifier.php` | Files data | FR-DATA-003 |
 | `src/PersonalData/UploaderIdentity.php` | Files data | FR-DATA-003, FR-GDPR-001 |
