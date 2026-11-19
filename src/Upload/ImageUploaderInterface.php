@@ -6,8 +6,8 @@ namespace Nowo\StorageKitBundle\Upload;
 
 use Doctrine\DBAL\Exception as DBALException;
 use Doctrine\DBAL\Exception\RetryableException;
-use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\TransactionContract\TransientStorageFailure;
 
 /**
  * Port of the image upload (1.3, public API, SemVer; architecture bar rule 1): aliased to {@see ImageUploader};
