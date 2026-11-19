@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Upload;
 
+use Doctrine\DBAL\Exception as DBALException;
 use Doctrine\DBAL\Exception\RetryableException;
+use Nowo\TransactionContract\TransientStorageFailure;
 
 /**
  * Port of the square image upload (1.6, public API, SemVer): profile pictures, logos and any other image shown as a
@@ -26,6 +28,9 @@ interface SquareImageUploaderInterface
      * @throws UploadRefused
      * @throws RetryableException a deadlock or lock wait timeout on the insert (1.7: rethrown, no longer an
      *                            UploadRefused; the objects written are deleted again, so a retry is safe)
+     * @throws TransientStorageFailure a runner's transient failure or the owner lock not obtained in time (1.7:
+     *                                 rethrown the same way)
+     * @throws DBALException a lost savepoint (commit outcome unknown, CONFLICT_002; 1.7: rethrown the same way)
      */
     public function uploadSquareImage(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFileView;
 }

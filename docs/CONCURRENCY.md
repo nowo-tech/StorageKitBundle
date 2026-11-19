@@ -106,7 +106,11 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
 - **Stale form, last writer wins.** Two admins editing the same existing bucket both save; the second save overwrites
   the first (both are audited with the changed field names). The owner lock prevents duplicates, not this.
 - **Owner lock inside your transaction.** If you call a Move / Storage write inside a transaction you opened, the
-  MySQL / MariaDB lock is released when the bundle's unit ends, before your commit.
+  MySQL / MariaDB lock is released when the bundle's unit ends, before your commit. `GET_LOCK()` is session-scoped,
+  not transaction-scoped: a first upload made inside your transaction (which creates the instance `storage` row on
+  first use) can therefore still race another one and create a duplicate instance row until your commit. The fix
+  (holding the lock until the outer commit) is planned for a later patch; detection and recovery are in
+  [UPGRADING](UPGRADING.md#duplicate-instance-rows-140161).
 - **PostgreSQL REPEATABLE READ.** With a REPEATABLE READ default, the re-check inside a unit reads the snapshot taken at
   its first statement (the lock), so a change committed while waiting for the lock is not seen. READ COMMITTED (the
   default) is not affected.
