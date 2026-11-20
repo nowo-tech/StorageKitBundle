@@ -59,9 +59,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+The last 1.x minor before 2.0: without configuration it behaves as 1.7.1, and it warns about every default 2.0 flips.
+
+### Added
+
+- **`doctrine.private_entity_manager`** (REQ-ARCH-001 rule 6, zero-config): `true` makes every bundle read and write
+  go through a private entity manager of the bundle's own (transaction-doctrine's `PrivateManager\PrivateEntityManager`),
+  created on the connection, mapping and event manager of `doctrine.entity_manager`, else of your default entity
+  manager. Same tables, same connection, no migration, no second manager to declare. The admin pages and console
+  commands (profile save, test and switch, bucket moves, the purge, the retired-profile cleanup, the adoption) then
+  never flush your pending changes, and a failed bundle write closes only the private manager. It is dropped at the
+  start and end of every request, Messenger message and outermost console command (FrankenPHP worker mode with the
+  kernel reset off included) and at `kernel.reset`, and replaced when closed. `false` keeps the 1.x behaviour; 2.0
+  defaults to `true`. How files are stored, delivered and authorised does not change.
+- **Host-flush probe:** while `private_entity_manager` is unset, every flush of your default manager by the bundle first
+  runs transaction-doctrine's read-only `HostFlushProbe`: each of your entity classes with pending changes that flush
+  writes triggers one deprecation per request, message or command ("Your pending changes to App\X were flushed by
+  NowoStorageKitBundle; 2.0 no longer does."). The deprecation log is the migration list (UPGRADING "To 1.8.0").
+
+### Deprecated
+
+- **Leaving `doctrine.private_entity_manager` unset** while the bundle entities live on your default manager
+  (`entity_manager` null or naming the default manager): a build-time deprecation names the option, the 2.0 default
+  (`true`) and the line that opts in now.
+- **`ImageUploader::upload()`** (the entity-returning upload, deprecated in 1.3) now triggers a runtime deprecation on
+  every call; 2.0 removes it. Use `ImageUploaderInterface::uploadImage()`. `FileDelivery::respond()` keeps its 1.5
+  runtime deprecation (removed in 2.0).
+- **Relying on `nowo-tech/instance-settings-bundle` being installed by this package:** 2.0 moves it to `suggest`
+  (announced in 1.3). Composer gives no notice; require it yourself when you use the settings-backed instance bucket.
+
 ### Changed
 
-- Requires `nowo-tech/transaction-doctrine` ^1.8.1 (fixes GHSA-9wh3-m3m5-jffx and GHSA-65w2-9r4h-848g).
+- Requires `nowo-tech/transaction-doctrine` ^1.9 (the private-manager kit and the host-flush probe; 1.8.1 fixed
+  GHSA-9wh3-m3m5-jffx and GHSA-65w2-9r4h-848g).
+- The announced 2.0 default of the bundle's entity manager is now **the private manager on your default connection**
+  instead of "a dedicated manager": no host has to declare a second Doctrine manager. `doctrine.entity_manager: <name>`
+  stays as the option for a dedicated manager.
 
 ## [1.7.1] - 2026-11-19
 

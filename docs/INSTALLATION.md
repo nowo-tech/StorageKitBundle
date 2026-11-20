@@ -42,8 +42,10 @@ composer require nowo-tech/storage-kit-bundle
 composer require nowo-tech/instance-settings-bundle
 ```
 
-New installs: give the bundle its own entity manager on your connection
-([USAGE](USAGE.md#a-dedicated-entity-manager-15)), so no bundle write ever flushes your unit of work.
+New installs: set `nowo_storage_kit.doctrine.private_entity_manager: true` (1.8, the 2.0 default; the recipe sets
+it): the bundle writes through a private entity manager on your connection, so no bundle write ever flushes your unit
+of work ([USAGE](USAGE.md#the-private-entity-manager-18)). A dedicated manager stays available for DDD hosts
+([USAGE](USAGE.md#a-dedicated-entity-manager-15)).
 
 ## Symfony Flex recipe
 
