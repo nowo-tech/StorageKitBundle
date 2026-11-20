@@ -1,6 +1,6 @@
 # Code inventory — 001-baseline
 
-**Last audited**: 2026-11-16 (sweep: 2026-11-13 baseline + later sources)
+**Last audited**: 2026-11-20 (v1.7.1)
 **Scope**: every production file under `src/` (`find src -type f | wc -l`). Tests, demo and generated caches are out of scope.
 
 ## Bundle / DI
@@ -21,6 +21,7 @@
 | `src/DependencyInjection/Compiler/FileDeliveryPortsPass.php` | Bundle / DI | FR-DI-010 |
 | `src/EventListener/RequestBoundaryListener.php` | Bundle / DI | FR-RUN-001 |
 | `src/EventListener/UnitOfWorkFrames.php` | Bundle / DI | FR-RUN-001 |
+| `src/DependencyInjection/Compiler/StorageKitCommitTrackingPass.php` | Bundle / DI | FR-RUN-002 |
 | `src/Concurrency/StorageConflicts.php` | Bundle / DI | FR-RUN-002 |
 | `src/EventListener/StorageKitConflictListener.php` | Bundle / DI | FR-RUN-002 |
 | `src/Doctrine/OwnerLock.php` | Bundle / DI | FR-RUN-002 |
@@ -220,13 +221,13 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 
 | Category | Files |
 | --- | --- |
-| Bundle / DI | 14 |
+| Bundle / DI | 18 |
 | Storage | 12 |
 | SSRF | 2 |
 | Profiles | 5 |
 | Instance Settings | 3 |
-| Contexts and scopes | 8 |
-| Upload | 9 |
+| Contexts and scopes | 9 |
+| Upload | 11 |
 | Download and rendering | 14 |
 | References and purge | 8 |
 | Moves | 10 |
@@ -234,4 +235,5 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 | Personal data and audit | 7 |
 | Admin UI and access | 20 |
 | Translations | 7 |
-| **Total production sources** | **127 / 127** (`find src -type f \| wc -l` = 127) |
+| Removal port and default remover | 3 |
+| **Total production sources** | **137 / 137** (`find src -type f \| wc -l` = 137) |
