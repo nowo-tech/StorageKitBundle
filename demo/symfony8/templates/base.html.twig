@@ -1,24 +1,20 @@
-{#- REQ-DEMO-014: the demo shell is UiKit's admin layout with UiKit's default theme (nowo-ui.css from the bundle's own
-    asset package, no CSS framework, no CDN, no token overrides). It is also the host layout of the Storage and Move
-    pages and the Instance Settings sections (nowo_ui_kit.layouts.admin). The header menu lists the demo pages. -#}
-{% extends '@NowoUiKit/layout/admin.html.twig' %}
-
-{% block nowo_ui_document_title %}{% block title %}Storage Kit Demo{% endblock %}{% endblock %}
-
-{% block nowo_ui_navigation %}
-    {% set _route = app.request.attributes.get('_route')|default('') %}
-    <header class="nowo-ui-header" data-testid="demo-masthead">
-        <a class="nowo-ui-brand" href="{{ path('demo_home') }}">Storage Kit Bundle Demo</a>
-        <nav class="nowo-ui-menu" aria-label="Demo">
-            <a class="nowo-ui-link" href="{{ path('demo_notes') }}"{% if _route == 'demo_notes' %} aria-current="page"{% endif %}>Notes</a>
-            <a class="nowo-ui-link" href="{{ path('nowo_storage_kit_settings') }}"{% if _route == 'nowo_storage_kit_settings' %} aria-current="page"{% endif %}>Storage</a>
-            <a class="nowo-ui-link" href="{{ path('nowo_storage_kit_move') }}"{% if _route == 'nowo_storage_kit_move' %} aria-current="page"{% endif %}>Move</a>
-        </nav>
-        <span class="nowo-ui-badge nowo-ui-badge--neutral">Symfony 8 · FrankenPHP</span>
-    </header>
-{% endblock %}
-
-{% block nowo_ui_content %}{% block body %}{% endblock %}{% endblock %}
+{#- REQ-DEMO-014: the demo runs inside UiKit's shared demo platform shell (@NowoUiKit/demo_platform/layout.html.twig).
+    This file only declares the demo (nowo_ui_demo_platform). It is also the host layout of the Storage and Move pages
+    and the Instance Settings sections (nowo_ui_kit.layouts). The demo users sign in with HTTP basic, so no auth link. -#}
+{% extends '@NowoUiKit/demo_platform/layout.html.twig' %}
+{% set nowo_ui_demo_platform = {
+    bundle: 'Storage Kit',
+    home_route: 'demo_home',
+    repository: 'https://github.com/nowo-tech/StorageKitBundle',
+    translation_domain: false,
+    nav: [
+        {label: 'Overview', route: 'demo_home', section: 'Demo'},
+        {label: 'Notes', route: 'demo_notes', section: 'Demo'},
+        {label: 'Storage', route: 'nowo_storage_kit_settings', section: 'Administration'},
+        {label: 'Move', route: 'nowo_storage_kit_move', section: 'Administration'},
+    ],
+} %}
+{% block nowo_ui_document_title %}{% block title %}Storage Kit Demo{% endblock %} — Symfony 8{% endblock %}
 
 {% block nowo_ui_scripts %}
     {{ parent() }}

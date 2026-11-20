@@ -65,6 +65,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Demo: runs in UiKit's demo platform shell (`@NowoUiKit/demo_platform/layout.html.twig`, UiKit ^2.60): the demo declares itself in `templates/base.html.twig` (aside items for the notes and the Storage / Move pages), the pages use the page header and section cards, the demo's own masthead and the inline styles on the notes are gone, a demo-platform e2e spec checks the layout rules, the drawer and axe, and the README screenshots no longer show the Symfony toolbar.
+
 ## [1.8.1] - 2026-11-20
 
 ### Fixed

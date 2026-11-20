@@ -2,22 +2,35 @@
 
 {% block title %}Home - Storage Kit Demo{% endblock %}
 
+{% block nowo_ui_page_header %}
+    {% set _toolbar %}
+        <a class="nowo-ui-btn nowo-ui-btn--outline" href="{{ path('nowo_storage_kit_settings') }}">Storage settings</a>
+        <a class="nowo-ui-btn nowo-ui-btn--primary" href="{{ path('demo_notes') }}" data-testid="demo-open-notes">Open the notes</a>
+    {% endset %}
+    {{ include(nowo_ui_partial('page_header'), {
+        title: 'S3-compatible storage for Symfony',
+        intro: 'Private S3-compatible buckets for the files of your texts, served through the application.',
+        toolbar: _toolbar,
+    }) }}
+{% endblock %}
+
 {% block body %}
-<div class="nowo-ui-card">
-    <div class="nowo-ui-card__header"><h1>S3-compatible storage for Symfony</h1></div>
-    <div class="nowo-ui-card__body">
-        <p>
-            Files uploaded into texts live in a private S3-compatible bucket (a RustFS container here). Texts keep
-            <code class="nowo-ui-code">![alt](storage-file:&lt;uuid&gt;)</code>, never a bucket URL; downloads go through the application,
-            which asks the file's context who may read it. The bucket credentials are encrypted at rest.
-        </p>
-        <ul>
-            <li><strong>Notes</strong> — upload an image into a note (needs a signed-in user: <code class="nowo-ui-code">alice</code> / <code class="nowo-ui-code">demo</code>).</li>
-            <li><strong>Storage</strong> — the instance bucket, its connection test and usage (<code class="nowo-ui-code">admin</code> / <code class="nowo-ui-code">demo</code>).</li>
-            <li><strong>Move</strong> — copy every file to another bucket, verified by SHA-256, then switch.</li>
-        </ul>
-    </div>
-</div>
-<a class="nowo-ui-btn nowo-ui-btn--primary" href="{{ path('demo_notes') }}" data-testid="demo-open-notes">Open the notes</a>
-<a class="nowo-ui-btn nowo-ui-btn--outline" href="{{ path('nowo_storage_kit_settings') }}">Storage settings</a>
+    {% embed '@NowoUiKit/demo_platform/_section.html.twig' with {title: 'How it works', kind: 'content'} %}
+        {% block section_body %}
+            <p>
+                Files uploaded into texts live in a private S3-compatible bucket (a RustFS container here). Texts keep
+                <code class="nowo-ui-code">![alt](storage-file:&lt;uuid&gt;)</code>, never a bucket URL; downloads go through the application,
+                which asks the file's context who may read it. The bucket credentials are encrypted at rest.
+            </p>
+        {% endblock %}
+    {% endembed %}
+    {% embed '@NowoUiKit/demo_platform/_section.html.twig' with {title: 'Pages of the demo', kind: 'list'} %}
+        {% block section_body %}
+            <ul>
+                <li><strong>Notes</strong> — upload an image into a note (needs a signed-in user: <code class="nowo-ui-code">alice</code> / <code class="nowo-ui-code">demo</code>).</li>
+                <li><strong>Storage</strong> — the instance bucket, its connection test and usage (<code class="nowo-ui-code">admin</code> / <code class="nowo-ui-code">demo</code>).</li>
+                <li><strong>Move</strong> — copy every file to another bucket, verified by SHA-256, then switch.</li>
+            </ul>
+        {% endblock %}
+    {% endembed %}
 {% endblock %}
