@@ -31,8 +31,11 @@ use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
 use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 
+use function array_key_exists;
 use function count;
+use function getenv;
 use function in_array;
+use function is_array;
 use function preg_replace;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 
@@ -70,8 +73,9 @@ abstract class KernelTestCase extends TestCase
             'scopes'    => ['enabled' => true, 'access_checker' => ScopeAccess::class],
             'endpoints' => ['allowed_hosts' => ['minio'], 'resolve_dns' => false],
         ];
-        $id     = (string) preg_replace('/\W+/', '_', static::class . '_' . $this->name() . '_' . count($this->kernels));
-        $kernel = new StorageKitTestKernel(
+        $config['doctrine'] = self::doctrineMode(is_array($config['doctrine'] ?? null) ? $config['doctrine'] : []);
+        $id                 = (string) preg_replace('/\W+/', '_', static::class . '_' . $this->name() . '_' . count($this->kernels));
+        $kernel             = new StorageKitTestKernel(
             $id,
             static function (ContainerConfigurator $container) use ($config, $extra, $memory, $without): void {
                 $container->extension('nowo_storage_kit', $config);
@@ -113,6 +117,34 @@ abstract class KernelTestCase extends TestCase
         }
 
         return $kernel;
+    }
+
+    /**
+     * 1.8: the `private_entity_manager` mode of a test kernel. A test that sets the key keeps it (null or false: the
+     * notice and the host-flush probe). Otherwise, without `entity_manager`: true (the 2.0 behaviour, opted in now), or
+     * false when STORAGE_KIT_TEST_HOST_EM=1 (the whole suite in host mode, as `make test-with-db` and the
+     * "host mode" CI legs run it; the bundle's notice is a silenced deprecation, which PHPUnit does not count). With
+     * `entity_manager` (a dedicated manager) the key stays unset: no notice.
+     *
+     * @param array<string, mixed> $doctrine
+     *
+     * @return array<string, mixed>
+     */
+    public static function doctrineMode(array $doctrine): array
+    {
+        if (array_key_exists('private_entity_manager', $doctrine) || isset($doctrine['entity_manager'])) {
+            return $doctrine;
+        }
+
+        return $doctrine + ['private_entity_manager' => !self::hostMode()];
+    }
+
+    /**
+     * Whether the suite runs in host mode (STORAGE_KIT_TEST_HOST_EM=1): the bundle flushes the default manager.
+     */
+    public static function hostMode(): bool
+    {
+        return getenv('STORAGE_KIT_TEST_HOST_EM') === '1';
     }
 
     /**
@@ -185,6 +217,28 @@ abstract class KernelTestCase extends TestCase
         self::assertInstanceOf(EntityManagerInterface::class, $manager);
 
         return $manager;
+    }
+
+    /**
+     * The manager the bundle reads and writes through (1.8: the private manager with `private_entity_manager: true`,
+     * else the default or dedicated one).
+     */
+    protected function bundleManager(StorageKitTestKernel $kernel): EntityManagerInterface
+    {
+        return $this->service($kernel, StorageEntityManager::class)->manager();
+    }
+
+    /**
+     * Forgets every loaded entity: the application's default manager and, when it is another one, the bundle's.
+     */
+    protected function clearManagers(StorageKitTestKernel $kernel): void
+    {
+        $host = $this->entityManager($kernel);
+        $host->clear();
+        $bundle = $this->bundleManager($kernel);
+        if ($bundle !== $host) {
+            $bundle->clear();
+        }
     }
 
     protected function buckets(StorageKitTestKernel $kernel): InMemoryBuckets

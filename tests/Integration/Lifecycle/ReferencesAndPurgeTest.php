@@ -157,11 +157,11 @@ final class ReferencesAndPurgeTest extends KernelTestCase
 
         // A profile that is not usable any more keeps the row too.
         $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET region = 'BAD'");
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         self::assertSame(1, $tester->execute(['--days' => '0']));
 
         $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET region = 'us-east-1'");
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $this->buckets($kernel)->failDeletes = false;
         self::assertSame(0, $tester->execute(['--days' => '0']));
         self::assertStringContainsString('purged: 1', $this->flat($tester));
@@ -189,7 +189,7 @@ final class ReferencesAndPurgeTest extends KernelTestCase
 
         self::assertSame(2, $data->erase('alice'));
         self::assertSame([], $data->export('alice'));
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $row = $this->entityManager($kernel)->find(StoredFile::class, $shown->getId());
         self::assertSame([StoredFile::ANONYMOUS_NAME, null], [$row?->getOriginalName(), $row?->getUploadedBy()]);
         self::assertNull($row?->getOrphanedSince());
@@ -218,7 +218,7 @@ final class ReferencesAndPurgeTest extends KernelTestCase
 
         self::assertSame(2, $data->eraseUser($user));
         self::assertSame([], $data->exportUser($user));
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $row = $this->entityManager($kernel)->find(StoredFile::class, $shown->getId());
         self::assertSame([StoredFile::ANONYMOUS_NAME, null, null], [$row?->getOriginalName(), $row?->getUploadedBy(), $row?->getUploadedByKey()]);
         self::assertSame('2000', $this->entityManager($kernel)->find(StoredFile::class, $hidden->getId())?->getOrphanedSince()?->format('Y'));
@@ -290,7 +290,7 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         self::assertStringContainsString('Identifiers keyed: 1 (files: 1)', $this->flat($tester), 'idempotent: only bob is left');
         self::assertSame(2, $tester->execute(['--batch' => 'x']));
 
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $key = fn (StoredFile $f): ?string => $this->entityManager($kernel)->find(StoredFile::class, $f->getId())?->getUploadedByKey();
         self::assertSame([AppUser::class . ':7', AppUser::class . ':8', null], [$key($alice), $key($bob), $key($admin)]);
         self::assertCount(2, $this->service($kernel, StoredFilesPersonalData::class)->exportUser(new AppUser(7, 'alice@new.example')));
@@ -316,7 +316,7 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         self::assertSame(0, $tester->execute([]));
         self::assertStringContainsString('Identifiers keyed: 3 (files: 2);', $this->flat($tester), 'a file uploaded before its current user existed belonged to a former holder of the identifier');
 
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $key = fn (StoredFile $f): ?string => $this->entityManager($kernel)->find(StoredFile::class, $f->getId())?->getUploadedByKey();
         self::assertSame([null, DatedUser::class . ':10', DatedUser::class . ':11'], [$key($dave), $key($erin), $key($fred)]);
     }

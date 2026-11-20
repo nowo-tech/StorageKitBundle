@@ -6,6 +6,7 @@
 - [Standard Symfony host](#standard-symfony-host)
 - [DDD / hexagonal host](#ddd--hexagonal-host)
   - [The ports (1.5)](#the-ports-15)
+  - [The private entity manager (1.8)](#the-private-entity-manager-18)
   - [A dedicated entity manager (1.5)](#a-dedicated-entity-manager-15)
   - [Square images: profile pictures and logos (1.6)](#square-images-profile-pictures-and-logos-16)
 - [The instance bucket](#the-instance-bucket)
@@ -65,8 +66,9 @@ hooks are services you inject (`StoredImageResolver`, `StoredFilesPersonalData::
 Host-called writes never flush your entity manager: uploads (1.3) and profile rows (1.4) are DBAL inserts, references
 are DBAL statements, and since 1.5 the GDPR erasure and the settings listener are DBAL updates. The admin pages and the
 console commands (profile save and test, bucket moves, purge) still flush the bundle's manager; with the default
-`doctrine.entity_manager: null` that is your default one, so for **new installs** give the bundle its own manager
-([below](#a-dedicated-entity-manager-15)); existing installs can keep `null`, the 1.x default (2.0 changes it).
+`doctrine.entity_manager: null` that is your default one, so set `doctrine.private_entity_manager: true`
+([below](#the-private-entity-manager-18), 1.8; the 2.0 default, where `false` is removed): the bundle then writes
+through a private manager on your connection and never flushes your pending changes.
 
 ## DDD / hexagonal host
 
@@ -146,6 +148,26 @@ HttpFoundation type). All are public service aliases:
 
 `DeliverableFile` keeps the pre-signed URL and the bucket stream out of its properties (dumps, logs, JSON and
 serialization never show them). Never log `location()`: it grants access to the object until it expires.
+
+### The private entity manager (1.8)
+
+```yaml
+nowo_storage_kit:
+    doctrine:
+        private_entity_manager: true   # the 2.0 default; false is removed in 2.0
+```
+
+Nothing else to configure: the bundle reads and writes its entities through a private entity manager of its own
+(transaction-doctrine's `PrivateManager\PrivateEntityManager`) on the connection, mapping and event manager of
+`doctrine.entity_manager`, else of your default manager. The tables do not move. No bundle flush ever writes your
+pending changes, a failed bundle write closes only the private manager (replaced on its next use), and the manager is
+dropped at the start and end of every request, Messenger message and outermost console command (FrankenPHP worker mode
+with the kernel reset off included). Your managers are never flushed, cleared, closed or reset by it. Uploads,
+references and the erasure still share your open transaction (as savepoints), as before.
+
+Unset or `false`, while the bundle entities live on your default manager, a deprecation is logged at build time and
+the host-flush probe reports, per request, every class of yours with pending changes a bundle flush writes
+([UPGRADING "To 1.8.0"](UPGRADING.md#to-180)).
 
 ### A dedicated entity manager (1.5)
 
@@ -270,8 +292,9 @@ overlapping ids, re-created users), implement `UploaderKeyResolverInterface`.
 - `ImageUploader::upload()` still returns the `StoredFile` entity (deprecated since 1.3; use `uploadImage()`), and
   `FileDelivery::respond()` still returns an HttpFoundation response (deprecated since 1.5; use
   `FileDeliveryInterface`).
-- With `doctrine.entity_manager: null` (the 1.x default, kept for existing installs; 2.0 changes it) the admin and CLI
-  writes flush your default manager; set a dedicated one ([above](#a-dedicated-entity-manager-15)).
+- With `doctrine.entity_manager: null` and `private_entity_manager` not `true` (the 1.x default; 2.0 always uses the
+  private manager) the admin and CLI writes flush your default manager; set `private_entity_manager: true`
+  ([above](#the-private-entity-manager-18)) or a dedicated manager ([above](#a-dedicated-entity-manager-15)).
 - `nowo-tech/instance-settings-bundle` is still installed through this package's `require` (it moves to `suggest` in
   2.0), although only the settings-backed instance bucket (`instance_profile: null`) needs it registered; a
   config-pinned bucket (from `profiles` or `config_profile_provider`) works without it. Relying on the implicit install

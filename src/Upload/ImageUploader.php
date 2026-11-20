@@ -33,6 +33,7 @@ use function mb_substr;
 use function preg_replace;
 use function str_replace;
 use function strlen;
+use function trigger_deprecation;
 use function trim;
 
 /**
@@ -78,8 +79,8 @@ final readonly class ImageUploader implements ImageUploaderInterface, SquareImag
      *
      * The `file_uploaded` audit event is recorded at once, as before 1.3.
      *
-     * @deprecated since 1.3 for its entity return type: use {@see uploadImage()} (a {@see StoredFileView}); the return
-     *             type changes in 2.0
+     * @deprecated since 1.3 for its entity return type: use {@see uploadImage()} (a {@see StoredFileView}); removed in
+     *             2.0 (runtime notice since 1.8)
      *
      * @param object $user security user (writes are checked by the context)
      *
@@ -87,6 +88,8 @@ final readonly class ImageUploader implements ImageUploaderInterface, SquareImag
      */
     public function upload(object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFile
     {
+        // 1.8: the runtime notice of the deprecation announced in 1.3 (the method is removed in 2.0).
+        trigger_deprecation('nowo-tech/storage-kit-bundle', '1.8', 'Method "%s::upload()" returning the "%s" entity is deprecated and removed in 2.0: use "%s::uploadImage()", which returns a "%s".', self::class, StoredFile::class, ImageUploaderInterface::class, StoredFileView::class);
         $file = $this->store($user, $contextType, $contextId, $bytes, $originalName);
         $this->record($file->getProfile()->getScope(), $user, $file->getUuid(), $contextType, $contextId, $file->totalBytes());
         $id = $file->getId();

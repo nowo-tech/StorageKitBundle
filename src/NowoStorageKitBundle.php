@@ -11,6 +11,7 @@ use Nowo\StorageKitBundle\DependencyInjection\Compiler\InstanceSettingsPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\MessengerIntegrationPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\StorageEntityManagerPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\StorageKitCommitTrackingPass;
+use Nowo\StorageKitBundle\DependencyInjection\Compiler\StoragePrivateEntityManagerPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\TwigPathsPass;
 use Nowo\StorageKitBundle\DependencyInjection\NowoStorageKitExtension;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
@@ -35,7 +36,7 @@ final class NowoStorageKitBundle extends Bundle
 
     /**
      * Registers the compiler passes: Twig paths, Messenger integration, CSRF fail-closed guard, the debug-only switches
-     * guard, Instance Settings, the bundle entity manager, the commit tracking and the download ports.
+     * guard, Instance Settings, the bundle entity manager, the private entity manager (1.8), the commit tracking and the download ports.
      */
     public function build(ContainerBuilder $container): void
     {
@@ -49,6 +50,8 @@ final class NowoStorageKitBundle extends Bundle
         // 1.5: doctrine.entity_manager — fail fast on an unknown manager, then keep the mapping on it only.
         $container->addCompilerPass(new StorageEntityManagerPass(checkOnly: true), PassConfig::TYPE_BEFORE_OPTIMIZATION, 10);
         $container->addCompilerPass(new StorageEntityManagerPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION, -10);
+        // 1.8: the private entity manager's middleware on its source manager's connection, before MiddlewaresPass (0).
+        $container->addCompilerPass(new StoragePrivateEntityManagerPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION, 10);
         // 1.7.1: the commit-tracking middleware on the bundle's connection only, before DoctrineBundle's MiddlewaresPass (0).
         $container->addCompilerPass(new StorageKitCommitTrackingPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION, 10);
         // 1.5: which download path the controller calls (the host's port wins; a decorated FileDelivery keeps it).

@@ -291,7 +291,7 @@ final readonly class FilePurger
                     ++$failed;
                 }
             }
-            $manager->flush();
+            $this->entityManager->flush($manager);
             // Kept files leave the unit of work (a long purge does not grow it); removed ones already have.
             foreach ($batch as $file) {
                 if ($manager->contains($file)) {

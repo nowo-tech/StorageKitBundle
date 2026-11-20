@@ -40,7 +40,7 @@ final class AdoptInstanceBucketTest extends KernelTestCase
 
         self::assertSame(Command::SUCCESS, $tester->execute([]));
         self::assertStringNotContainsString('test-secret-not-real', $tester->getDisplay());
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $active = $this->service($kernel, StorageProfileRepository::class)->activeOf(null);
         self::assertSame($profile->getUuid(), $active?->getUuid());
         self::assertTrue($active->isSettingsBacked());

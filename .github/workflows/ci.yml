@@ -186,6 +186,9 @@ jobs:
           - { name: 'PostgreSQL 17', image: 'postgres:17', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=17&charset=utf8', health: 'pg_isready -U postgres' }
           # 1.6.1: PostgreSQL with DBAL 3 maps the ORM id with a sequence (no column default); the raw inserts must take it themselves.
           - { name: 'PostgreSQL 17 (DBAL 3)', image: 'postgres:17', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=17&charset=utf8', health: 'pg_isready -U postgres', dbal: '^3.8' }
+          # 1.8: the suites default to private_entity_manager: true; these legs run them in host mode (the bundle flushes the default manager).
+          - { name: 'MySQL 8.4 (host mode)', image: 'mysql:8.4', port: 3306, scheme: mysql, user: root, query: 'serverVersion=8.4&charset=utf8mb4', health: 'mysqladmin ping -h 127.0.0.1 -uroot -pci-throwaway', host_em: '1' }
+          - { name: 'PostgreSQL 17 (host mode)', image: 'postgres:17', port: 5432, scheme: postgresql, user: postgres, query: 'serverVersion=17&charset=utf8', health: 'pg_isready -U postgres', host_em: '1' }
     services:
       db:
         image: ${{ needs.changes.outputs.mode != 'light' && matrix.db.image || '' }}
@@ -235,10 +238,12 @@ jobs:
         timeout-minutes: 15
         run: |
           export STORAGE_KIT_TEST_DATABASE_URL="${{ matrix.db.scheme }}://${{ matrix.db.user }}:${DB_CI_PASSWORD}@127.0.0.1:${{ matrix.db.port }}/storagekit?${{ matrix.db.query }}"
+          export STORAGE_KIT_TEST_HOST_EM="${{ matrix.db.host_em || '0' }}"
           vendor/bin/phpunit --no-coverage tests/Integration/Lifecycle
           vendor/bin/phpunit --no-coverage tests/Integration/Functional/ArchitectureBarTest.php
           vendor/bin/phpunit --no-coverage tests/Integration/Concurrency
           vendor/bin/phpunit --no-coverage tests/Integration/Functional/ConcurrentWritesTest.php
+          vendor/bin/phpunit --no-coverage tests/Integration/Persistence/PrivateEntityManagerKernelTest.php
 
   # Dependency floor: the code must work with the LOWEST nowo-tech/transaction-* versions composer.json allows (a host
   # can run `composer update nowo-tech/storage-kit-bundle` without updating them), and the demo lock must install

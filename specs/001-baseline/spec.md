@@ -114,6 +114,10 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-DI-008** — `TwigPathsPass` registers `@NowoStorageKitBundle` with host overrides first.
 - **FR-DI-009** — `StorageEntityManagerPass`, `ExcludedEntityNamespaceDriver`, `OwnEntityManagerSubscriber` (1.5):
   optional dedicated entity manager (`doctrine.entity_manager`), entities mapped on it only, recovered when closed.
+- **FR-DI-011** — `StoragePrivateEntityManagerPass` (1.8): `doctrine.private_entity_manager: true` writes through
+  transaction-doctrine's private entity manager on the source manager's connection (its middleware tagged for that
+  connection only); unset or false while the default manager is flushed triggers a deprecation (2.0 defaults to true
+  and removes false), and the host-flush probe runs before each flush of the default manager.
 - **FR-DI-010** — `FileDeliveryPortsPass` (1.5): the service behind the download port (`FileDeliveryInterface`, host
   alias or decorator wins) must implement it, or the build fails.
 

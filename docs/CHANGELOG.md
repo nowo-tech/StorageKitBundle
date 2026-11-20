@@ -7,23 +7,27 @@ All notable changes to this project are documented here. The format follows
 
 - [[Unreleased]](#unreleased)
   - [Fixed](#fixed)
+- [[1.8.0] - 2026-11-20](#180---2026-11-20)
+  - [Added](#added)
+  - [Deprecated](#deprecated)
+  - [Changed](#changed)
 - [[1.7.1] - 2026-11-19](#171---2026-11-19)
   - [Fixed](#fixed-1)
 - [[1.7.0] - 2026-11-19](#170---2026-11-19)
-  - [Added](#added)
+  - [Added](#added-1)
   - [Fixed](#fixed-2)
-  - [Changed](#changed)
+  - [Changed](#changed-1)
 - [[1.6.1] - 2026-11-15](#161---2026-11-15)
   - [Fixed](#fixed-3)
   - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
-  - [Added](#added-1)
-  - [Changed](#changed-1)
+  - [Added](#added-2)
+  - [Changed](#changed-2)
   - [Tests](#tests-1)
 - [[1.5.3] - 2026-11-13](#153---2026-11-13)
   - [Security](#security)
-  - [Added](#added-2)
-  - [Changed](#changed-2)
+  - [Added](#added-3)
+  - [Changed](#changed-3)
   - [Tests](#tests-2)
 - [[1.5.2] - 2026-11-13](#152---2026-11-13)
   - [Security](#security-1)
@@ -33,29 +37,29 @@ All notable changes to this project are documented here. The format follows
   - [Fixed](#fixed-5)
   - [Tests](#tests-4)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
-  - [Added](#added-3)
-  - [Changed](#changed-3)
-  - [Deprecated](#deprecated)
-- [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Added](#added-4)
+  - [Changed](#changed-4)
+  - [Deprecated](#deprecated-1)
+- [[1.4.0] - 2026-11-11](#140---2026-11-11)
+  - [Added](#added-5)
   - [Security](#security-2)
   - [Fixed](#fixed-6)
-  - [Changed](#changed-4)
+  - [Changed](#changed-5)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
   - [Fixed](#fixed-7)
-  - [Added](#added-5)
-  - [Changed](#changed-5)
-  - [Deprecated](#deprecated-1)
-- [[1.2.0] - 2026-11-10](#120---2026-11-10)
-  - [Security](#security-3)
   - [Added](#added-6)
   - [Changed](#changed-6)
-- [[1.1.0] - 2026-11-03](#110---2026-11-03)
+  - [Deprecated](#deprecated-2)
+- [[1.2.0] - 2026-11-10](#120---2026-11-10)
+  - [Security](#security-3)
   - [Added](#added-7)
   - [Changed](#changed-7)
+- [[1.1.0] - 2026-11-03](#110---2026-11-03)
+  - [Added](#added-8)
+  - [Changed](#changed-8)
   - [Fixed](#fixed-8)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
-  - [Added](#added-8)
+  - [Added](#added-9)
   - [Security](#security-4)
 
 ## [Unreleased]
@@ -81,9 +85,45 @@ All notable changes to this project are documented here. The format follows
   and PostgreSQL, in host and private (`doctrine.entity_manager`) mode. Existing databases:
   [UPGRADING](UPGRADING.md#unreleased).
 
+## [1.8.0] - 2026-11-20
+
+The last 1.x minor before 2.0: without configuration it behaves as 1.7.1, and it warns about every default 2.0 flips.
+
+### Added
+
+- **`doctrine.private_entity_manager`** (REQ-ARCH-001 rule 6, zero-config): `true` makes every bundle read and write
+  go through a private entity manager of the bundle's own (transaction-doctrine's `PrivateManager\PrivateEntityManager`),
+  created on the connection, mapping and event manager of `doctrine.entity_manager`, else of your default entity
+  manager. Same tables, same connection, no migration, no second manager to declare. The admin pages and console
+  commands (profile save, test and switch, bucket moves, the purge, the retired-profile cleanup, the adoption) then
+  never flush your pending changes, and a failed bundle write closes only the private manager. It is dropped at the
+  start and end of every request, Messenger message and outermost console command (FrankenPHP worker mode with the
+  kernel reset off included) and at `kernel.reset`, and replaced when closed. `false` keeps the 1.x behaviour until
+  2.0, which defaults to `true` and removes `false`. How files are stored, delivered and authorised does not change.
+- **Host-flush probe:** unless `private_entity_manager` is `true`, every flush of your default manager by the bundle first
+  runs transaction-doctrine's read-only `HostFlushProbe`: each of your entity classes with pending changes that flush
+  writes triggers one deprecation per request, message or command ("Your pending changes to App\X were flushed by
+  NowoStorageKitBundle; 2.0 no longer does."). The deprecation log is the migration list (UPGRADING "To 1.8.0").
+
+### Deprecated
+
+- **Leaving `doctrine.private_entity_manager` unset, or setting it to `false`,** while the bundle entities live on
+  your default manager (`entity_manager` null or naming the default manager): a build-time deprecation names the
+  option, the 2.0 default (`true`; `false` is removed) and the line that opts in now. Two texts: one for unset, one
+  for `false`.
+- **`ImageUploader::upload()`** (the entity-returning upload, deprecated in 1.3) now triggers a runtime deprecation on
+  every call; 2.0 removes it. Use `ImageUploaderInterface::uploadImage()`. `FileDelivery::respond()` keeps its 1.5
+  runtime deprecation (removed in 2.0).
+- **Relying on `nowo-tech/instance-settings-bundle` being installed by this package:** 2.0 moves it to `suggest`
+  (announced in 1.3). Composer gives no notice; require it yourself when you use the settings-backed instance bucket.
+
 ### Changed
 
-- Requires `nowo-tech/transaction-doctrine` ^1.8.1 (fixes GHSA-9wh3-m3m5-jffx and GHSA-65w2-9r4h-848g).
+- Requires `nowo-tech/transaction-doctrine` ^1.9.1 (the private-manager kit and the host-flush probe, with the 1.9.1
+  fixes; 1.8.1 fixed GHSA-9wh3-m3m5-jffx and GHSA-65w2-9r4h-848g).
+- The announced 2.0 default of the bundle's entity manager is now **the private manager on your default connection**
+  instead of "a dedicated manager": no host has to declare a second Doctrine manager. `doctrine.entity_manager: <name>`
+  stays as the option for a dedicated manager.
 
 ## [1.7.1] - 2026-11-19
 
