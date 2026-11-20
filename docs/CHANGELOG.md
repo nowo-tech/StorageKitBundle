@@ -70,18 +70,19 @@ The last 1.x minor before 2.0: without configuration it behaves as 1.7.1, and it
   commands (profile save, test and switch, bucket moves, the purge, the retired-profile cleanup, the adoption) then
   never flush your pending changes, and a failed bundle write closes only the private manager. It is dropped at the
   start and end of every request, Messenger message and outermost console command (FrankenPHP worker mode with the
-  kernel reset off included) and at `kernel.reset`, and replaced when closed. `false` keeps the 1.x behaviour; 2.0
-  defaults to `true`. How files are stored, delivered and authorised does not change.
-- **Host-flush probe:** while `private_entity_manager` is unset, every flush of your default manager by the bundle first
+  kernel reset off included) and at `kernel.reset`, and replaced when closed. `false` keeps the 1.x behaviour until
+  2.0, which defaults to `true` and removes `false`. How files are stored, delivered and authorised does not change.
+- **Host-flush probe:** unless `private_entity_manager` is `true`, every flush of your default manager by the bundle first
   runs transaction-doctrine's read-only `HostFlushProbe`: each of your entity classes with pending changes that flush
   writes triggers one deprecation per request, message or command ("Your pending changes to App\X were flushed by
   NowoStorageKitBundle; 2.0 no longer does."). The deprecation log is the migration list (UPGRADING "To 1.8.0").
 
 ### Deprecated
 
-- **Leaving `doctrine.private_entity_manager` unset** while the bundle entities live on your default manager
-  (`entity_manager` null or naming the default manager): a build-time deprecation names the option, the 2.0 default
-  (`true`) and the line that opts in now.
+- **Leaving `doctrine.private_entity_manager` unset, or setting it to `false`,** while the bundle entities live on
+  your default manager (`entity_manager` null or naming the default manager): a build-time deprecation names the
+  option, the 2.0 default (`true`; `false` is removed) and the line that opts in now. Two texts: one for unset, one
+  for `false`.
 - **`ImageUploader::upload()`** (the entity-returning upload, deprecated in 1.3) now triggers a runtime deprecation on
   every call; 2.0 removes it. Use `ImageUploaderInterface::uploadImage()`. `FileDelivery::respond()` keeps its 1.5
   runtime deprecation (removed in 2.0).
