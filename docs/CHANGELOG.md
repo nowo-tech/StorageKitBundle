@@ -6,14 +6,15 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
-- [[1.7.1] - 2026-11-19](#171---2026-11-19)
   - [Fixed](#fixed)
+- [[1.7.1] - 2026-11-19](#171---2026-11-19)
+  - [Fixed](#fixed-1)
 - [[1.7.0] - 2026-11-19](#170---2026-11-19)
   - [Added](#added)
-  - [Fixed](#fixed-1)
+  - [Fixed](#fixed-2)
   - [Changed](#changed)
 - [[1.6.1] - 2026-11-15](#161---2026-11-15)
-  - [Fixed](#fixed-2)
+  - [Fixed](#fixed-3)
   - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
   - [Added](#added-1)
@@ -26,10 +27,10 @@ All notable changes to this project are documented here. The format follows
   - [Tests](#tests-2)
 - [[1.5.2] - 2026-11-13](#152---2026-11-13)
   - [Security](#security-1)
-  - [Fixed](#fixed-3)
+  - [Fixed](#fixed-4)
   - [Tests](#tests-3)
 - [[1.5.1] - 2026-11-12](#151---2026-11-12)
-  - [Fixed](#fixed-4)
+  - [Fixed](#fixed-5)
   - [Tests](#tests-4)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
   - [Added](#added-3)
@@ -38,10 +39,10 @@ All notable changes to this project are documented here. The format follows
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Added](#added-4)
   - [Security](#security-2)
-  - [Fixed](#fixed-5)
+  - [Fixed](#fixed-6)
   - [Changed](#changed-4)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
-  - [Fixed](#fixed-6)
+  - [Fixed](#fixed-7)
   - [Added](#added-5)
   - [Changed](#changed-5)
   - [Deprecated](#deprecated-1)
@@ -52,12 +53,33 @@ All notable changes to this project are documented here. The format follows
 - [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-7)
   - [Changed](#changed-7)
-  - [Fixed](#fixed-7)
+  - [Fixed](#fixed-8)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
   - [Added](#added-8)
   - [Security](#security-4)
 
 ## [Unreleased]
+
+### Fixed
+
+- **Missing foreign keys on MySQL / MariaDB** (audit XI-3). With doctrine/orm 3.7.0 to 3.8.0 and doctrine/dbal 4.5 or
+  later, the schema generated for MySQL / MariaDB (`doctrine:schema:create` / `update`, `doctrine:migrations:diff`)
+  lacked the foreign keys starting on the tables whose identifier columns get the exact collation:
+  `UploaderCollationListener` rebuilt the table and handed it back with `setClassTable()`, and the ORM added its
+  foreign keys to the table it had replaced. Affected: `storage_kit_file.profile_id` → `storage_kit_profile` from
+  1.5.2 (a profile could be deleted under its files) and `storage_kit_file_reference.file_id` → `storage_kit_file`
+  (ON DELETE CASCADE) from 1.5.3 (references of deleted files stayed behind). PostgreSQL and SQLite were not
+  affected. With doctrine/orm before 3.7 and doctrine/dbal 4.5 or later, generating the schema failed instead
+  (`setClassTable()` does not exist there). The listener now runs on `postGenerateSchema`, once every foreign key
+  exists, and never calls `setClassTable()`: with doctrine/dbal 4.5+ and doctrine/orm 3.7+ it rebuilds each table with
+  its editor (foreign keys and indexes included) and hands back the schema with `setSchema()`; otherwise it sets the
+  column options in place. The platform and `server_version` are those of the schema tool's own entity manager, and a
+  manager that does not map the bundle is left alone. The collations are unchanged.
+  `UploaderCollationListener::postGenerateSchemaTable()` is kept as a deprecated no-op and its first constructor
+  argument is no longer used. A test checks that the generated schema has the same foreign keys and indexes with and
+  without the listener, and the database suites check both foreign keys and their rules on MySQL 8.4, MariaDB 11.4
+  and PostgreSQL, in host and private (`doctrine.entity_manager`) mode. Existing databases:
+  [UPGRADING](UPGRADING.md#unreleased).
 
 ### Changed
 
