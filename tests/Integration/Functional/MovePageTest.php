@@ -154,7 +154,7 @@ final class MovePageTest extends KernelTestCase
         $this->runWorker($kernel);
         self::assertStringContainsString('Every file now comes from the new bucket.', $this->act($client, 'switch', kernel: $kernel));
 
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $repository = $this->service($kernel, StorageProfileRepository::class);
         self::assertSame($target->getUuid(), $repository->activeOf(null)?->getUuid());
         self::assertSame(StorageProfile::STATE_RETIRED, $repository->findOneByUuid($active->getUuid())?->getState());
@@ -189,7 +189,7 @@ final class MovePageTest extends KernelTestCase
         $this->runWorker($kernel);
         self::assertStringContainsString('Every file now comes from the new bucket.', $this->act($client, 'switch', kernel: $kernel));
 
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $repository = $this->service($kernel, StorageProfileRepository::class);
         $target     = $repository->activeOf(null);
         self::assertNotNull($target);
@@ -223,10 +223,10 @@ final class MovePageTest extends KernelTestCase
         $this->runWorker($kernel);
         // The allow-list changed since the target was saved (simulated): the section refuses its endpoint now.
         $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET endpoint = 'http://10.0.0.5:9000' WHERE state = 'target'");
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
 
         self::assertStringContainsString('The Storage settings refused the new bucket', $this->act($client, 'switch', kernel: $kernel));
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $repository = $this->service($kernel, StorageProfileRepository::class);
         self::assertSame($file->getProfile()->getUuid(), $repository->activeOf(null)?->getUuid());
         self::assertNotNull($repository->targetOf(null));
@@ -274,7 +274,7 @@ final class MovePageTest extends KernelTestCase
         self::assertNotNull($repository->findOneByUuid($scoped->getUuid()));
         self::assertSame(Command::SUCCESS, $tester->execute(['--all' => true]));
         self::assertStringContainsString('1 profile(s) forgotten.', $tester->getDisplay());
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         self::assertNull($repository->findOneByUuid($scoped->getUuid()));
         self::assertSame(Command::SUCCESS, $tester->execute([]));
         self::assertStringContainsString('No retired profile to forget.', $tester->getDisplay());

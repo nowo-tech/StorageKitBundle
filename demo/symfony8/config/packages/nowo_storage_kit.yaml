@@ -16,3 +16,7 @@ nowo_storage_kit:
         path_prefix: /admin/storage
     security:
         access_roles: [ROLE_ADMIN]
+    # 1.8: the 2.0 behaviour now: the bundle writes through a private entity manager on the default connection and
+    # never flushes the application's pending changes (unset or false logs a deprecation; false is removed in 2.0).
+    doctrine:
+        private_entity_manager: true

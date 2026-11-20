@@ -282,7 +282,7 @@ final class SettingsPageTest extends KernelTestCase
         // Amazon S3: a refused endpoint in a hidden row is ignored and the stored one kept (unused).
         $this->save($client, ['provider' => StorageProvider::AWS_S3, 'endpoint' => 'http://10.0.0.5', 'path_style' => false]);
         self::assertSame(302, $client->getResponse()->getStatusCode());
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $profile = $this->service($kernel, StorageProfileRepository::class)->activeOf('acme');
         self::assertNotNull($profile);
         self::assertSame([StorageProvider::AWS_S3, 'http://minio:9000', true], [$profile->getProvider(), $profile->getEndpoint(), $profile->isPathStyle()]);
@@ -294,7 +294,7 @@ final class SettingsPageTest extends KernelTestCase
         $this->save($client, ['provider' => StorageProvider::S3_COMPATIBLE, 'path_style' => false]);
         $this->save($client, ['provider' => StorageProvider::AWS_S3]);
         self::assertSame(302, $client->getResponse()->getStatusCode());
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         self::assertFalse($this->service($kernel, StorageProfileRepository::class)->activeOf('acme')?->isPathStyle());
     }
 
@@ -368,7 +368,7 @@ final class SettingsPageTest extends KernelTestCase
         $client  = $this->client($kernel);
         $profile = $this->profile($kernel);
         $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET region = 'BAD'");
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $crawler = $client->request('GET', '/admin/storage');
         $client->submit($crawler->filter('[data-testid="storage-kit-test"]')->closest('form')?->form() ?? self::fail('no test form'));
         $client->followRedirect();

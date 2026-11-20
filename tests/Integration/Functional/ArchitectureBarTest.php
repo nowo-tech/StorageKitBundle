@@ -40,7 +40,7 @@ final class ArchitectureBarTest extends KernelTestCase
         self::assertTrue($manager->getUnitOfWork()->isScheduledForInsert($note), 'still pending');
         self::assertSame(0, (int) $manager->getConnection()->fetchOne('SELECT COUNT(*) FROM ' . $this->noteTable($kernel)));
         self::assertNotNull($file->getId());
-        self::assertSame($file, $manager->find(StoredFile::class, $file->getId()), 'the deprecated upload() returns the managed row');
+        self::assertSame($file, $this->bundleManager($kernel)->find(StoredFile::class, $file->getId()), 'the deprecated upload() returns the bundle manager\'s managed row');
         self::assertSame(1, (int) $manager->getConnection()->fetchOne('SELECT COUNT(*) FROM storage_kit_file'));
         self::assertSame([StorageAuditEvent::FILE_UPLOADED], $this->audit($kernel)->actions());
     }

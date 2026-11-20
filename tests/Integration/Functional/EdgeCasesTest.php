@@ -124,7 +124,7 @@ final class EdgeCasesTest extends KernelTestCase
         }
         self::assertSame('image', ImageUploader::cleanName("\x01\x02"));
         $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET region = 'BAD'");
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $this->service($kernel, StorageProfiles::class)->reset();
         try {
             $uploader->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(), 'a.png');

@@ -32,6 +32,7 @@ use Nowo\StorageKitBundle\Tests\Support\Legacy\InstanceSettingsListenerV140;
 use Nowo\StorageKitBundle\Tests\Support\Legacy\StoredFilesPersonalDataV140;
 use Nowo\StorageKitBundle\Tests\Support\SeedIds;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
+use PHPUnit\Framework\Attributes\IgnoreDeprecations;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
 use function array_map;
@@ -51,6 +52,7 @@ use function sprintf;
  *
  * Runs on every CI database (SQLite, MySQL, MariaDB, PostgreSQL): one kernel at a time, schema recreated per boot.
  */
+#[IgnoreDeprecations]
 final class HostWritesEquivalenceTest extends KernelTestCase
 {
     /** Rows seeded besides the uploaded one: more than {@see StoredFilesPersonalData::PAGE} for alice. */
@@ -96,7 +98,8 @@ final class HostWritesEquivalenceTest extends KernelTestCase
      */
     private function eraseRun(bool $legacy): array
     {
-        $kernel     = $this->bootKernel();
+        // Host mode (1.x): the equivalence is about the bundle's writes next to the host's default manager.
+        $kernel     = $this->bootKernel(['doctrine' => ['private_entity_manager' => false]]);
         $connection = $this->seed($kernel);
         $manager    = $this->entityManager($kernel);
         $manager->clear();
@@ -142,7 +145,7 @@ final class HostWritesEquivalenceTest extends KernelTestCase
      */
     private function settingsRun(bool $legacy): array
     {
-        $kernel = $this->bootKernel(extra: static function (ContainerConfigurator $container): void {
+        $kernel = $this->bootKernel(['doctrine' => ['private_entity_manager' => false]], extra: static function (ContainerConfigurator $container): void {
             $container->services()->alias(InstanceSettingsListener::class . '.public', InstanceSettingsListener::class)->public();
         });
         $this->service($kernel, InstanceSettingsInterface::class)->save('storage', ['provider' => StorageProvider::S3_COMPATIBLE, 'endpoint' => 'http://minio:9000', 'region' => 'us-east-1', 'bucket' => 'files', 'access_key' => 'test-key', 'secret' => 'REDACTED-TEST', 'path_style' => true]);
