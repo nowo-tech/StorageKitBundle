@@ -16,6 +16,7 @@ use Symfony\Component\HttpKernel\Event\FinishRequestEvent;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Event\TerminateEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
+use Symfony\Contracts\Service\ResetInterface;
 
 use const PHP_INT_MAX;
 use const PHP_INT_MIN;
@@ -35,6 +36,13 @@ use const PHP_INT_MIN;
  * the outer unit. Messenger messages act inside commands (`messenger:consume` is itself a command) but not inside
  * another message: a worker run in-process by a message handler keeps the outer message's unit (audit NX CR1). The
  * host's managers are never reset nor cleared.
+ *
+ * 1.8 (`doctrine.private_entity_manager: true`): a second instance keeps the bundle's PRIVATE entity manager
+ * (transaction-doctrine's `PrivateEntityManager`) to the same boundaries. Instead of recovering and clearing a manager
+ * of the registry it drops the private manager ({@see ResetInterface::reset()}) at the start and at the end of every
+ * outermost unit: the next use creates a fresh one on the application's connection, and one a failed write closed is
+ * replaced. Changes the bundle left unflushed are discarded (logged by the private manager, classes and counts only).
+ * The registry and the application's managers are not touched in that mode.
  *
  * State (1.5.1, audit NM / NL2-v): the units of work running in this process ({@see UnitOfWorkFrames}), changed at
  * PHP_INT_MAX before any other listener can throw: one frame per console run (keyed by command and input, removed by
@@ -79,11 +87,13 @@ final class OwnEntityManagerSubscriber
     /**
      * @param string $managerName the configured `doctrine.entity_manager`
      * @param RequestStack|null $requestStack the HTTP kernel's request stack (read only, see {@see UnitOfWorkFrames})
+     * @param ResetInterface|null $privateManager 1.8: the private entity manager dropped at every boundary instead
      */
     public function __construct(
         private readonly ManagerRegistry $registry,
         private readonly string $managerName,
         ?RequestStack $requestStack = null,
+        private readonly ?ResetInterface $privateManager = null,
     ) {
         $this->units = new UnitOfWorkFrames($requestStack);
     }
@@ -238,6 +248,10 @@ final class OwnEntityManagerSubscriber
      */
     public function recover(): void
     {
+        if ($this->privateManager instanceof ResetInterface) {
+            // 1.8: the private manager replaces a closed manager itself; the boundary drops it in clear().
+            return;
+        }
         $manager = $this->registry->getManager($this->managerName);
         if ($manager instanceof EntityManagerInterface && !$manager->isOpen()) {
             $this->registry->resetManager($this->managerName);
@@ -249,6 +263,12 @@ final class OwnEntityManagerSubscriber
      */
     public function clear(): void
     {
+        if ($this->privateManager instanceof ResetInterface) {
+            // @igor-ignore - This IS the unit-of-work boundary drop of the bundle's private manager (no state kept).
+            $this->privateManager->reset();
+
+            return;
+        }
         $manager = $this->registry->getManager($this->managerName);
         if ($manager instanceof EntityManagerInterface && $manager->isOpen()) {
             // @igor-ignore - This IS the request-boundary reset of the bundle's own manager (no state kept).

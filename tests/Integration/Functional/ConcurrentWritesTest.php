@@ -30,6 +30,7 @@ use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
 use Nowo\TransactionContract\TransientStorageFailure;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\IgnoreDeprecations;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -316,7 +317,7 @@ final class ConcurrentWritesTest extends KernelTestCase
         $sync              = $this->service($kernel, StorageSyncer::class)->open($active, $target);
 
         // A detached entity whose guard no longer matches: nothing written, nothing refreshed.
-        $this->entityManager($kernel)->detach($sync);
+        $this->bundleManager($kernel)->detach($sync);
         $sync->complete();
         self::assertFalse($storage->updateIf($sync, StorageSyncer::STATUS_FIELDS, 'status', [StorageSync::RUNNING]));
         self::assertSame(1, $this->rows($kernel, "SELECT COUNT(*) FROM storage_kit_sync WHERE status = 'queued'"));
@@ -414,9 +415,14 @@ final class ConcurrentWritesTest extends KernelTestCase
         self::assertSame(1, $this->rows($kernel, "SELECT COUNT(*) FROM storage_kit_profile WHERE state = 'active' AND scope IS NULL"));
     }
 
+    /**
+     * Host mode (`private_entity_manager: false`, 1.x): the bundle flushes the default manager. The private mode's
+     * failed write is covered by PrivateEntityManagerKernelTest.
+     */
+    #[IgnoreDeprecations]
     public function testAFailedFlushNeverResetsAnOpenManagerAndReplacesAClosedOne(): void
     {
-        $kernel                          = $this->kernel();
+        $kernel                          = $this->kernel(['doctrine' => ['private_entity_manager' => false]]);
         $client                          = $this->client($kernel, 'scopeadmin');
         $form                            = $client->request('GET', '/storage/scopes/acme')->selectButton('Save')->form()->disableValidation();
         $form['storage_profile[bucket]'] = 'mine';

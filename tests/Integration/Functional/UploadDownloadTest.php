@@ -243,7 +243,7 @@ final class UploadDownloadTest extends KernelTestCase
         $client  = $this->client($kernel, 'alice');
         $data    = $this->post($kernel, $client, Images::png());
         $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET region = 'BAD'");
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $client->request('GET', $data['url']);
 
         self::assertSame(404, $client->getResponse()->getStatusCode());

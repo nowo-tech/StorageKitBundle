@@ -294,9 +294,9 @@ final readonly class StorageMove
             [Types::INTEGER, Types::INTEGER, Types::INTEGER],
         );
         $active->retire();
-        $manager->flush();
+        $this->entityManager->flush($manager);
         $target->activate();
-        $manager->flush();
+        $this->entityManager->flush($manager);
 
         return $moved;
     }

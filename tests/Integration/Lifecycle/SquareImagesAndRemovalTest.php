@@ -202,7 +202,7 @@ final class SquareImagesAndRemovalTest extends KernelTestCase
         $profile = $this->profile($kernel);
         $view    = $this->square($kernel);
         $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET bucket = '' WHERE id = ?", [$profile->getId()]);
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
 
         self::assertTrue($this->service($kernel, FileRemoverInterface::class)->remove($view->uuid, 'board', 'b1')?->expired);
         self::assertSame(1, $this->rows($kernel));
@@ -232,7 +232,7 @@ final class SquareImagesAndRemovalTest extends KernelTestCase
         self::assertContains(StorageAuditEvent::FILE_EXPIRED, $this->audit($kernel)->actions());
 
         // QJ-L2: an expired file is gone for every reader at once, not only after the purge.
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         foreach (['thumb', 'preview', 'original'] as $variant) {
             $client->request('GET', '/storage/files/' . $view->uuid . '/' . $variant);
             self::assertSame(404, $client->getResponse()->getStatusCode());

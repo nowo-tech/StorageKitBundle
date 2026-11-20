@@ -180,6 +180,9 @@ db-up:
 test-with-db: ensure-up db-up
 	$(COMPOSE) exec -T $(SERVICE_PHP) vendor/bin/phpunit --testsuite Integration
 	$(COMPOSE) exec -T -e STORAGE_KIT_TEST_DATABASE_URL='$(STORAGE_KIT_TEST_DATABASE_URL)' $(SERVICE_PHP) vendor/bin/phpunit --no-coverage tests/Integration/Lifecycle
+	# 1.8: the same in host mode (the suites default to doctrine.private_entity_manager: true).
+	$(COMPOSE) exec -T -e STORAGE_KIT_TEST_HOST_EM=1 $(SERVICE_PHP) vendor/bin/phpunit --testsuite Integration
+	$(COMPOSE) exec -T -e STORAGE_KIT_TEST_HOST_EM=1 -e STORAGE_KIT_TEST_DATABASE_URL='$(STORAGE_KIT_TEST_DATABASE_URL)' $(SERVICE_PHP) vendor/bin/phpunit --no-coverage tests/Integration/Lifecycle
 
 test-coverage-with-db: ensure-up db-up
 	$(COMPOSE) exec -T -e STORAGE_KIT_TEST_DATABASE_URL='$(STORAGE_KIT_TEST_DATABASE_URL)' $(SERVICE_PHP) vendor/bin/phpunit tests/Integration/Lifecycle --coverage-text

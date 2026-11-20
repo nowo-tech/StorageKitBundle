@@ -17,6 +17,7 @@ use Nowo\DoctrineEncryptBundle\Configuration\Encrypted;
 use Nowo\StorageKitBundle\Repository\StorageProfileRepository;
 use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
+use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
 use ReflectionException;
 use ReflectionProperty;
 use Throwable;
@@ -40,6 +41,13 @@ use function sprintf;
  * reset / closed manager is replaced in worker mode, plus the DBAL connection and the (prefixed) table names for the
  * bounded raw-SQL statements. Since 1.5 a dedicated manager is supported (the entities are mapped on it only); the
  * host-called writes ({@see self::insert()}, {@see self::update()}, {@see self::updateRows()}) never flush any manager.
+ *
+ * Since 1.8 (`doctrine.private_entity_manager: true`) {@see self::manager()} is transaction-doctrine's
+ * {@see PrivateEntityManager}: a manager of the bundle's own on the connection, mapping and tables of
+ * `doctrine.entity_manager` (else the default manager), so no bundle flush ever writes the application's pending
+ * changes. It is dropped at every unit-of-work boundary and replaced when closed; the application's managers are never
+ * flushed, cleared, closed or reset by it. Without the option, every flush of the host's manager goes through
+ * {@see self::flush()}, which runs the host-flush probe first ({@see StorageHostFlushReporter}).
  */
 final readonly class StorageEntityManager
 {
@@ -52,11 +60,15 @@ final readonly class StorageEntityManager
     /**
      * @param string|null $name entity manager name
      * @param int $ownerLockTimeout seconds to wait for the owner lock (`conflict_response.owner_lock_timeout`)
+     * @param PrivateEntityManager|null $privateManager 1.8: the private manager (`doctrine.private_entity_manager: true`)
+     * @param StorageHostFlushReporter|null $hostFlushReporter 1.8: the host-flush probe of the host-mode flushes
      */
     public function __construct(
         private ManagerRegistry $registry,
         private ?string $name = null,
         private int $ownerLockTimeout = self::OWNER_LOCK_TIMEOUT,
+        private ?PrivateEntityManager $privateManager = null,
+        private ?StorageHostFlushReporter $hostFlushReporter = null,
     ) {
     }
 
@@ -67,6 +79,9 @@ final readonly class StorageEntityManager
      */
     public function manager(): EntityManagerInterface
     {
+        if ($this->privateManager instanceof PrivateEntityManager) {
+            return $this->privateManager;
+        }
         $manager = $this->registry->getManager($this->name);
         if (!$manager instanceof EntityManagerInterface) {
             throw new LogicException('NowoStorageKitBundle needs a Doctrine ORM entity manager (doctrine.entity_manager).');
@@ -170,6 +185,7 @@ final readonly class StorageEntityManager
             if ($savepoint !== null) {
                 $connection->releaseSavepoint($savepoint);
             }
+            $this->noteWrite();
         } catch (Throwable $e) {
             if ($savepoint !== null) {
                 try {
@@ -325,6 +341,8 @@ final readonly class StorageEntityManager
         if (!$connection->isTransactionActive()) {
             return $connection->transactional(static fn (Connection $connection): mixed => $work($connection));
         }
+        // Inside the host's transaction: a later rollback of it undoes this unit (1.8: the private manager then knows).
+        $this->noteWrite();
         // A unique name: a nested unit never releases or reuses the savepoint of the unit around it.
         $savepoint = 'nowo_storage_kit_' . $label . '_' . bin2hex(random_bytes(6));
         $connection->createSavepoint($savepoint);
@@ -350,10 +368,14 @@ final readonly class StorageEntityManager
      *
      * - A dedicated manager (`doctrine.entity_manager` names one other than the default) is the bundle's own:
      *   {@see DoctrineTransactionRunner::forEntityManager()} resets it after a storage failure.
+     * - The private manager (1.8, `doctrine.private_entity_manager: true`) is the bundle's own too: the same runner
+     *   flushes it and clears it after a storage failure (no registry: a closed private manager is replaced on its
+     *   next use, the application's managers are never touched).
      * - With the host's manager (null, the default and unchanged) the runner is the DBAL one
      *   ({@see DoctrineTransactionRunner::forConnection()}) and the unit flushes the manager itself, as these pages did
-     *   before 1.7 (REQ-ARCH-001 rule 6, major only; use a dedicated manager to keep your pending changes out). An
-     *   open host manager is never cleared or reset; one a failed flush closed is replaced through the registry.
+     *   before 1.7 (REQ-ARCH-001 rule 6; the 1.8 private manager keeps your pending changes out), after the host-flush
+     *   probe. An open host manager is never cleared or reset; one a failed flush closed is replaced through the
+     *   registry.
      *   `forHostEntityManager()` is not used: DoctrineEncrypt decrypts the bucket secret in place after loading, so a
      *   loaded profile always looks changed to its pending-changes check.
      *
@@ -378,18 +400,21 @@ final readonly class StorageEntityManager
         $manager    = $this->manager();
         $connection = $manager->getConnection();
         $own        = $this->ownsManager();
-        $runner     = $own
-            ? DoctrineTransactionRunner::forEntityManager($manager, $this->registry, $this->name)
-            : DoctrineTransactionRunner::forConnection($connection);
+        $runner     = match (true) {
+            $this->privateManager instanceof PrivateEntityManager => DoctrineTransactionRunner::forEntityManager($manager),
+            $own                                                  => DoctrineTransactionRunner::forEntityManager($manager, $this->registry, $this->name),
+            default                                               => DoctrineTransactionRunner::forConnection($connection),
+        };
+        $flush   = $this->flush(...);
         $timeout = $this->ownerLockTimeout;
         $named   = OwnerLock::acquire($connection, $ownerLock, $timeout);
         try {
             // @igor-ignore - The closure runs synchronously inside the runner; nothing is kept on the service.
-            return $runner->run(static function () use ($connection, $manager, $own, $ownerLock, $timeout, $work): mixed {
+            return $runner->run(static function () use ($connection, $manager, $own, $ownerLock, $timeout, $work, $flush): mixed {
                 OwnerLock::acquireInside($connection, $ownerLock, $timeout);
                 $result = $work();
                 if (!$own) {
-                    $manager->flush();
+                    $flush($manager);
                 }
 
                 return $result;
@@ -475,12 +500,46 @@ final readonly class StorageEntityManager
     }
 
     /**
-     * Whether the bundle entities live on a manager of their own (`doctrine.entity_manager` names one other than the
-     * host's default): only then may a failed unit reset it.
+     * Whether the bundle entities live on a manager of their own: the private manager (1.8), or `doctrine.entity_manager`
+     * names one other than the host's default. Only then may a failed unit reset it, and only then is a flush of the
+     * bundle never a flush of the application's manager.
      */
     public function ownsManager(): bool
     {
-        return $this->name !== null && $this->name !== $this->registry->getDefaultManagerName();
+        return $this->privateManager instanceof PrivateEntityManager
+            || ($this->name !== null && $this->name !== $this->registry->getDefaultManagerName());
+    }
+
+    /**
+     * Whether the bundle reads and writes through its private entity manager (1.8, `doctrine.private_entity_manager`).
+     */
+    public function isPrivate(): bool
+    {
+        return $this->privateManager instanceof PrivateEntityManager;
+    }
+
+    /**
+     * Flushes `$manager` (default: {@see self::manager()}), the only way the bundle flushes (1.8). When that is the
+     * application's manager (host mode: neither the private manager nor a dedicated one), the host-flush probe runs
+     * first ({@see StorageHostFlushReporter}, unless `doctrine.private_entity_manager` is true): one deprecation per
+     * application entity class with pending changes this flush writes. The probe is read-only.
+     */
+    public function flush(?EntityManagerInterface $manager = null): void
+    {
+        $manager ??= $this->manager();
+        if (!$this->ownsManager()) {
+            $this->hostFlushReporter?->beforeFlush($manager);
+        }
+        $manager->flush();
+    }
+
+    /**
+     * The private manager learns that a statement of the bundle bypassed its unit of work at the current transaction
+     * level (1.8): a rollback of that level then makes its identity map stale, so it is replaced. No-op otherwise.
+     */
+    private function noteWrite(): void
+    {
+        $this->privateManager?->noteWrite();
     }
 
     /**
@@ -512,6 +571,10 @@ final readonly class StorageEntityManager
      */
     public function resetIfClosed(): void
     {
+        // 1.8: a closed private manager is replaced on its next use; the registry (the application's managers) is not touched.
+        if ($this->privateManager instanceof PrivateEntityManager) {
+            return;
+        }
         if (!$this->manager()->isOpen()) {
             $this->registry->resetManager($this->name);
         }

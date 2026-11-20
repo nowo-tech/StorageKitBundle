@@ -131,7 +131,7 @@ final class DownloadEquivalenceTest extends KernelTestCase
         self::assertSame(404, $old['status']);
         self::assertSame($old, $cur);
 
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $file = $this->service($kernel, StoredFileRepository::class)->findOneByUuid($file->getUuid());
         self::assertInstanceOf(StoredFile::class, $file);
         foreach ([$this->service($kernel, FileDeliveryV140::class), $this->service($kernel, FileDelivery::class)] as $delivery) {

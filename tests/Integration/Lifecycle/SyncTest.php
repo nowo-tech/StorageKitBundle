@@ -77,7 +77,7 @@ final class SyncTest extends KernelTestCase
         $again = $syncer->open($from, $to);
         self::assertSame($sync->getId(), $again->getId());
         $this->entityManager($kernel)->getConnection()->executeStatement('UPDATE storage_kit_sync SET last_file_id = 0, processed = 0');
-        $this->entityManager($kernel)->refresh($again);
+        $this->bundleManager($kernel)->refresh($again);
         self::assertTrue($syncer->run($again));
         self::assertSame(5, $again->getSkippedObjects(), 'objects already there with the same checksum are not written again');
     }
@@ -149,9 +149,9 @@ final class SyncTest extends KernelTestCase
 
         // A cancel that arrives while running stops the runner at the next batch.
         $sync->queue();
-        $this->entityManager($kernel)->flush();
+        $this->bundleManager($kernel)->flush();
         $this->entityManager($kernel)->getConnection()->executeStatement('UPDATE storage_kit_sync SET last_file_id = 0, processed = 0');
-        $this->entityManager($kernel)->refresh($sync);
+        $this->bundleManager($kernel)->refresh($sync);
         $connection = $this->entityManager($kernel)->getConnection();
         $syncer->run($sync, null, static function (StorageSync $running) use ($connection): void {
             $connection->executeStatement("UPDATE storage_kit_sync SET status = 'cancelled' WHERE id = ?", [$running->getId()]);
@@ -164,7 +164,7 @@ final class SyncTest extends KernelTestCase
         $kernel      = $this->bootKernel();
         [$from, $to] = $this->pair($kernel);
         $this->entityManager($kernel)->getConnection()->executeStatement("UPDATE storage_kit_profile SET region = 'BAD' WHERE id = ?", [$to->getId()]);
-        $this->entityManager($kernel)->refresh($to);
+        $this->bundleManager($kernel)->refresh($to);
         $sync = $this->syncer($kernel)->open($from, $to);
         $this->syncer($kernel)->run($sync);
 

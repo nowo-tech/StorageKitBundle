@@ -140,7 +140,7 @@ final class AwsCsvImportTest extends KernelTestCase
 
         $this->saveScope($client, $this->aws(), self::CONSOLE_CSV);
         self::assertSame(302, $client->getResponse()->getStatusCode());
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $profile = $this->service($kernel, StorageProfileRepository::class)->activeOf('acme');
         self::assertNotNull($profile);
         self::assertSame([self::KEY_ID, self::SECRET, true], [$profile->getAccessKey(), $profile->getSecret(), $profile->isEnabled()]);
@@ -166,7 +166,7 @@ final class AwsCsvImportTest extends KernelTestCase
         // The access key row is pre-filled with the saved key: left as is, the file replaces it (key rotation).
         $this->submit($client, '/storage/scopes/acme', 'storage_profile', 'Save', [], self::CONSOLE_CSV);
         self::assertSame(302, $client->getResponse()->getStatusCode());
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $profile = $this->service($kernel, StorageProfileRepository::class)->activeOf('acme');
         self::assertSame([self::KEY_ID, self::SECRET], [$profile?->getAccessKey(), $profile?->getSecret()]);
     }
@@ -178,7 +178,7 @@ final class AwsCsvImportTest extends KernelTestCase
         $this->saveScope($client, $this->aws(), "User name,Password,Access key ID,Secret access key,Console login link\nbob,," . self::KEY_ID . ',' . self::SECRET . ",https://123456789012.signin.aws.amazon.com/console\n");
 
         self::assertSame(302, $client->getResponse()->getStatusCode());
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         self::assertSame(self::KEY_ID, $this->service($kernel, StorageProfileRepository::class)->activeOf('acme')?->getAccessKey());
     }
 
@@ -195,7 +195,7 @@ final class AwsCsvImportTest extends KernelTestCase
             self::assertStringNotContainsString(self::SECRET, $html);
             self::assertStringNotContainsString(self::KEY_ID, $html);
         }
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         self::assertNull($this->service($kernel, StorageProfileRepository::class)->activeOf('acme'));
 
         // The same values typed and in the file are fine.
@@ -228,7 +228,7 @@ final class AwsCsvImportTest extends KernelTestCase
         $html = (string) $client->getResponse()->getContent();
         self::assertStringContainsString($message, $html);
         self::assertStringNotContainsString(self::SECRET, $html);
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         self::assertNull($this->service($kernel, StorageProfileRepository::class)->activeOf('acme'));
     }
 
@@ -246,7 +246,7 @@ final class AwsCsvImportTest extends KernelTestCase
         ], self::CONSOLE_CSV);
 
         self::assertSame(302, $client->getResponse()->getStatusCode());
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $profile = $this->service($kernel, StorageProfileRepository::class)->activeOf('acme');
         self::assertSame(['minio-key', 'minio-secret-not-real'], [$profile?->getAccessKey(), $profile?->getSecret()]);
     }
@@ -265,7 +265,7 @@ final class AwsCsvImportTest extends KernelTestCase
         ], self::CONSOLE_CSV);
 
         self::assertSame(302, $client->getResponse()->getStatusCode());
-        $this->entityManager($kernel)->clear();
+        $this->clearManagers($kernel);
         $target = $this->service($kernel, StorageProfileRepository::class)->targetOf(null);
         self::assertSame([self::KEY_ID, self::SECRET], [$target?->getAccessKey(), $target?->getSecret()]);
     }

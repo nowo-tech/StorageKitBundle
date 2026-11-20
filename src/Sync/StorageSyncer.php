@@ -100,7 +100,7 @@ final readonly class StorageSyncer
         } elseif ($sync->getStatus() !== StorageSync::RUNNING) {
             $sync->queue();
         }
-        $manager->flush();
+        $this->entityManager->flush($manager);
 
         return $sync;
     }
@@ -214,7 +214,7 @@ final readonly class StorageSyncer
             return true;
         }
         $sync->start($this->remaining($sync));
-        $manager->flush();
+        $this->entityManager->flush($manager);
         $deadline   = $seconds === null ? null : time() + $seconds;
         $syncs      = $this->entityManager->table(StorageSync::class);
         $connection = $manager->getConnection();
@@ -243,7 +243,7 @@ final readonly class StorageSyncer
                     return true;
                 }
                 $sync->advance((int) $file['id'], $copied, $skipped);
-                $manager->flush();
+                $this->entityManager->flush($manager);
                 $lock->refresh();
                 if ($progress !== null) {
                     $progress($sync);
