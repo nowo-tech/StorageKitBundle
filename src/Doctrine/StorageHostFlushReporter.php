@@ -9,7 +9,6 @@ use Nowo\StorageKitBundle\EventListener\RequestBoundaryListener;
 use Nowo\TransactionDoctrine\HostFlushProbe;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
 use Symfony\Contracts\Service\ResetInterface;
-use Throwable;
 
 /**
  * 1.8 (REQ-ARCH-001 rule 6 deprecation layer): reports the application's pending changes that a flush of the bundle
@@ -28,8 +27,8 @@ use Throwable;
  * {@see PrivateEntityManager} is never inspected; neither is a dedicated manager (`doctrine.entity_manager` naming one
  * other than the default: {@see StorageEntityManager::flush()} does not call it then).
  *
- * Read-only and fail-safe: it never flushes, clears, closes or resets a manager (REQ-RUNTIME-003), and a probe that
- * throws is ignored, so the write goes on. The probe is the shared `nowo_transaction_doctrine.host_flush_probe` when
+ * Read-only and fail-safe: it never flushes, clears, closes or resets a manager (REQ-RUNTIME-003), and a failing
+ * inspection never breaks the write (transaction-doctrine 1.9.1 catches it inside the probe). The probe is the shared `nowo_transaction_doctrine.host_flush_probe` when
  * the application registers NowoTransactionDoctrineBundle, else one of its own. Its "already reported" classes are reset at every unit-of-work boundary (main request start and
  * `kernel.terminate`, every Messenger message, the outermost console command: {@see RequestBoundaryListener}) and at
  * `kernel.reset`, so a FrankenPHP worker with the kernel reset off starts every unit clean.
@@ -74,11 +73,9 @@ final readonly class StorageHostFlushReporter implements ResetInterface
             return;
         }
 
-        try {
-            $this->probe->beforeHostFlush($entityManager, self::BUNDLE_NAME, self::OWN_NAMESPACES);
-        } catch (Throwable) {
-            // A diagnostic never breaks a write: the flush that follows runs as it did before 1.8.
-        }
+        // Never throws since transaction-doctrine 1.9.1 (audit XA-3): a failed inspection reports nothing and the
+        // flush that follows runs as it did before 1.8.
+        $this->probe->beforeHostFlush($entityManager, self::BUNDLE_NAME, self::OWN_NAMESPACES);
     }
 
     /**
