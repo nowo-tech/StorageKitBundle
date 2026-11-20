@@ -408,7 +408,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$config['doctrine']['table_prefix']]))
             ->addTag('doctrine.event_listener', ['event' => 'loadClassMetadata']));
         $container->setDefinition(UploaderCollationListener::class, (new Definition(UploaderCollationListener::class, [new Reference(StorageEntityManager::class), $logger]))
-            ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchemaTable']));
+            ->addTag('doctrine.event_listener', ['event' => 'postGenerateSchema']));
         foreach ([StorageProfileRepository::class, StoredFileRepository::class, StorageSyncRepository::class] as $repository) {
             $container->setDefinition($repository, (new Definition($repository, [new Reference(StorageEntityManager::class)]))->setPublic(true));
         }

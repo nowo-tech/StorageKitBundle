@@ -15,14 +15,15 @@ use Doctrine\DBAL\Schema\Schema;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
+use Doctrine\ORM\Mapping\ClassMetadataFactory;
+use Doctrine\ORM\Tools\Event\GenerateSchemaEventArgs;
 use Doctrine\ORM\Tools\Event\GenerateSchemaTableEventArgs;
+use Doctrine\ORM\Tools\SchemaTool;
 use Doctrine\Persistence\ManagerRegistry;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Doctrine\UploaderCollationListener;
-use Nowo\StorageKitBundle\Entity\StorageProfile;
-use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Entity\StoredFile;
-use Nowo\StorageKitBundle\Entity\StoredFileReference;
+use Nowo\StorageKitBundle\Tests\Support\OfflineSchema;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\ErrorHandler\BufferingLogger;
 
@@ -58,93 +59,129 @@ final class UploaderCollationListenerTest extends TestCase
     public function testTheFallbackIsLoggedWithTheServerVersion(): void
     {
         $logger = new BufferingLogger();
-        $args   = $this->args(StoredFileReference::class);
-        (new UploaderCollationListener($this->manager(new MySQLPlatform(), ['serverVersion' => '8.0']), $logger))->postGenerateSchemaTable($args);
-        self::assertSame('utf8mb4_bin', $args->getClassTable()->getColumn('source_id')->getPlatformOption('collation'));
+        $schema = OfflineSchema::generate('mysql://u@127.0.0.1/storagekit?serverVersion=8.0', new UploaderCollationListener(null, $logger));
+        self::assertSame('utf8mb4_bin', $schema->getTable('storage_kit_file_reference')->getColumn('source_id')->getPlatformOption('collation'));
         $logs = $logger->cleanLogs();
-        self::assertCount(1, $logs);
+        self::assertCount(3, $logs, 'one warning per collated table');
         self::assertSame('warning', $logs[0][0]);
         self::assertSame(['table' => 'storage_kit_file', 'version' => '8.0'], $logs[0][2]);
 
-        $args = $this->args(StorageProfile::class);
-        (new UploaderCollationListener($this->manager(new MySQLPlatform()), $logger))->postGenerateSchemaTable($args);
-        self::assertSame('utf8mb4_bin', $args->getClassTable()->getColumn('scope')->getPlatformOption('collation'));
+        // DBAL detected the platform itself (no server_version): the 5.7 platform falls back too.
+        $args = $this->args(new MySQLPlatform());
+        (new UploaderCollationListener(null, $logger))->postGenerateSchema($args);
+        self::assertSame('utf8mb4_bin', $args->getSchema()->getTable('storage_kit_profile')->getColumn('scope')->getPlatformOption('collation'));
         self::assertSame('detected', $logger->cleanLogs()[0][2]['version']);
 
-        $args = $this->args(StoredFile::class);
-        (new UploaderCollationListener($this->manager(new MariaDBPlatform()), $logger))->postGenerateSchemaTable($args);
+        OfflineSchema::generate('mysql://u@127.0.0.1/storagekit?serverVersion=11.4.0-MariaDB', new UploaderCollationListener(null, $logger));
         self::assertSame([], $logger->cleanLogs(), 'a NO PAD collation logs nothing');
     }
 
     public function testTheIdentityColumnsGetTheCollationOnMysql(): void
     {
-        $args = $this->args(StoredFile::class);
-        (new UploaderCollationListener($this->manager(new MySQL80Platform())))->postGenerateSchemaTable($args);
+        $schema = OfflineSchema::generate('mysql://u@127.0.0.1/storagekit?serverVersion=8.4.0', new UploaderCollationListener());
+        $file   = $schema->getTable('storage_kit_file');
 
         foreach (['uploaded_by', 'uploaded_by_key', 'context_id', 'owner'] as $column) {
-            self::assertSame('utf8mb4_0900_bin', $args->getClassTable()->getColumn($column)->getPlatformOption('collation'));
-            self::assertSame('utf8mb4', $args->getClassTable()->getColumn($column)->getPlatformOption('charset'));
+            self::assertSame('utf8mb4_0900_bin', $file->getColumn($column)->getPlatformOption('collation'));
+            self::assertSame('utf8mb4', $file->getColumn($column)->getPlatformOption('charset'));
         }
-        self::assertFalse($args->getClassTable()->getColumn('original_name')->hasPlatformOption('collation'));
+        self::assertFalse($file->getColumn('original_name')->hasPlatformOption('collation'));
+        self::assertSame('utf8mb4_0900_bin', $schema->getTable('storage_kit_file_reference')->getColumn('source_id')->getPlatformOption('collation'));
+        self::assertSame('utf8mb4_0900_bin', $schema->getTable('storage_kit_profile')->getColumn('scope')->getPlatformOption('collation'));
+        foreach ($schema->getTable('storage_kit_sync')->getColumns() as $column) {
+            self::assertFalse($column->hasPlatformOption('collation'));
+        }
     }
 
-    public function testOtherEntitiesAndExactPlatformsAreUntouched(): void
+    public function testExactPlatformsAreUntouched(): void
     {
-        $args  = $this->args(StorageSync::class);
-        $table = $args->getClassTable();
-        (new UploaderCollationListener($this->manager(new MySQL80Platform())))->postGenerateSchemaTable($args);
-        self::assertSame($table, $args->getClassTable());
+        $args   = $this->args(new PostgreSQLPlatform());
+        $schema = $args->getSchema();
+        (new UploaderCollationListener())->postGenerateSchema($args);
+        self::assertSame($schema, $args->getSchema());
+        self::assertFalse($schema->getTable('storage_kit_file')->getColumn('uploaded_by')->hasPlatformOption('collation'));
 
-        foreach ([StoredFileReference::class => 'source_id', StorageProfile::class => 'scope'] as $class => $column) {
-            $args = $this->args($class);
-            (new UploaderCollationListener($this->manager(new MySQL80Platform())))->postGenerateSchemaTable($args);
-            self::assertSame('utf8mb4_0900_bin', $args->getClassTable()->getColumn($column)->getPlatformOption('collation'));
-        }
+        $schema = OfflineSchema::generate('sqlite:///:memory:', new UploaderCollationListener());
+        self::assertFalse($schema->getTable('storage_kit_file')->getColumn('uploaded_by')->hasPlatformOption('collation'));
+    }
 
-        $args  = $this->args(StoredFile::class);
-        $table = $args->getClassTable();
-        (new UploaderCollationListener($this->manager(new PostgreSQLPlatform())))->postGenerateSchemaTable($args);
+    /** A manager that does not map the bundle (the host's, with a dedicated `doctrine.entity_manager`) is left alone. */
+    public function testAManagerWithoutTheBundleIsLeftAlone(): void
+    {
+        $metadataFactory = $this->createMock(ClassMetadataFactory::class);
+        $metadataFactory->method('isTransient')->willReturn(true);
+        $manager = $this->createMock(EntityManagerInterface::class);
+        $manager->method('getMetadataFactory')->willReturn($metadataFactory);
+        $manager->expects(self::never())->method('getConnection');
+        $schema = new Schema();
+        $args   = new GenerateSchemaEventArgs($manager, $schema);
+
+        (new UploaderCollationListener())->postGenerateSchema($args);
+
+        self::assertSame($schema, $args->getSchema());
+    }
+
+    /** A schema without the bundle tables (a subset of the classes) is left as it is. */
+    public function testASchemaWithoutTheBundleTablesIsLeftAsItIs(): void
+    {
+        $schema = new Schema();
+        $args   = new GenerateSchemaEventArgs(OfflineSchema::manager('mysql://u@127.0.0.1/storagekit?serverVersion=8.4.0'), $schema);
+
+        (new UploaderCollationListener())->postGenerateSchema($args);
+
+        self::assertSame($schema, $args->getSchema());
+    }
+
+    /** The 1.5.2–1.8.0 constructor argument is still accepted (unused). */
+    public function testTheFormerConstructorArgumentIsAccepted(): void
+    {
+        $schema = OfflineSchema::generate('mysql://u@127.0.0.1/storagekit?serverVersion=11.4.0-MariaDB', new UploaderCollationListener(new StorageEntityManager($this->createStub(ManagerRegistry::class))));
+
+        self::assertSame('utf8mb4_nopad_bin', $schema->getTable('storage_kit_file')->getColumn('uploaded_by')->getPlatformOption('collation'));
+    }
+
+    /** The former table event does nothing (1.8.1: replacing the table there lost its foreign keys). */
+    public function testTheFormerTableEventDoesNothing(): void
+    {
+        $table = new Table('storage_kit_file');
+        $table->addColumn('uploaded_by', 'string', ['length' => 180]);
+        $args = new GenerateSchemaTableEventArgs(new ClassMetadata(StoredFile::class), new Schema(), $table);
+
+        (new UploaderCollationListener())->postGenerateSchemaTable($args);
+
         self::assertSame($table, $args->getClassTable());
         self::assertFalse($table->getColumn('uploaded_by')->hasPlatformOption('collation'));
     }
 
-    public function testTheInPlaceBranchOfOlderDbal(): void
+    public function testCollatesInPlaceOrThroughTheEditor(): void
     {
         $table = new Table('t');
         $table->addColumn('uploaded_by', 'string', ['length' => 180]);
         self::assertNull(UploaderCollationListener::collate($table, 'uploaded_by', 'utf8mb4_nopad_bin', false));
         self::assertSame('utf8mb4_nopad_bin', $table->getColumn('uploaded_by')->getPlatformOption('collation'));
+
+        $edited = UploaderCollationListener::collate($table, 'uploaded_by', 'utf8mb4_0900_bin', true);
+        self::assertInstanceOf(Table::class, $edited);
+        self::assertNotSame($table, $edited);
+        self::assertSame('utf8mb4_0900_bin', $edited->getColumn('uploaded_by')->getPlatformOption('collation'));
     }
 
     /**
-     * @param class-string $class
+     * The schema of the bundle entities (SQLite metadata) behind a manager whose connection has `$platform` and no
+     * configured server_version (DBAL detected the platform).
      */
-    private function args(string $class): GenerateSchemaTableEventArgs
+    private function args(AbstractPlatform $platform): GenerateSchemaEventArgs
     {
-        $metadata = new ClassMetadata($class);
-        $metadata->setPrimaryTable(['name' => 'storage_kit_file']);
-        $table = new Table('storage_kit_file');
-        foreach (['uploadedBy' => 'uploaded_by', 'uploadedByKey' => 'uploaded_by_key', 'originalName' => 'original_name', 'contextId' => 'context_id', 'owner' => 'owner', 'sourceId' => 'source_id', 'scope' => 'scope'] as $field => $column) {
-            $metadata->mapField(['fieldName' => $field, 'columnName' => $column, 'type' => 'string', 'length' => 180, 'nullable' => true]);
-            $table->addColumn($column, 'string', ['length' => 180, 'notnull' => false]);
-        }
-
-        return new GenerateSchemaTableEventArgs($metadata, new Schema(), $table);
-    }
-
-    /**
-     * @param array<string, mixed> $params connection parameters
-     */
-    private function manager(AbstractPlatform $platform, array $params = []): StorageEntityManager
-    {
+        $real       = OfflineSchema::manager('sqlite:///:memory:');
+        $schema     = (new SchemaTool($real))->getSchemaFromMetadata($real->getMetadataFactory()->getAllMetadata());
         $connection = $this->createStub(Connection::class);
         $connection->method('getDatabasePlatform')->willReturn($platform);
-        $connection->method('getParams')->willReturn($params);
+        $connection->method('getParams')->willReturn([]);
         $manager = $this->createStub(EntityManagerInterface::class);
+        $manager->method('getMetadataFactory')->willReturn($real->getMetadataFactory());
+        $manager->method('getClassMetadata')->willReturnCallback($real->getClassMetadata(...));
         $manager->method('getConnection')->willReturn($connection);
-        $registry = $this->createStub(ManagerRegistry::class);
-        $registry->method('getManager')->willReturn($manager);
 
-        return new StorageEntityManager($registry);
+        return new GenerateSchemaEventArgs($manager, $schema);
     }
 }

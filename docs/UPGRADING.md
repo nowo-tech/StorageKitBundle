@@ -4,6 +4,8 @@
 
 - [Planned for 2.0](#planned-for-20)
 - [Unreleased](#unreleased)
+- [To 1.8.1](#to-181)
+  - [Missing foreign keys on MySQL / MariaDB (1.5.2 to 1.8.0)](#missing-foreign-keys-on-mysql--mariadb-152-to-180)
 - [To 1.8.0](#to-180)
 - [To 1.8.0](#to-180-1)
   - [The private entity manager notice](#the-private-entity-manager-notice)
@@ -49,6 +51,53 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
    `uploadImage()`.
 
 ## Unreleased
+
+## To 1.8.1
+
+From **1.8.0**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
+
+### Missing foreign keys on MySQL / MariaDB (1.5.2 to 1.8.0)
+
+Only MySQL / MariaDB databases whose bundle tables were created or migrated with doctrine/orm 3.7.0 to 3.8.0 and
+doctrine/dbal 4.5 or later are affected (PostgreSQL and SQLite are not): `storage_kit_file.profile_id` from 1.5.2,
+`storage_kit_file_reference.file_id` from 1.5.3. After the update, check the schema of the bundle's entity manager:
+
+```bash
+php bin/console doctrine:schema:validate --em=<doctrine.entity_manager, or your default manager>
+# or, with migrations: php bin/console doctrine:migrations:diff
+```
+
+If it reports the missing foreign keys, first deal with the rows they would reject, then add the indexes and foreign
+keys. The names below are those of the default `table_prefix: ''`; with a prefix the table and generated names
+differ, so take them from `php bin/console doctrine:schema:update --dump-sql` (run the statements it prints for these
+two tables only, after the clean-up).
+
+```sql
+-- Files whose profile was deleted: list them (their objects stay in the bucket of the deleted profile).
+SELECT f.id, f.uuid, f.profile_id, f.storage_key FROM storage_kit_file f LEFT JOIN storage_kit_profile p ON p.id = f.profile_id WHERE p.id IS NULL;
+-- Either move them to an existing profile that holds their objects (replace 123 with its id; a storage_key that profile
+-- already has fails the unique key uniq_storage_kit_file_key)...
+UPDATE storage_kit_file f LEFT JOIN storage_kit_profile p ON p.id = f.profile_id SET f.profile_id = 123 WHERE p.id IS NULL;
+-- ...or delete them (their references go too, here by hand: the foreign key below does not exist yet).
+DELETE r FROM storage_kit_file_reference r JOIN storage_kit_file f ON f.id = r.file_id LEFT JOIN storage_kit_profile p ON p.id = f.profile_id WHERE p.id IS NULL;
+DELETE f FROM storage_kit_file f LEFT JOIN storage_kit_profile p ON p.id = f.profile_id WHERE p.id IS NULL;
+
+-- References of deleted files (ON DELETE CASCADE would have deleted them): check, then delete.
+SELECT COUNT(*) FROM storage_kit_file_reference r LEFT JOIN storage_kit_file f ON f.id = r.file_id WHERE f.id IS NULL;
+DELETE r FROM storage_kit_file_reference r LEFT JOIN storage_kit_file f ON f.id = r.file_id WHERE f.id IS NULL;
+
+CREATE INDEX IDX_D26DA834CCFA12B8 ON storage_kit_file (profile_id);
+ALTER TABLE storage_kit_file ADD CONSTRAINT FK_D26DA834CCFA12B8 FOREIGN KEY (profile_id) REFERENCES storage_kit_profile (id);
+CREATE INDEX IDX_AAE94DBE93CB796C ON storage_kit_file_reference (file_id);
+ALTER TABLE storage_kit_file_reference ADD CONSTRAINT FK_AAE94DBE93CB796C FOREIGN KEY (file_id) REFERENCES storage_kit_file (id) ON DELETE CASCADE;
+```
+
+`profile_id` has no ON DELETE rule (a profile with files cannot be deleted), as in the mapping. Run
+`php bin/console doctrine:schema:validate` again: the mapping and the database are in sync once it passes.
 
 ## To 1.8.0
 
