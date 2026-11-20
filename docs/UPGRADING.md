@@ -5,6 +5,7 @@
 - [Planned for 2.0](#planned-for-20)
 - [Unreleased](#unreleased)
 - [To 1.8.0](#to-180)
+- [To 1.8.0](#to-180-1)
   - [The private entity manager notice](#the-private-entity-manager-notice)
   - [Reading the host-flush probe](#reading-the-host-flush-probe)
   - [Opting in: what changes](#opting-in-what-changes)
@@ -48,6 +49,14 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
    `uploadImage()`.
 
 ## Unreleased
+
+## To 1.8.0
+
+From **1.7.1**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
 
 ## To 1.8.0
 
