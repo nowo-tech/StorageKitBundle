@@ -91,8 +91,8 @@ The last 1.x minor before 2.0: without configuration it behaves as 1.7.1, and it
 
 ### Changed
 
-- Requires `nowo-tech/transaction-doctrine` ^1.9 (the private-manager kit and the host-flush probe; 1.8.1 fixed
-  GHSA-9wh3-m3m5-jffx and GHSA-65w2-9r4h-848g).
+- Requires `nowo-tech/transaction-doctrine` ^1.9.1 (the private-manager kit and the host-flush probe, with the 1.9.1
+  fixes; 1.8.1 fixed GHSA-9wh3-m3m5-jffx and GHSA-65w2-9r4h-848g).
 - The announced 2.0 default of the bundle's entity manager is now **the private manager on your default connection**
   instead of "a dedicated manager": no host has to declare a second Doctrine manager. `doctrine.entity_manager: <name>`
   stays as the option for a dedicated manager.

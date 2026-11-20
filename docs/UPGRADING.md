@@ -59,7 +59,7 @@ composer update nowo-tech/storage-kit-bundle nowo-tech/transaction-doctrine
 
 1.8.0 is the last 1.x minor before 2.0. Without configuration it behaves as 1.7.1. It adds the
 `doctrine.private_entity_manager` opt-in, a deprecation notice for each default that 2.0 changes, and a host-flush
-probe that lists what the change would mean for your application. It requires `nowo-tech/transaction-doctrine` ^1.9.
+probe that lists what the change would mean for your application. It requires `nowo-tech/transaction-doctrine` ^1.9.1.
 How files are stored, delivered and authorised does not change.
 
 ### The private entity manager notice
@@ -139,6 +139,11 @@ With `private_entity_manager: true`:
   bundle left unflushed then are discarded and logged as a warning (classes and counts only).
 - Bundle entities loaded through your own manager (`$em->find(StoredFile::class, …)`) are your manager's instances,
   not the bundle's: read them, but change them only through the bundle's API. Reference files by `uuid`, as documented.
+- An entity of yours with a to-one association to a bundle entity (for example `Product::$image` to `StoredFile`) must
+  hold a reference of your own manager: `$yourManager->getReference(StoredFile::class, $storedFile->getId())`. Above
+  all for the `StoredFile` returned by the deprecated `ImageUploader::upload()`: it belongs to the private manager, so
+  assigning it as it is makes your manager take it for a new entity ("A new entity was found through the
+  relationship") and your flush fails.
 - The connection is shared: a transaction you open around an upload includes the row, and your rollback undoes it (the
   private manager then forgets what it loaded or wrote in that transaction).
 - The REQ-RUNTIME-003 conflict answer of the bundle's routes is unchanged: 409 with `Retry-After` and
