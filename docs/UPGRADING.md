@@ -5,6 +5,7 @@
 - [Planned for 2.0](#planned-for-20)
 - [Unreleased](#unreleased)
 - [To 1.8.1](#to-181)
+- [To 1.8.1](#to-181-1)
   - [Missing foreign keys on MySQL / MariaDB (1.5.2 to 1.8.0)](#missing-foreign-keys-on-mysql--mariadb-152-to-180)
 - [To 1.8.0](#to-180)
 - [To 1.8.0](#to-180-1)
@@ -51,6 +52,14 @@ Breaking changes announced in 1.x (deprecated now, applied in the next major per
    `uploadImage()`.
 
 ## Unreleased
+
+## To 1.8.1
+
+From **1.8.0**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
 
 ## To 1.8.1
 

@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.8.1] - 2026-11-20](#181---2026-11-20)
   - [Fixed](#fixed)
 - [[1.8.0] - 2026-11-20](#180---2026-11-20)
   - [Added](#added)
@@ -64,6 +65,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-11-20
+
 ### Fixed
 
 - **Missing foreign keys on MySQL / MariaDB** (audit XI-3). With doctrine/orm 3.7.0 to 3.8.0 and doctrine/dbal 4.5 or
@@ -83,7 +86,7 @@ All notable changes to this project are documented here. The format follows
   argument is no longer used. A test checks that the generated schema has the same foreign keys and indexes with and
   without the listener, and the database suites check both foreign keys and their rules on MySQL 8.4, MariaDB 11.4
   and PostgreSQL, in host and private (`doctrine.entity_manager`) mode. Existing databases:
-  [UPGRADING](UPGRADING.md#unreleased).
+  [UPGRADING](UPGRADING.md#to-181).
 
 ## [1.8.0] - 2026-11-20
 
