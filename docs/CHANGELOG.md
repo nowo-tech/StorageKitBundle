@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.0.0] - 2026-11-21](#200---2026-11-21)
   - [Removed](#removed)
   - [Changed](#changed)
   - [Security](#security)
@@ -68,9 +69,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-21
+
 2.0.0: the major that removes what 1.x deprecated (REQ-BC-001) and closes REQ-ARCH-001 rules 6 and 8. An application
 that runs 1.8 without deprecation notices from this bundle upgrades without code changes; with the settings-backed
-instance bucket it also requires `nowo-tech/instance-settings-bundle` itself. See [UPGRADING](UPGRADING.md#unreleased).
+instance bucket it also requires `nowo-tech/instance-settings-bundle` itself. See [UPGRADING](UPGRADING.md#to-200).
 
 ### Removed
 
