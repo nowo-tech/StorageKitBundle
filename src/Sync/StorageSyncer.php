@@ -92,6 +92,9 @@ final readonly class StorageSyncer
         if ($from === $to || ($from->getId() !== null && $from->getId() === $to->getId())) {
             throw new InvalidArgumentException('A profile cannot be synced to itself.');
         }
+        // 2.0 (lesson W1-2): profiles loaded through the application's manager are loaded again by the bundle's.
+        $from    = $this->entityManager->adopt($from);
+        $to      = $this->entityManager->adopt($to);
         $manager = $this->entityManager->manager();
         $sync    = $this->syncs->forPair($from, $to);
         if (!$sync instanceof StorageSync) {
@@ -113,6 +116,7 @@ final readonly class StorageSyncer
      */
     public function run(StorageSync $sync, ?int $seconds = null, ?callable $progress = null): bool
     {
+        $sync = $this->entityManager->adopt($sync);
         $lock = $this->locks->createLock('nowo_storage_kit/sync/' . $sync->getId(), (float) $this->staleSeconds);
         if (!$lock->acquire()) {
             return false;
@@ -131,6 +135,7 @@ final readonly class StorageSyncer
      */
     public function cancel(StorageSync $sync): bool
     {
+        $sync = $this->entityManager->adopt($sync);
         if (!$sync->isOpen()) {
             return false;
         }

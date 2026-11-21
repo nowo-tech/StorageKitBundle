@@ -17,7 +17,6 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\Mapping\ClassMetadataFactory;
 use Doctrine\ORM\Tools\Event\GenerateSchemaEventArgs;
-use Doctrine\ORM\Tools\Event\GenerateSchemaTableEventArgs;
 use Doctrine\ORM\Tools\SchemaTool;
 use Doctrine\Persistence\ManagerRegistry;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
@@ -138,19 +137,6 @@ final class UploaderCollationListenerTest extends TestCase
         $schema = OfflineSchema::generate('mysql://u@127.0.0.1/storagekit?serverVersion=11.4.0-MariaDB', new UploaderCollationListener(new StorageEntityManager($this->createStub(ManagerRegistry::class))));
 
         self::assertSame('utf8mb4_nopad_bin', $schema->getTable('storage_kit_file')->getColumn('uploaded_by')->getPlatformOption('collation'));
-    }
-
-    /** The former table event does nothing (1.8.1: replacing the table there lost its foreign keys). */
-    public function testTheFormerTableEventDoesNothing(): void
-    {
-        $table = new Table('storage_kit_file');
-        $table->addColumn('uploaded_by', 'string', ['length' => 180]);
-        $args = new GenerateSchemaTableEventArgs(new ClassMetadata(StoredFile::class), new Schema(), $table);
-
-        (new UploaderCollationListener())->postGenerateSchemaTable($args);
-
-        self::assertSame($table, $args->getClassTable());
-        self::assertFalse($table->getColumn('uploaded_by')->hasPlatformOption('collation'));
     }
 
     public function testCollatesInPlaceOrThroughTheEditor(): void

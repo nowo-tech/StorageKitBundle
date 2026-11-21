@@ -11,6 +11,7 @@ use Doctrine\Persistence\ManagerRegistry;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
+use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Storage\StorageProvider;
 use Nowo\StorageKitBundle\Tests\Fixtures\AuditLog;
 use Nowo\StorageKitBundle\Tests\Fixtures\Boards;
@@ -20,6 +21,7 @@ use Nowo\StorageKitBundle\Tests\Fixtures\ScopeAccess;
 use Nowo\StorageKitBundle\Tests\Fixtures\UploadLimit;
 use Nowo\StorageKitBundle\Tests\Support\InMemoryBuckets;
 use Nowo\StorageKitBundle\Tests\Support\InMemoryStorageConnectionFactory;
+use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use PHPUnit\Framework\TestCase;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\BrowserKit\Cookie;
@@ -31,11 +33,8 @@ use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
 use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 
-use function array_key_exists;
 use function count;
-use function getenv;
 use function in_array;
-use function is_array;
 use function preg_replace;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 
@@ -73,7 +72,6 @@ abstract class KernelTestCase extends TestCase
             'scopes'    => ['enabled' => true, 'access_checker' => ScopeAccess::class],
             'endpoints' => ['allowed_hosts' => ['minio'], 'resolve_dns' => false],
         ];
-        $config['doctrine'] = self::doctrineMode(is_array($config['doctrine'] ?? null) ? $config['doctrine'] : []);
         $id                 = (string) preg_replace('/\W+/', '_', static::class . '_' . $this->name() . '_' . count($this->kernels));
         $kernel             = new StorageKitTestKernel(
             $id,
@@ -117,34 +115,6 @@ abstract class KernelTestCase extends TestCase
         }
 
         return $kernel;
-    }
-
-    /**
-     * 1.8: the `private_entity_manager` mode of a test kernel. A test that sets the key keeps it (null or false: the
-     * notice and the host-flush probe). Otherwise, without `entity_manager`: true (the 2.0 behaviour, opted in now), or
-     * false when STORAGE_KIT_TEST_HOST_EM=1 (the whole suite in host mode, as `make test-with-db` and the
-     * "host mode" CI legs run it; the bundle's notice is a silenced deprecation, which PHPUnit does not count). With
-     * `entity_manager` (a dedicated manager) the key stays unset: no notice.
-     *
-     * @param array<string, mixed> $doctrine
-     *
-     * @return array<string, mixed>
-     */
-    public static function doctrineMode(array $doctrine): array
-    {
-        if (array_key_exists('private_entity_manager', $doctrine) || isset($doctrine['entity_manager'])) {
-            return $doctrine;
-        }
-
-        return $doctrine + ['private_entity_manager' => !self::hostMode()];
-    }
-
-    /**
-     * Whether the suite runs in host mode (STORAGE_KIT_TEST_HOST_EM=1): the bundle flushes the default manager.
-     */
-    public static function hostMode(): bool
-    {
-        return getenv('STORAGE_KIT_TEST_HOST_EM') === '1';
     }
 
     /**
@@ -220,8 +190,7 @@ abstract class KernelTestCase extends TestCase
     }
 
     /**
-     * The manager the bundle reads and writes through (1.8: the private manager with `private_entity_manager: true`,
-     * else the default or dedicated one).
+     * The manager the bundle reads and writes through (2.0: the private manager, or the dedicated one).
      */
     protected function bundleManager(StorageKitTestKernel $kernel): EntityManagerInterface
     {
@@ -258,12 +227,25 @@ abstract class KernelTestCase extends TestCase
     {
         $profile = new StorageProfile($scope, $state);
         $profile->configure(StorageProvider::S3_COMPATIBLE, true, $endpoint, null, 'us-east-1', $bucket, 'app', 'test-key', 'test-secret-not-real', true);
-        // The bundle's manager: the default one, or the dedicated `doctrine.entity_manager` (1.5).
+        // The bundle's manager: the private one, or the dedicated `doctrine.entity_manager` (1.5).
         $manager = $this->service($kernel, StorageEntityManager::class)->manager();
         $manager->persist($profile);
         $manager->flush();
 
         return $profile;
+    }
+
+    /**
+     * Uploads an image through {@see ImageUploaderInterface::uploadImage()} and returns its row, loaded through the
+     * bundle's manager (what the entity-returning `ImageUploader::upload()` returned until 2.0 removed it).
+     */
+    protected function uploadFile(StorageKitTestKernel $kernel, object $user, string $contextType, string $contextId, string $bytes, string $originalName): StoredFile
+    {
+        $view = $this->service($kernel, ImageUploaderInterface::class)->uploadImage($user, $contextType, $contextId, $bytes, $originalName);
+        $file = $this->bundleManager($kernel)->getRepository(StoredFile::class)->findOneBy(['uuid' => $view->uuid]);
+        self::assertInstanceOf(StoredFile::class, $file);
+
+        return $file;
     }
 
     /**

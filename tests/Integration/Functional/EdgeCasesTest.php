@@ -24,7 +24,6 @@ use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Support\Images;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\UploadRefused;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\DomCrawler\Field\ChoiceFormField;
@@ -79,7 +78,7 @@ final class EdgeCasesTest extends KernelTestCase
         $kernel = $this->bootKernel();
         $files  = $this->service($kernel, StoredFileRepository::class);
         $this->profile($kernel);
-        $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'a.png');
+        $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'a.png');
 
         self::assertSame([], $files->byUuids([]));
         self::assertSame(0, $files->bytesFor([]));
@@ -95,7 +94,7 @@ final class EdgeCasesTest extends KernelTestCase
     {
         $kernel = $this->bootKernel();
         $this->profile($kernel);
-        $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'a.png');
+        $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'a.png');
         $this->entityManager($kernel)->getConnection()->executeStatement('UPDATE storage_kit_file SET orphaned_since = NULL');
 
         self::assertSame(1, $this->service($kernel, FilePurger::class)->run(new DateTimeImmutable())['orphaned']);
@@ -104,11 +103,10 @@ final class EdgeCasesTest extends KernelTestCase
     public function testUploaderCorners(): void
     {
         $kernel   = $this->bootKernel();
-        $uploader = $this->service($kernel, ImageUploader::class);
         $this->profile($kernel);
 
         try {
-            $uploader->upload(new InMemoryUser('alice', null), 'Bad Type', 'b1', Images::png(), 'a.png');
+            $this->uploadFile($kernel, new InMemoryUser('alice', null), 'Bad Type', 'b1', Images::png(), 'a.png');
             self::fail('accepted');
         } catch (UploadRefused $e) {
             self::assertSame(UploadRefused::CONTEXT, $e->reason);
@@ -117,7 +115,7 @@ final class EdgeCasesTest extends KernelTestCase
         $this->buckets($kernel)->writesLeft  = 1;
         $this->buckets($kernel)->failDeletes = true;
         try {
-            $uploader->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(2000, 1000), 'a.png');
+            $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(2000, 1000), 'a.png');
             self::fail('accepted');
         } catch (UploadRefused $e) {
             self::assertSame(UploadRefused::STORAGE, $e->reason);
@@ -127,7 +125,7 @@ final class EdgeCasesTest extends KernelTestCase
         $this->clearManagers($kernel);
         $this->service($kernel, StorageProfiles::class)->reset();
         try {
-            $uploader->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(), 'a.png');
+            $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(), 'a.png');
             self::fail('accepted');
         } catch (UploadRefused $e) {
             self::assertSame(UploadRefused::OFF, $e->reason);
@@ -139,9 +137,8 @@ final class EdgeCasesTest extends KernelTestCase
         $kernel   = $this->bootKernel();
         $from     = $this->profile($kernel);
         $to       = $this->profile($kernel, null, 'target', StorageProfile::STATE_TARGET);
-        $uploader = $this->service($kernel, ImageUploader::class);
-        $uploader->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'a.png');
-        $uploader->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'b.png');
+        $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'a.png');
+        $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'b.png');
         $syncer = $this->service($kernel, StorageSyncer::class);
         $sync   = $syncer->open($from, $to);
         $bus    = new class implements MessageBusInterface {

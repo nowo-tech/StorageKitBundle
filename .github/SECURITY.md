@@ -2,10 +2,14 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.x     | :white_check_mark: |
-| < 1.0   | :x:                |
+| Version | Supported                                             |
+| ------- | ----------------------------------------------------- |
+| 2.x     | ✅                                                    |
+| 1.x     | security fixes (Moderate+) until 6 months after 2.0.0 |
+| < 1.0   | :x:                                                   |
+
+After 2.0.0 is released, the 1.x line receives security fixes for 6 months: fixes rated Moderate and above are
+backported to the last 1.x minor; Low ones are fixed in 2.x only.
 
 ## Reporting a Vulnerability
 

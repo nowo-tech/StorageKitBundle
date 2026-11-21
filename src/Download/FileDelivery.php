@@ -14,8 +14,6 @@ use Nowo\StorageKitBundle\Storage\FileStorage;
 use Nowo\StorageKitBundle\Upload\ImageProcessor;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\HeaderUtils;
-use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 use function in_array;
 use function max;
@@ -24,7 +22,6 @@ use function preg_replace;
 use function strlen;
 use function strtolower;
 use function substr;
-use function trigger_deprecation;
 use function trim;
 
 use const PATHINFO_FILENAME;
@@ -38,8 +35,8 @@ use const PATHINFO_FILENAME;
  * hostile object cannot run script on the application origin. Both are private, short-lived and `noindex`.
  *
  * Since 1.5 the result is a framework-free {@see DeliverableFile} ({@see self::deliver()}, the
- * {@see FileDeliveryInterface} port); {@see FileDeliveryResponder} builds the HttpFoundation response. The 1.4
- * {@see self::respond()} still returns the same response, deprecated.
+ * {@see FileDeliveryInterface} port); {@see FileDeliveryResponder} builds the HttpFoundation response (2.0 removed the
+ * 1.4 `respond()`, deprecated since 1.5).
  */
 final readonly class FileDelivery implements FileDeliveryInterface
 {
@@ -112,26 +109,6 @@ final readonly class FileDelivery implements FileDeliveryInterface
             'Content-Security-Policy'      => self::SANDBOX_CSP,
             'Cross-Origin-Resource-Policy' => 'same-origin',
         ]);
-    }
-
-    /**
-     * The response of a variant of a file the viewer may read.
-     *
-     * @deprecated since 1.5, removed in 2.0: call {@see self::deliver()} ({@see FileDeliveryInterface}, a
-     *             {@see DeliverableFile}) and build the response with {@see FileDeliveryResponder}; the response is the same
-     *
-     * @throws NotFoundHttpException when the profile is not connectable any more
-     */
-    public function respond(StoredFile $file, string $variant): Response
-    {
-        trigger_deprecation('nowo-tech/storage-kit-bundle', '1.5', 'Method "%s::respond()" is deprecated, use "%s::deliver()" and "%s" instead (removed in 2.0).', self::class, FileDeliveryInterface::class, FileDeliveryResponder::class);
-        try {
-            $delivery = $this->prepare($file, $variant);
-        } catch (FileNotDeliverable $e) {
-            throw new NotFoundHttpException('', $e); // no message: the same 404 as 1.4
-        }
-
-        return (new FileDeliveryResponder())->toResponse($delivery);
     }
 
     /**

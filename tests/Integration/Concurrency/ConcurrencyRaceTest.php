@@ -20,7 +20,6 @@ use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\TransactionDoctrine\ConflictCode;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\CommitMark;
@@ -81,7 +80,7 @@ final class ConcurrencyRaceTest extends KernelTestCase
 
     private function upload(StorageKitTestKernel $kernel): StoredFile
     {
-        return $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', 'acme', Images::png(40, 30), 'photo.png');
+        return $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'acme', Images::png(40, 30), 'photo.png');
     }
 
     private function follow(KernelBrowser $client): string

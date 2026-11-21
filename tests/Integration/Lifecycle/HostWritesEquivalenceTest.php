@@ -48,7 +48,8 @@ use function sprintf;
  * ({@see StoredFilesPersonalDataV140}, {@see InstanceSettingsListenerV140}, literal copies) and through the 1.5 code
  * ends with the same rows (every column of the files, references and profile tables), the same return values and the
  * same audit events — over more than one erasure page, by identifier and by uploader key, with referenced and
- * unreferenced files. The one intended difference: an entity the host left pending stays pending (1.4 flushed it).
+ * unreferenced files. An entity the host left pending stays pending (1.4 flushed it; 2.0 writes through the private
+ * manager, so the v1.4.0 copies flush that one and not the host's either).
  *
  * Runs on every CI database (SQLite, MySQL, MariaDB, PostgreSQL): one kernel at a time, schema recreated per boot.
  */
@@ -73,8 +74,9 @@ final class HostWritesEquivalenceTest extends KernelTestCase
         self::assertSame($legacy['audit'], $new['audit']);
         self::assertCount(self::ROWS + 1, $new['files']);
 
-        // The intended difference: 1.4 flushed the host's pending entity, 1.5 leaves it pending.
-        self::assertSame(1, $legacy['notes']);
+        // 1.4 flushed the host's pending entity, 1.5 leaves it pending. 2.0: the v1.4.0 copy's flush goes to the
+        // bundle's private manager too, so neither run writes it.
+        self::assertSame(0, $legacy['notes']);
         self::assertSame(0, $new['notes']);
         self::assertTrue($new['pending']);
     }
@@ -87,7 +89,7 @@ final class HostWritesEquivalenceTest extends KernelTestCase
         self::assertSame($legacy['profile'], $new['profile']);
         self::assertNull($new['profile']['tested_at']);
         self::assertSame($legacy['audit'], $new['audit']);
-        self::assertSame(1, $legacy['notes']);
+        self::assertSame(0, $legacy['notes'], '2.0: the v1.4.0 copy flushes the private manager');
         self::assertSame(0, $new['notes']);
         self::assertTrue($new['pending']);
         self::assertTrue($new['synced'], 'the managed profile shows the forgotten test, with nothing left to flush');
@@ -98,11 +100,11 @@ final class HostWritesEquivalenceTest extends KernelTestCase
      */
     private function eraseRun(bool $legacy): array
     {
-        // Host mode (1.x): the equivalence is about the bundle's writes next to the host's default manager.
-        $kernel     = $this->bootKernel(['doctrine' => ['private_entity_manager' => false]]);
+        // 2.0: the bundle writes through its private manager, next to the host's default manager.
+        $kernel     = $this->bootKernel();
         $connection = $this->seed($kernel);
         $manager    = $this->entityManager($kernel);
-        $manager->clear();
+        $this->clearManagers($kernel);
         $this->audit($kernel)->events = [];
         $note                         = new Note('b1', 'pending host change');
         $manager->persist($note);
@@ -126,8 +128,10 @@ final class HostWritesEquivalenceTest extends KernelTestCase
             // The file the manager held shows the erased values and has nothing left to flush.
             self::assertSame(StoredFile::ANONYMOUS_NAME, $loaded->getOriginalName());
             self::assertNull($loaded->getUploadedBy());
-            $manager->getUnitOfWork()->computeChangeSets();
-            self::assertSame([], $manager->getUnitOfWork()->getEntityChangeSet($loaded));
+            $bundle = $this->bundleManager($kernel);
+            self::assertTrue($bundle->contains($loaded));
+            $bundle->getUnitOfWork()->computeChangeSets();
+            self::assertSame([], $bundle->getUnitOfWork()->getEntityChangeSet($loaded));
         }
 
         return [
@@ -145,7 +149,7 @@ final class HostWritesEquivalenceTest extends KernelTestCase
      */
     private function settingsRun(bool $legacy): array
     {
-        $kernel = $this->bootKernel(['doctrine' => ['private_entity_manager' => false]], extra: static function (ContainerConfigurator $container): void {
+        $kernel = $this->bootKernel(extra: static function (ContainerConfigurator $container): void {
             $container->services()->alias(InstanceSettingsListener::class . '.public', InstanceSettingsListener::class)->public();
         });
         $this->service($kernel, InstanceSettingsInterface::class)->save('storage', ['provider' => StorageProvider::S3_COMPATIBLE, 'endpoint' => 'http://minio:9000', 'region' => 'us-east-1', 'bucket' => 'files', 'access_key' => 'test-key', 'secret' => 'REDACTED-TEST', 'path_style' => true]);
@@ -155,12 +159,12 @@ final class HostWritesEquivalenceTest extends KernelTestCase
         self::assertInstanceOf(StorageProfile::class, $active);
         self::assertTrue($active->isSettingsBacked());
         $active->recordTest(true, true);
+        $this->bundleManager($kernel)->flush();
         $manager = $this->entityManager($kernel);
-        $manager->flush();
         $connection = $manager->getConnection();
         $table      = $manager->getClassMetadata(StorageProfile::class)->getTableName();
         $connection->executeStatement('UPDATE ' . $table . ' SET tested_at = ?, created_at = ?, updated_at = ?, uuid = ?', ['2026-01-02 03:04:05', '2026-01-01 00:00:00', '2026-01-01 00:00:00', '00000000-0000-4000-8000-0000000000aa']);
-        $manager->clear();
+        $this->clearManagers($kernel);
         $profiles->reset();
         $this->audit($kernel)->events = [];
         $note                         = new Note('b1', 'pending host change');
@@ -179,8 +183,9 @@ final class HostWritesEquivalenceTest extends KernelTestCase
         $pending = $manager->getUnitOfWork()->isScheduledForInsert($note);
         $active  = $profiles->activeOf(null);
         self::assertInstanceOf(StorageProfile::class, $active);
-        $manager->getUnitOfWork()->computeChangeSets();
-        $synced = !$active->getTestedAt() instanceof DateTimeImmutable && $manager->getUnitOfWork()->getEntityChangeSet($active) === [];
+        $bundle = $this->bundleManager($kernel);
+        $bundle->getUnitOfWork()->computeChangeSets();
+        $synced = $bundle->contains($active) && !$active->getTestedAt() instanceof DateTimeImmutable && $bundle->getUnitOfWork()->getEntityChangeSet($active) === [];
         $rows   = $this->rows($connection, $table);
         self::assertCount(1, $rows);
 

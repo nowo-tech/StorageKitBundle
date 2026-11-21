@@ -14,7 +14,6 @@ use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\StoredFileView;
 use Nowo\StorageKitBundle\Upload\UploadRefused;
@@ -35,7 +34,7 @@ final class ArchitectureBarTest extends KernelTestCase
         $note    = new Note('b1', 'pending');
         $manager->persist($note);
 
-        $file = $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'a.png');
+        $file = $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'a.png');
 
         self::assertTrue($manager->getUnitOfWork()->isScheduledForInsert($note), 'still pending');
         self::assertSame(0, (int) $manager->getConnection()->fetchOne('SELECT COUNT(*) FROM ' . $this->noteTable($kernel)));

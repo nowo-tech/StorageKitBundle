@@ -18,7 +18,6 @@ use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Tests\Support\SeedIds;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -138,13 +137,12 @@ final class LookalikeUploaderTest extends KernelTestCase
         $this->profile($kernel);
         $long                                                           = str_repeat('a', 181);
         $this->service($kernel, Boards::class)->boards['b1']['writers'] = ['alice', 'alice ', "ali\u{200B}ce", $long];
-        $uploader                                                       = $this->service($kernel, ImageUploader::class);
 
-        $file = $uploader->upload(new AppUser(5, 'alice'), 'board', 'b1', Images::png(4, 4), 'a.png');
+        $file = $this->uploadFile($kernel, new AppUser(5, 'alice'), 'board', 'b1', Images::png(4, 4), 'a.png');
         self::assertSame('alice', $file->getUploadedBy());
         self::assertSame('user:5', $file->getUploadedByKey());
         foreach (['alice ', "ali\u{200B}ce", $long] as $identifier) {
-            $file = $uploader->upload(new AppUser('5 ', $identifier), 'board', 'b1', Images::png(4, 4), 'a.png');
+            $file = $this->uploadFile($kernel, new AppUser('5 ', $identifier), 'board', 'b1', Images::png(4, 4), 'a.png');
             self::assertNull($file->getUploadedBy(), sprintf('identifier "%s"', $identifier));
             self::assertNull($file->getUploadedByKey(), 'a padded key is not stored either');
         }

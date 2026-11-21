@@ -37,7 +37,7 @@ use const PHP_INT_MIN;
  * another message: a worker run in-process by a message handler keeps the outer message's unit (audit NX CR1). The
  * host's managers are never reset nor cleared.
  *
- * 1.8 (`doctrine.private_entity_manager: true`): a second instance keeps the bundle's PRIVATE entity manager
+ * 1.8 (the private manager; the default since 2.0): a second instance keeps the bundle's PRIVATE entity manager
  * (transaction-doctrine's `PrivateEntityManager`) to the same boundaries. Instead of recovering and clearing a manager
  * of the registry it drops the private manager ({@see ResetInterface::reset()}) at the start and at the end of every
  * outermost unit: the next use creates a fresh one on the application's connection, and one a failed write closed is

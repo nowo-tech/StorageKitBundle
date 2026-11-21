@@ -1,0 +1,10 @@
+{
+    "bundles": {
+        "Nowo\\StorageKitBundle\\NowoStorageKitBundle": [
+            "all"
+        ]
+    },
+    "copy-from-recipe": {
+        "config/": "%CONFIG_DIR%/"
+    }
+}

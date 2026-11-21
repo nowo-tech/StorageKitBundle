@@ -19,7 +19,6 @@ use Nowo\StorageKitBundle\Storage\StorageProvider;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\Console\Command\Command;
@@ -41,7 +40,7 @@ final class MovePageTest extends KernelTestCase
 
     private function upload(StorageKitTestKernel $kernel, string $board = 'b1'): StoredFile
     {
-        return $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', $board, Images::png(2000, 1000), 'photo.png');
+        return $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', $board, Images::png(2000, 1000), 'photo.png');
     }
 
     private function saveTarget(KernelBrowser $client, string $url = '/admin/storage/move', string $bucket = 'new-files', string $secret = 'test-secret-not-real'): void

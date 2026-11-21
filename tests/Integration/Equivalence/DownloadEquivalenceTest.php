@@ -9,6 +9,7 @@ use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Download\FileDelivery;
 use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
 use Nowo\StorageKitBundle\Download\FileDeliveryResponder;
+use Nowo\StorageKitBundle\Download\FileNotDeliverable;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Profile\StorageProfiles;
 use Nowo\StorageKitBundle\Repository\StoredFileRepository;
@@ -37,8 +38,8 @@ use function time;
 
 /**
  * 1.5 equivalence of the download path (REQ-ARCH-001 rule 3): the new port ({@see FileDeliveryInterface} +
- * {@see FileDeliveryResponder}, what the 1.5 controller calls) and the deprecated {@see FileDelivery::respond()} answer
- * exactly what the v1.4.0 code answers ({@see FileDeliveryV140} and {@see FileDownloadControllerV140}, literal copies):
+ * {@see FileDeliveryResponder}, what the 1.5 controller calls; 2.0 removed the deprecated `FileDelivery::respond()`)
+ * answers exactly what the v1.4.0 code answers ({@see FileDeliveryV140} and {@see FileDownloadControllerV140}, literal copies):
  * same status, same headers (the `Date` header aside), same bytes — through the HTTP kernel (both controllers, same
  * viewer, same session) and at the service level — for streamed and redirect-delivered buckets, database and
  * configuration profiles, every variant, both dispositions, short and long URL lifetimes, hostile and empty names,
@@ -74,7 +75,6 @@ final class DownloadEquivalenceTest extends KernelTestCase
         $alice  = $this->client($kernel, 'alice');
         $this->http($alice, '/storage/files/00000000-0000-4000-8000-000000000000/original'); // session cookie set once
         $legacy = $this->service($kernel, FileDeliveryV140::class);
-        $new    = $this->service($kernel, FileDelivery::class);
         $port   = $this->service($kernel, FileDeliveryInterface::class);
         $html   = new FileDeliveryResponder();
         $cases  = 0;
@@ -88,13 +88,11 @@ final class DownloadEquivalenceTest extends KernelTestCase
                 ]);
                 self::assertSame($old, $cur, $file->getOriginalName() . ' / ' . $variant . ': HTTP');
 
-                // Services: v1.4.0 respond(), the deprecated 1.5 respond() and the port + HttpFoundation adapter.
-                [$v140, $deprecated, $ported] = $this->sameSecond(fn (): array => [
+                // Services: v1.4.0 respond() and the port + HttpFoundation adapter (2.0 removed FileDelivery::respond()).
+                [$v140, $ported] = $this->sameSecond(fn (): array => [
                     $this->snapshot($legacy->respond($file, $variant)),
-                    $this->snapshot($new->respond($file, $variant)),
                     $variant === 'huge' ? null : $this->snapshot($html->toResponse($port->deliver($file->getUuid(), $variant))),
                 ]);
-                self::assertSame($v140, $deprecated, $file->getOriginalName() . ' / ' . $variant . ': deprecated respond()');
                 if ($ported !== null) {
                     self::assertSame($v140, $ported, $file->getOriginalName() . ' / ' . $variant . ': port');
                 }
@@ -134,14 +132,18 @@ final class DownloadEquivalenceTest extends KernelTestCase
         $this->clearManagers($kernel);
         $file = $this->service($kernel, StoredFileRepository::class)->findOneByUuid($file->getUuid());
         self::assertInstanceOf(StoredFile::class, $file);
-        foreach ([$this->service($kernel, FileDeliveryV140::class), $this->service($kernel, FileDelivery::class)] as $delivery) {
-            try {
-                $delivery->respond($file, 'original');
-                self::fail('404 expected');
-            } catch (NotFoundHttpException $e) {
-                self::assertSame('', $e->getMessage());
-                self::assertSame(404, $e->getStatusCode());
-            }
+        try {
+            $this->service($kernel, FileDeliveryV140::class)->respond($file, 'original');
+            self::fail('404 expected');
+        } catch (NotFoundHttpException $e) {
+            self::assertSame('', $e->getMessage());
+            self::assertSame(404, $e->getStatusCode());
+        }
+        try {
+            $this->service($kernel, FileDelivery::class)->deliver($file->getUuid(), 'original');
+            self::fail('FileNotDeliverable expected');
+        } catch (FileNotDeliverable $e) {
+            self::assertSame('The bucket of this file is not connectable.', $e->getMessage());
         }
     }
 
