@@ -114,6 +114,8 @@ instance bucket it also requires `nowo-tech/instance-settings-bundle` itself. Se
   MariaDB 11.4 database legs with DBAL 3; the dedicated-manager kernel test runs on every database.
 - Demo: runs in UiKit's demo platform shell (`@NowoUiKit/demo_platform/layout.html.twig`, UiKit ^2.60): the demo declares itself in `templates/base.html.twig` (aside items for the notes and the Storage / Move pages), the pages use the page header and section cards, the demo's own masthead and the inline styles on the notes are gone, a demo-platform e2e spec checks the layout rules, the drawer and axe, and the README screenshots no longer show the Symfony toolbar.
 - Demo: no `private_entity_manager` line, and the notes page uploads through `ImageUploaderInterface::uploadImage()`.
+- The bundle's Doctrine mapping no longer declares the `NowoStorageKit` alias: Doctrine ORM 3 has no entity namespace
+  aliases, and DoctrineBundle 3.4 deprecates the option. Nothing changes for applications.
 
 ### Security
 
