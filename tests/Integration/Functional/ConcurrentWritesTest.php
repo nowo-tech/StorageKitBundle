@@ -26,11 +26,9 @@ use Nowo\StorageKitBundle\Tests\Support\StatementHook;
 use Nowo\StorageKitBundle\Tests\Support\StatementHooks;
 use Nowo\StorageKitBundle\Tests\Unit\Concurrency\StorageConflictsTest;
 use Nowo\StorageKitBundle\Ui\ProfileTester;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
 use Nowo\TransactionContract\TransientStorageFailure;
 use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\IgnoreDeprecations;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -91,7 +89,7 @@ final class ConcurrentWritesTest extends KernelTestCase
 
     private function upload(StorageKitTestKernel $kernel, string $board = 'acme'): StoredFile
     {
-        return $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', $board, Images::png(40, 30), 'photo.png');
+        return $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', $board, Images::png(40, 30), 'photo.png');
     }
 
     private function follow(KernelBrowser $client): string
@@ -375,7 +373,7 @@ final class ConcurrentWritesTest extends KernelTestCase
         });
         $this->service($kernel, InstanceSettingsInterface::class)->save('storage', ['provider' => 's3_compatible', 'endpoint' => 'http://minio:9000', 'region' => 'us-east-1', 'bucket' => 'files', 'prefix' => 'app', 'access_key' => 'test-key', 'path_style' => true, 'secret' => 'test-secret-not-real']);
         self::assertNull($this->hooks($kernel)->hook, 'the other worker ran');
-        $file = $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(40, 30), 'photo.png');
+        $file = $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(40, 30), 'photo.png');
 
         self::assertSame(1, $this->rows($kernel, "SELECT COUNT(*) FROM storage_kit_profile WHERE state = 'active' AND scope IS NULL"));
         self::assertSame($this->rows($kernel, 'SELECT MIN(id) FROM storage_kit_profile'), (int) $file->getProfile()->getId());
@@ -416,13 +414,12 @@ final class ConcurrentWritesTest extends KernelTestCase
     }
 
     /**
-     * Host mode (`private_entity_manager: false`, 1.x): the bundle flushes the default manager. The private mode's
-     * failed write is covered by PrivateEntityManagerKernelTest.
+     * 2.0 (private manager only): a failed bundle flush answers 409 and never touches the application's manager, open
+     * or closed (the private manager's own failure is covered by PrivateEntityManagerKernelTest).
      */
-    #[IgnoreDeprecations]
-    public function testAFailedFlushNeverResetsAnOpenManagerAndReplacesAClosedOne(): void
+    public function testAFailedFlushNeverResetsTheApplicationsManager(): void
     {
-        $kernel                          = $this->kernel(['doctrine' => ['private_entity_manager' => false]]);
+        $kernel                          = $this->kernel();
         $client                          = $this->client($kernel, 'scopeadmin');
         $form                            = $client->request('GET', '/storage/scopes/acme')->selectButton('Save')->form()->disableValidation();
         $form['storage_profile[bucket]'] = 'mine';
@@ -437,11 +434,11 @@ final class ConcurrentWritesTest extends KernelTestCase
         self::assertSame($before, $this->entityManager($kernel));
         self::assertTrue($before->isOpen());
 
-        // A manager a failure closed is replaced.
+        // Even a closed application manager is never reset by the bundle (only the private manager is replaced).
         $before->close();
-        self::assertFalse($this->entityManager($kernel)->isOpen());
         $this->storage($kernel)->resetIfClosed();
-        self::assertTrue($this->entityManager($kernel)->isOpen());
+        self::assertSame($before, $this->entityManager($kernel));
+        self::assertFalse($before->isOpen());
     }
 
     public function testAProfileTestOfAnUnsavedBucketWritesNothing(): void

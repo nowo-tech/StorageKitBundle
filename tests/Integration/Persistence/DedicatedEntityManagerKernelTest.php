@@ -278,11 +278,17 @@ final class DedicatedEntityManagerKernelTest extends KernelTestCase
         $this->bootKernel(['doctrine' => ['entity_manager' => 'missing']]);
     }
 
+    /**
+     * Lesson W0-1: naming the default manager is the standard setup, never a dedicated manager. 2.0: the bundle writes
+     * through its private manager on it, never through the application's manager itself.
+     */
     public function testTheHostDefaultManagerByNameKeepsTheStandardBehaviour(): void
     {
         foreach ([null, $this->orm()] as $orm) {
-            $kernel = $this->bootKernel(['doctrine' => ['entity_manager' => 'default']], orm: $orm === null ? null : ['default_entity_manager' => 'default', 'entity_managers' => ['default' => $orm['entity_managers']['default']]]);
-            self::assertSame($this->registry($kernel)->getManager('default'), $this->service($kernel, StorageEntityManager::class)->manager());
+            $kernel  = $this->bootKernel(['doctrine' => ['entity_manager' => 'default']], orm: $orm === null ? null : ['default_entity_manager' => 'default', 'entity_managers' => ['default' => $orm['entity_managers']['default']]]);
+            $storage = $this->service($kernel, StorageEntityManager::class);
+            self::assertTrue($storage->isPrivate());
+            self::assertNotSame($this->registry($kernel)->getManager('default'), $storage->manager());
             self::assertFalse($this->container($kernel)->has(OwnEntityManagerSubscriber::class), 'the host manager is never cleared by the bundle');
             $this->profile($kernel);
         }

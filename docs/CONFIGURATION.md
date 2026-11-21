@@ -82,8 +82,8 @@ nowo_storage_kit:
         user_provider: security.user_providers # used by nowo:storage-kit:backfill-uploader-keys
     doctrine:
         table_prefix: ''
-        entity_manager: null      # 1.5: a dedicated manager name (the DDD option; stays in 2.0)
-        private_entity_manager: null # 1.8: true = private manager on the same connection (the 2.0 default); false is removed in 2.0
+        entity_manager: null      # 1.5: a dedicated manager name (the DDD option)
+        private_entity_manager: null # deprecated since 2.0: true is a no-op (removed in 3.0), false fails the build
     conflict_response:            # 1.7 (REQ-RUNTIME-003)
         status: 409               # or 503
         retry_after: 1            # seconds, CONFLICT_001 answers only
@@ -257,8 +257,8 @@ Buckets per scope (organisation, tenant, workspace…).
 | Key | Default | Validation / effect |
 | --- | --- | --- |
 | `table_prefix` | `''` | `[A-Za-z0-9_]*`. Prefixes the tables and index names: `app_` gives `app_storage_kit_file`. |
-| `entity_manager` | `null` | `\w+` or `null` (1.5). Null: the default manager (the 1.x default, unchanged for existing installs; 2.0 writes through the private manager on it, see `private_entity_manager`). A name: the bundle entities are mapped on that manager **only** (removed from the others, `auto_mapping` and a default metadata driver — DoctrineBundle 3.4 `auto_discover_entities`, fixed in Unreleased — included), every bundle read and write uses it, the bundle recovers it when closed and clears it at the end of every request, Messenger message and console command; the build fails when the manager is not declared under `doctrine.orm.entity_managers` or does not map the entities. The DDD option (stays in 2.0), on the same connection as your default manager (see below). |
-| `private_entity_manager` | `null` | `true`, `false` or `null` (1.8, REQ-ARCH-001 rule 6). True: every bundle read and write goes through a private entity manager created on the connection, mapping and event manager of `entity_manager` (else the default manager): same tables, nothing else to declare, no bundle flush ever writes your pending changes; dropped at every request / message / command boundary and replaced when closed. False or null: the admin pages and commands flush that manager (1.x). While the entities live on your default manager, null and false trigger a build-time deprecation (2.0 defaults to true and removes false) and the host-flush probe ([UPGRADING](UPGRADING.md#to-180)). **Recommended**: `true`. |
+| `entity_manager` | `null` | `\w+` or `null` (1.5). Null: the bundle writes through a private manager on the connection, mapping and event manager of your default manager (2.0; your manager itself is never used). A name: the bundle entities are mapped on that manager **only** (removed from the others, `auto_mapping` and a default metadata driver — DoctrineBundle 3.4 `auto_discover_entities`, fixed in Unreleased — included), every bundle read and write uses it, the bundle recovers it when closed and clears it at the end of every request, Messenger message and console command; the build fails when the manager is not declared under `doctrine.orm.entity_managers` or does not map the entities. The DDD option, on the same connection as your default manager (see below). |
+| `private_entity_manager` | `null` | Deprecated since 2.0 (REQ-ARCH-001 rule 6; removed in 3.0). The bundle always reads and writes through a private entity manager created on the connection, mapping and event manager of your default manager: same tables, nothing else to declare, no bundle flush ever writes your pending changes; dropped at every request / message / command boundary and replaced when closed. Unset: that private manager (or, with a dedicated `entity_manager`, that manager directly). `true`: a no-op with a build-time deprecation; with a dedicated `entity_manager`, the private manager on it (as in 1.8). `false`: the build fails ([UPGRADING "To 2.0.0"](UPGRADING.md#to-200)); with a dedicated `entity_manager` it is ignored with a deprecation. |
 
 Tables: `storage_kit_profile`, `storage_kit_file`, `storage_kit_file_reference`, `storage_kit_sync` (see
 [ARCHITECTURE](ARCHITECTURE.md#entities-and-tables)).

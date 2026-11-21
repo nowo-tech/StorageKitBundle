@@ -9,7 +9,7 @@ use App\Form\NoteType;
 use App\Storage\DemoBoardContext;
 use Doctrine\ORM\EntityManagerInterface;
 use Nowo\StorageKitBundle\Reference\FileUris;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
+use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\UploadRefused;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -34,7 +34,7 @@ final class DemoController extends AbstractController
     }
 
     #[Route('/notes', name: 'demo_notes', methods: ['GET', 'POST'])]
-    public function notes(Request $request, EntityManagerInterface $entityManager, ImageUploader $uploader, FileUris $uris): Response
+    public function notes(Request $request, EntityManagerInterface $entityManager, ImageUploaderInterface $uploader, FileUris $uris): Response
     {
         $user = $this->getUser();
         \assert($user instanceof UserInterface);
@@ -45,8 +45,8 @@ final class DemoController extends AbstractController
             $image = $form->get('image')->getData();
             if ($image instanceof UploadedFile) {
                 try {
-                    $file = $uploader->upload($user, DemoBoardContext::TYPE, DemoBoardContext::ID, (string) file_get_contents($image->getPathname()), $image->getClientOriginalName());
-                    $body .= sprintf("\n\n![%s](%s)", pathinfo($file->getOriginalName(), PATHINFO_FILENAME), $uris->uri($file->getUuid()));
+                    $file = $uploader->uploadImage($user, DemoBoardContext::TYPE, DemoBoardContext::ID, (string) file_get_contents($image->getPathname()), $image->getClientOriginalName());
+                    $body .= sprintf("\n\n![%s](%s)", pathinfo($file->originalName, PATHINFO_FILENAME), $uris->uri($file->uuid));
                 } catch (UploadRefused $e) {
                     $this->addFlash('error', 'Image refused: ' . $e->reason);
 

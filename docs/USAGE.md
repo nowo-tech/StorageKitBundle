@@ -56,19 +56,17 @@
 
 ## Standard Symfony host
 
-Nothing to configure beyond the [installation](INSTALLATION.md): register `NowoInstanceSettingsBundle` (installed with
-this package until 2.0, which moves it to `suggest`: require `nowo-tech/instance-settings-bundle` yourself) and the
-instance bucket is the
+Nothing to configure beyond the [installation](INSTALLATION.md): require and register `NowoInstanceSettingsBundle`
+(`nowo-tech/instance-settings-bundle` ^1.3.1, a `suggest` since 2.0) and the instance bucket is the
 `storage` settings section; the bundle entities are attribute-mapped on your default entity manager; your texts are
 Doctrine entities whose `FileReferenceSourceInterface` makes the references automatic; downloads, rendering and GDPR
 hooks are services you inject (`StoredImageResolver`, `StoredFilesPersonalData::exportUser()` / `eraseUser()`).
 
 Host-called writes never flush your entity manager: uploads (1.3) and profile rows (1.4) are DBAL inserts, references
 are DBAL statements, and since 1.5 the GDPR erasure and the settings listener are DBAL updates. The admin pages and the
-console commands (profile save and test, bucket moves, purge) still flush the bundle's manager; with the default
-`doctrine.entity_manager: null` that is your default one, so set `doctrine.private_entity_manager: true`
-([below](#the-private-entity-manager-18), 1.8; the 2.0 default, where `false` is removed): the bundle then writes
-through a private manager on your connection and never flushes your pending changes.
+console commands (profile save and test, bucket moves, purge) flush only the bundle's own manager: since 2.0 every
+bundle read and write goes through a private manager on your connection ([below](#the-private-entity-manager-18)), so
+the bundle never flushes your pending changes.
 
 ## DDD / hexagonal host
 
@@ -151,23 +149,21 @@ serialization never show them). Never log `location()`: it grants access to the 
 
 ### The private entity manager (1.8)
 
-```yaml
-nowo_storage_kit:
-    doctrine:
-        private_entity_manager: true   # the 2.0 default; false is removed in 2.0
-```
+Since 2.0 this is the only mode and there is nothing to configure: the bundle reads and writes its entities through a
+private entity manager of its own (transaction-doctrine's `PrivateManager\PrivateEntityManager`) on the connection,
+mapping and event manager of your default manager (or of a dedicated `doctrine.entity_manager` when
+`private_entity_manager: true` is set with it). The tables do not move. No bundle flush ever writes your pending
+changes, a failed bundle write closes only the private manager (replaced on its next use), and the manager is dropped
+at the start and end of every request, Messenger message and outermost console command (FrankenPHP worker mode with
+the kernel reset off included). Your managers are never flushed, cleared, closed or reset by it. Uploads, references
+and the erasure still share your open transaction (as savepoints), as before.
 
-Nothing else to configure: the bundle reads and writes its entities through a private entity manager of its own
-(transaction-doctrine's `PrivateManager\PrivateEntityManager`) on the connection, mapping and event manager of
-`doctrine.entity_manager`, else of your default manager. The tables do not move. No bundle flush ever writes your
-pending changes, a failed bundle write closes only the private manager (replaced on its next use), and the manager is
-dropped at the start and end of every request, Messenger message and outermost console command (FrankenPHP worker mode
-with the kernel reset off included). Your managers are never flushed, cleared, closed or reset by it. Uploads,
-references and the erasure still share your open transaction (as savepoints), as before.
-
-Unset or `false`, while the bundle entities live on your default manager, a deprecation is logged at build time and
-the host-flush probe reports, per request, every class of yours with pending changes a bundle flush writes
-([UPGRADING "To 1.8.0"](UPGRADING.md#to-180)).
+- `doctrine.private_entity_manager: true` is a deprecated no-op in 2.x (removed in 3.0); `false` fails the build,
+  except with a dedicated `doctrine.entity_manager`, where it is ignored with a deprecation.
+- Change bundle rows only through the bundle's services, admin pages and commands: a row loaded through the bundle's
+  repositories belongs to the private manager, so changing it and flushing your own manager saves nothing.
+- A to-one association from one of your entities to a bundle entity must hold your own manager's reference:
+  `$yourManager->getReference(StoredFile::class, $id)`.
 
 ### A dedicated entity manager (1.5)
 
@@ -289,16 +285,10 @@ overlapping ids, re-created users), implement `UploaderKeyResolverInterface`.
   that are not Doctrine entities).
 - Files uploaded before 1.2.0 carry no uploader key until you run `nowo:storage-kit:backfill-uploader-keys`
   ([UPGRADING](UPGRADING.md#to-120)); until then they are matched by identifier as in 1.1.
-- `ImageUploader::upload()` still returns the `StoredFile` entity (deprecated since 1.3; use `uploadImage()`), and
-  `FileDelivery::respond()` still returns an HttpFoundation response (deprecated since 1.5; use
-  `FileDeliveryInterface`).
-- With `doctrine.entity_manager: null` and `private_entity_manager` not `true` (the 1.x default; 2.0 always uses the
-  private manager) the admin and CLI writes flush your default manager; set `private_entity_manager: true`
-  ([above](#the-private-entity-manager-18)) or a dedicated manager ([above](#a-dedicated-entity-manager-15)).
-- `nowo-tech/instance-settings-bundle` is still installed through this package's `require` (it moves to `suggest` in
-  2.0), although only the settings-backed instance bucket (`instance_profile: null`) needs it registered; a
-  config-pinned bucket (from `profiles` or `config_profile_provider`) works without it. Relying on the implicit install
-  is deprecated: require it yourself.
+- `nowo-tech/instance-settings-bundle` is a `suggest` (2.0): the settings-backed instance bucket
+  (`instance_profile: null`) needs it required and registered, and the build fails with `composer require
+  nowo-tech/instance-settings-bundle` in the message when it is missing; a config-pinned bucket (from `profiles` or
+  `config_profile_provider`) works without it.
 
 ## The instance bucket
 

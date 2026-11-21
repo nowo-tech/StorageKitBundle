@@ -102,7 +102,9 @@ final readonly class StorageMove
      */
     public function saveTarget(StorageProfile $target, ?object $actor, array $fields, ?callable $configure = null): bool
     {
-        $scope = $target->getScope();
+        // 2.0 (lesson W1-2): a saved target loaded through the application's manager is loaded again by the bundle's.
+        $target = $this->entityManager->adopt($target);
+        $scope  = $target->getScope();
         // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
         $saved = $this->entityManager->transactional(function () use ($target, $scope, $configure): bool {
             if (!$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET)) {
@@ -130,7 +132,9 @@ final readonly class StorageMove
      */
     public function start(StorageProfile $active, StorageProfile $target, ?object $actor): ?StorageSync
     {
-        $scope = $target->getScope();
+        $active = $this->entityManager->adopt($active);
+        $target = $this->entityManager->adopt($target);
+        $scope  = $target->getScope();
         // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
         $sync = $this->entityManager->transactional(function () use ($active, $target, $scope, $actor): ?StorageSync {
             if (!$this->profiles->isCurrent($active, $scope, StorageProfile::STATE_ACTIVE) || !$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET)) {
@@ -165,6 +169,7 @@ final readonly class StorageMove
      */
     public function cancel(StorageSync $sync, ?object $actor): bool
     {
+        $sync = $this->entityManager->adopt($sync);
         if (!$this->syncer->cancel($sync)) {
             return false;
         }
@@ -179,8 +184,9 @@ final readonly class StorageMove
      */
     public function discard(StorageProfile $target, ?object $actor): bool
     {
-        $uuid  = $target->getUuid();
-        $scope = $target->getScope();
+        $target = $this->entityManager->adopt($target);
+        $uuid   = $target->getUuid();
+        $scope  = $target->getScope();
         // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
         $discarded = $this->entityManager->transactional(function () use ($target, $scope): bool {
             if (!$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET) || $this->syncs->hasOpenTo($target)) {
@@ -206,7 +212,9 @@ final readonly class StorageMove
      */
     public function switch(StorageProfile $active, StorageProfile $target, ?object $actor): string
     {
-        $scope = $active->getScope();
+        $active = $this->entityManager->adopt($active);
+        $target = $this->entityManager->adopt($target);
+        $scope  = $active->getScope();
         if ($this->resolver->isEnvManaged($scope)) {
             return self::ENV_MANAGED;
         }

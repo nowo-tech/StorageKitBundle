@@ -86,17 +86,13 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
 
 ## Entity managers
 
-- **Private manager** (1.8, `doctrine.private_entity_manager: true`, recommended; the 2.0 default): units use
+- **Private manager** (1.8 opt-in, the only mode since 2.0 unless a dedicated manager is named): units use
   transaction-doctrine's `forEntityManager()` on the private manager, which is cleared after a storage failure or
   replaced on its next use when closed. Your managers are never touched.
 - **Dedicated manager** (`doctrine.entity_manager: storage_kit`): units use transaction-doctrine's
   `forEntityManager()`, which resets that manager after a storage failure. Your manager is never touched.
-- **Default manager** (`entity_manager: null`, `private_entity_manager` unset or false, the 1.x default; deprecated in
-  1.8, gone in 2.0): units use the DBAL runner (`forConnection()`) and flush the manager themselves, as these admin
-  pages did before 1.7 (REQ-ARCH-001 rule 6); since 1.8 the host-flush probe runs before each of those flushes. An
-  open manager is never cleared or reset; one a failed flush closed is replaced through the registry.
-  `forHostEntityManager()` is not used: DoctrineEncrypt decrypts the bucket secret in place after loading, so every
-  loaded profile looks changed to its pending-changes check.
+- **Your default manager** (the 1.x default, removed in 2.0, REQ-ARCH-001 rule 6): the bundle never reads, writes or
+  flushes through it. Its pending changes are no longer written by a storage admin page or command.
 - Worker mode with kernel reset false: nothing of a unit is kept on a service; the private manager is dropped and the
   dedicated manager is cleared at every request / message / command boundary ([FRANKENPHP-WORKER-AUDIT.md](FRANKENPHP-WORKER-AUDIT.md)).
 

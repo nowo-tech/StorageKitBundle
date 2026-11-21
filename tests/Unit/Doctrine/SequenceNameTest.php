@@ -52,6 +52,6 @@ final class SequenceNameTest extends TestCase
         $registry = $this->createStub(ManagerRegistry::class);
         $registry->method('getManager')->willReturn($manager);
 
-        self::assertSame($expected, (new StorageEntityManager($registry))->sequenceName(StoredFileReference::class));
+        self::assertSame($expected, (new StorageEntityManager($registry, 'storage_kit'))->sequenceName(StoredFileReference::class));
     }
 }

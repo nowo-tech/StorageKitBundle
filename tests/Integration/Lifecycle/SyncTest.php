@@ -17,7 +17,6 @@ use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\Lock\LockFactory;
@@ -34,7 +33,7 @@ final class SyncTest extends KernelTestCase
      */
     private function upload(StorageKitTestKernel $kernel, int $width = 2000): StoredFile
     {
-        return $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png($width, 1000), 'photo.png');
+        return $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png($width, 1000), 'photo.png');
     }
 
     /**

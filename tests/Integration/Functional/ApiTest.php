@@ -15,7 +15,6 @@ use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Twig\StorageKitTwigExtension;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\Request;
@@ -115,7 +114,7 @@ final class ApiTest extends KernelTestCase
     {
         $kernel = $this->bootKernel();
         $this->profile($kernel);
-        $file = $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        $file = $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
         $twig = $this->service($kernel, 'twig');
         self::assertInstanceOf(Environment::class, $twig);
         $text = '![a](storage-file:' . $file->getUuid() . ')';

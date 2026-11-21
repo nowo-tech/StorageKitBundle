@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Tests\Fixtures\Ports;
 
+use Nowo\StorageKitBundle\Download\DeliverableFile;
 use Nowo\StorageKitBundle\Download\FileDelivery;
-use Nowo\StorageKitBundle\Entity\StoredFile;
-use Symfony\Component\HttpFoundation\Response;
 
 /**
- * A 1.4-style decorator of the deprecated `FileDelivery` service id: only `respond()` (the class is final, so it
- * wraps it). Host code that calls it keeps getting it; the download port is not affected.
+ * A decorator of the `FileDelivery` service id (the class is final, so it wraps it) that host code calls: it keeps
+ * decorating that id; the download port is not affected. 2.0 removed `respond()`, so it offers `deliver()`.
  */
 final class LegacyDeliveryDecorator
 {
@@ -21,10 +20,10 @@ final class LegacyDeliveryDecorator
     ) {
     }
 
-    public function respond(StoredFile $file, string $variant): Response
+    public function deliver(string $uuid, string $variant): DeliverableFile
     {
         ++$this->calls;
 
-        return $this->inner->respond($file, $variant);
+        return $this->inner->deliver($uuid, $variant);
     }
 }

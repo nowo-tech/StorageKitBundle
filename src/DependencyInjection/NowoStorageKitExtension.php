@@ -28,7 +28,6 @@ use Nowo\StorageKitBundle\DependencyInjection\Compiler\InstanceSettingsPass;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\StorageKitCommitTrackingPass;
 use Nowo\StorageKitBundle\Doctrine\OwnEntityManagerSubscriber;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
-use Nowo\StorageKitBundle\Doctrine\StorageHostFlushReporter;
 use Nowo\StorageKitBundle\Doctrine\TablePrefixListener;
 use Nowo\StorageKitBundle\Doctrine\UploaderCollationListener;
 use Nowo\StorageKitBundle\Download\FileDelivery;
@@ -95,7 +94,6 @@ use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\SquareImageProcessor;
 use Nowo\StorageKitBundle\Upload\SquareImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\UploadEndpoint;
-use Nowo\TransactionDoctrine\HostFlushProbe;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManagerMiddleware;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
@@ -123,7 +121,6 @@ use function is_bool;
 use function is_string;
 use function min;
 use function sprintf;
-use function trigger_deprecation;
 use function trim;
 
 use const PHP_INT_MAX;
@@ -177,7 +174,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
     /** Container parameter: `doctrine.entity_manager` (null = the default manager). */
     public const ENTITY_MANAGER_PARAMETER = 'nowo_storage_kit.doctrine.entity_manager';
 
-    /** 1.8: container parameter holding `doctrine.private_entity_manager` (true, false or null = unset). */
+    /** 1.8: container parameter holding `doctrine.private_entity_manager` (true, false or null = unset; 2.0: see StoragePrivateEntityManagerPass). */
     public const PRIVATE_ENTITY_MANAGER_PARAMETER = 'nowo_storage_kit.doctrine.private_entity_manager';
 
     /**
@@ -186,7 +183,7 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
      */
     public const PRIVATE_SOURCE_MANAGER_PARAMETER = 'nowo_storage_kit.private_entity_manager.source_manager';
 
-    /** 1.8: the bundle's private entity manager (`doctrine.private_entity_manager: true`). */
+    /** The bundle's private entity manager (1.8 opt-in, the only mode since 2.0 unless a dedicated manager is named). */
     public const PRIVATE_ENTITY_MANAGER_SERVICE = 'nowo_storage_kit.private_entity_manager';
 
     /** 1.8: tells the private manager how the connection's transactions end (tagged by StoragePrivateEntityManagerPass). */
@@ -195,11 +192,14 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
     /** 1.8: drops the private manager at every outermost unit-of-work boundary ({@see OwnEntityManagerSubscriber}). */
     public const PRIVATE_BOUNDARY_SERVICE = 'nowo_storage_kit.private_entity_manager_boundary';
 
-    /** 1.8: the notice of a host that leaves `doctrine.private_entity_manager` unset while the bundle flushes its default manager. */
-    public const PRIVATE_ENTITY_MANAGER_UNSET_DEPRECATION = 'Not setting "nowo_storage_kit.doctrine.private_entity_manager" is deprecated: the storage admin pages and console commands flush the application\'s default entity manager, including its own pending changes. 2.0 defaults to true: a private entity manager on the same connection and tables that never flushes them. Opt in now with "nowo_storage_kit: { doctrine: { private_entity_manager: true } }" (false keeps the current behaviour in 1.x only: 2.0 removes it; see UPGRADING.md "To 1.8.0").';
+    /** The bundle named in the private manager's warnings (changes left unflushed at a boundary). */
+    public const BUNDLE_NAME = 'NowoStorageKitBundle';
 
-    /** 1.8: the notice of a host that sets `doctrine.private_entity_manager: false` while the bundle flushes its default manager. */
-    public const PRIVATE_ENTITY_MANAGER_FALSE_DEPRECATION = 'Setting "nowo_storage_kit.doctrine.private_entity_manager" to false is deprecated: the option is removed in 2.0, which always writes the bundle entities through a private entity manager on the same connection and tables, so the storage admin pages and console commands no longer flush the application\'s default entity manager and its pending changes. Opt in now with "nowo_storage_kit: { doctrine: { private_entity_manager: true } }", or name a dedicated manager with doctrine.entity_manager (see UPGRADING.md "To 1.8.0").';
+    /**
+     * 2.0: the build error when the instance bucket is settings-backed (`instance_profile: null`, the default) and
+     * nowo-tech/instance-settings-bundle, a suggested package since 2.0, is not installed.
+     */
+    public const INSTANCE_SETTINGS_MISSING = 'composer require nowo-tech/instance-settings-bundle: NowoStorageKitBundle edits the instance bucket in Instance Settings (nowo_storage_kit.instance_profile is null, the default), and since 2.0 that package is only suggested. Require it in your own composer.json, or manage the instance bucket in the configuration (nowo_storage_kit.profiles + instance_profile). See UPGRADING.md "To 2.0.0".';
 
     /** 1.7.1: container parameter holding `conflict_response.commit_tracking`. */
     public const COMMIT_TRACKING_PARAMETER = 'nowo_storage_kit.conflict_response.commit_tracking';
@@ -239,7 +239,6 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
                         'type'      => 'attribute',
                         'dir'       => __DIR__ . '/../Entity',
                         'prefix'    => 'Nowo\StorageKitBundle\Entity',
-                        'alias'     => 'NowoStorageKit',
                         'is_bundle' => false,
                     ],
                 ],
@@ -302,8 +301,6 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
                 new Reference(FileStorage::class),
                 new Reference(FileContexts::class),
                 new Reference(FileReferenceListener::class),
-                // 1.8: the classes the host-flush probe already reported (one deprecation per class and unit of work).
-                new Reference(StorageHostFlushReporter::class),
             ]),
             new Reference('request_stack', ContainerInterface::NULL_ON_INVALID_REFERENCE),
         ]))
@@ -397,13 +394,14 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         $settingsBacked = $config['instance_profile'] === null;
         $webUi          = $config['web_ui']['enabled'];
 
-        $private = $this->registerPrivateEntityManager($container, $config['doctrine']['private_entity_manager'], $config['doctrine']['entity_manager'], $logger);
+        $this->registerPrivateEntityManager($container, $config['doctrine']['private_entity_manager'], $config['doctrine']['entity_manager'], $logger);
+        // 2.0: the private manager, unless StoragePrivateEntityManagerPass finds a dedicated doctrine.entity_manager
+        // (it then replaces this argument with null and removes the private manager's services).
         $container->setDefinition(StorageEntityManager::class, new Definition(StorageEntityManager::class, [
             new Reference('doctrine'),
             $config['doctrine']['entity_manager'],
             $config['conflict_response']['owner_lock_timeout'],
-            $private,
-            new Reference(StorageHostFlushReporter::class),
+            new Reference(self::PRIVATE_ENTITY_MANAGER_SERVICE),
         ]));
         $container->setDefinition(TablePrefixListener::class, (new Definition(TablePrefixListener::class, [$config['doctrine']['table_prefix']]))
             ->addTag('doctrine.event_listener', ['event' => 'loadClassMetadata']));
@@ -455,8 +453,9 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
         ]))->setPublic(true)->addTag('kernel.reset', ['method' => 'reset']));
         $container->setParameter(InstanceSettingsPass::PARAMETER, $settingsBacked);
         if ($settingsBacked && !($this->instanceSettingsInstalled ?? interface_exists(InstanceSettingsInterface::class))) {
-            // 1.3 (rule 8): InstanceSettings is only needed for the settings-backed instance bucket (2.0 moves it to suggest).
-            throw new LogicException('NowoStorageKitBundle: the instance bucket is edited in Instance Settings (nowo_storage_kit.instance_profile is null), which needs nowo-tech/instance-settings-bundle: require it, or manage the instance bucket in the configuration (nowo_storage_kit.instance_profile).');
+            // 2.0 (rule 8): InstanceSettings is a suggested package, needed only for the settings-backed instance bucket.
+            // A host that got it transitively from 1.x loses it on `composer update`: never fall back silently.
+            throw new LogicException(self::INSTANCE_SETTINGS_MISSING);
         }
         if ($settingsBacked) {
             $container->setDefinition(InstanceStorageSettings::class, (new Definition(InstanceStorageSettings::class, [
@@ -856,42 +855,26 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
     }
 
     /**
-     * 1.8 (REQ-ARCH-001 rule 6): `doctrine.private_entity_manager`. Returns the private manager's reference (true) or
-     * null.
+     * REQ-ARCH-001 rule 6: the bundle's private entity manager (transaction-doctrine's {@see PrivateEntityManager}),
+     * created on the connection, configuration and event manager of `doctrine.entity_manager` (else the default
+     * manager). Same tables, no host configuration. It is dropped at the start and end of every outermost unit of work
+     * (a second {@see OwnEntityManagerSubscriber}; also by transaction-doctrine's bundle through the
+     * {@see PrivateEntityManager::TAG} tag, and at `kernel.reset`) and replaced when closed.
      *
-     * - true: {@see StorageEntityManager::manager()} is transaction-doctrine's {@see PrivateEntityManager}, created on the
-     *   connection, configuration and event manager of `doctrine.entity_manager` (else the default manager). Same
-     *   tables, no host configuration. It is dropped at the start and end of every outermost unit of work (a second
-     *   {@see OwnEntityManagerSubscriber}; also by transaction-doctrine's bundle through the {@see PrivateEntityManager::TAG}
-     *   tag, and at `kernel.reset`) and replaced when closed.
-     * - false or null: the bundle flushes the manager that maps its entities (1.x) and runs the host-flush probe before
-     *   every flush of the application's default manager ({@see StorageHostFlushReporter}). With `doctrine.entity_manager`
-     *   unset too, a deprecation notice is triggered: one for null (2.0 defaults to true), another for false (2.0
-     *   removes it). StoragePrivateEntityManagerPass triggers them when `entity_manager` names the default manager.
+     * 2.0: registered for every setup. StoragePrivateEntityManagerPass, which knows the default manager's name, removes
+     * it again for a dedicated `doctrine.entity_manager` (used directly, as in 1.x), refuses `private_entity_manager:
+     * false` where 1.8 warned about it, and reports the keys that no longer have an effect.
      */
-    private function registerPrivateEntityManager(ContainerBuilder $container, ?bool $private, ?string $entityManagerName, Reference $logger): ?Reference
+    private function registerPrivateEntityManager(ContainerBuilder $container, ?bool $private, ?string $entityManagerName, Reference $logger): void
     {
         $container->setParameter(self::PRIVATE_ENTITY_MANAGER_PARAMETER, $private);
         $container->setParameter(self::PRIVATE_SOURCE_MANAGER_PARAMETER, $entityManagerName ?? '');
-        $notice = self::privateEntityManagerNotice($private);
-        if ($notice !== null && $entityManagerName === null) {
-            trigger_deprecation('nowo-tech/storage-kit-bundle', '1.8', $notice);
-        }
-
-        $container->setDefinition(StorageHostFlushReporter::class, (new Definition(StorageHostFlushReporter::class, [
-            $private !== true,
-            new Reference(HostFlushProbe::SERVICE_ID, ContainerInterface::NULL_ON_INVALID_REFERENCE),
-        ]))->addTag('kernel.reset', ['method' => 'reset']));
-
-        if ($private !== true) {
-            return null;
-        }
 
         $container->setDefinition(self::PRIVATE_ENTITY_MANAGER_SERVICE, (new Definition(PrivateEntityManager::class, [
             new Reference('doctrine'),
             '%' . self::PRIVATE_SOURCE_MANAGER_PARAMETER . '%',
             StorageProfile::class,
-            StorageHostFlushReporter::BUNDLE_NAME,
+            self::BUNDLE_NAME,
             $logger,
         ]))
             ->addTag(PrivateEntityManager::TAG)
@@ -911,21 +894,6 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
             // @igor-ignore - Compile-time DI definition (container build), not a runtime service.
             $boundary->addTag('kernel.event_listener', ['event' => $event, 'method' => $method, 'priority' => $priority]);
         }
-
-        return new Reference(self::PRIVATE_ENTITY_MANAGER_SERVICE);
-    }
-
-    /**
-     * 1.8: the deprecation of `doctrine.private_entity_manager` while the bundle flushes the application's default
-     * manager: unset (null) or false; none for true.
-     */
-    public static function privateEntityManagerNotice(?bool $private): ?string
-    {
-        return match ($private) {
-            null    => self::PRIVATE_ENTITY_MANAGER_UNSET_DEPRECATION,
-            false   => self::PRIVATE_ENTITY_MANAGER_FALSE_DEPRECATION,
-            default => null,
-        };
     }
 
     /**

@@ -23,7 +23,6 @@ use Nowo\StorageKitBundle\Tests\Fixtures\Users\DatedUser;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
@@ -42,7 +41,7 @@ final class ReferencesAndPurgeTest extends KernelTestCase
 {
     private function upload(StorageKitTestKernel $kernel, string $board = 'b1', string $user = 'alice'): StoredFile
     {
-        return $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser($user, null), 'board', $board, Images::png(2000, 1000), 'photo.png');
+        return $this->uploadFile($kernel, new InMemoryUser($user, null), 'board', $board, Images::png(2000, 1000), 'photo.png');
     }
 
     private function note(StorageKitTestKernel $kernel, string $body, string $board = 'b1'): Note
@@ -203,10 +202,9 @@ final class ReferencesAndPurgeTest extends KernelTestCase
     {
         $kernel = $this->bootKernel();
         $this->profile($kernel);
-        $user     = new AppUser(7, 'alice');
-        $uploader = $this->service($kernel, ImageUploader::class);
-        $shown    = $uploader->upload($user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
-        $hidden   = $uploader->upload($user, 'board', 'b1', Images::png(2000, 1000), 'other.png');
+        $user   = new AppUser(7, 'alice');
+        $shown  = $this->uploadFile($kernel, $user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        $hidden = $this->uploadFile($kernel, $user, 'board', 'b1', Images::png(2000, 1000), 'other.png');
         self::assertSame(['alice', AppUser::class . ':7'], [$shown->getUploadedBy(), $shown->getUploadedByKey()]);
         $this->note($kernel, '![a](storage-file:' . $shown->getUuid() . ')');
         $data = $this->service($kernel, StoredFilesPersonalData::class);
@@ -230,7 +228,7 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         $this->profile($kernel);
         $legacy = $this->upload($kernel);
         self::assertNull($legacy->getUploadedByKey(), 'an in-memory user has no id');
-        $former = $this->service($kernel, ImageUploader::class)->upload(new AppUser(3, 'alice'), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        $former = $this->uploadFile($kernel, new AppUser(3, 'alice'), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
         $data   = $this->service($kernel, StoredFilesPersonalData::class);
 
         self::assertSame([$legacy->getUuid()], array_column($data->exportUser(new AppUser(9, 'alice')), 'uuid'), 'the identifier now belongs to user 9: user 3\'s file stays out');
@@ -245,12 +243,12 @@ final class ReferencesAndPurgeTest extends KernelTestCase
         });
         $this->profile($kernel);
         $user = new AppUser(5, 'alice');
-        $file = $this->service($kernel, ImageUploader::class)->upload($user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        $file = $this->uploadFile($kernel, $user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
         self::assertSame('user:5', $file->getUploadedByKey());
 
         $user->email = 'renamed';
         self::assertCount(1, $this->service($kernel, StoredFilesPersonalData::class)->exportUser($user));
-        $long = $this->service($kernel, ImageUploader::class)->upload(new AppUser(str_repeat('9', 180), 'alice'), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        $long = $this->uploadFile($kernel, new AppUser(str_repeat('9', 180), 'alice'), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
         self::assertNull($long->getUploadedByKey(), 'a key longer than 180 characters is dropped, never cut');
     }
 
@@ -258,9 +256,8 @@ final class ReferencesAndPurgeTest extends KernelTestCase
     {
         $kernel = $this->bootKernel();
         $this->profile($kernel);
-        $uploader = $this->service($kernel, ImageUploader::class);
-        $admin    = $uploader->upload(new Admin(5, 'alice'), 'board', 'b1', Images::png(2000, 1000), 'admin.png');
-        $customer = $uploader->upload(new Customer(5, 'admin'), 'board', 'b1', Images::png(2000, 1000), 'customer.png');
+        $admin    = $this->uploadFile($kernel, new Admin(5, 'alice'), 'board', 'b1', Images::png(2000, 1000), 'admin.png');
+        $customer = $this->uploadFile($kernel, new Customer(5, 'admin'), 'board', 'b1', Images::png(2000, 1000), 'customer.png');
         $data     = $this->service($kernel, StoredFilesPersonalData::class);
 
         self::assertSame([$customer->getUuid()], array_column($data->exportUser(new Customer(5, 'customer@new.example')), 'uuid'));

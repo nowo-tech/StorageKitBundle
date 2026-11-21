@@ -8,14 +8,13 @@ use Closure;
 use LogicException;
 use Nowo\StorageKitBundle\Controller\FileDownloadController;
 use Nowo\StorageKitBundle\DependencyInjection\NowoStorageKitExtension;
+use Nowo\StorageKitBundle\Download\DeliverableFile;
 use Nowo\StorageKitBundle\Download\FileDelivery;
 use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
 use Nowo\StorageKitBundle\Download\StoredImageResolverInterface;
 use Nowo\StorageKitBundle\PersonalData\StoredFilesPersonalDataInterface;
 use Nowo\StorageKitBundle\Reference\FileReferencesInterface;
-use Nowo\StorageKitBundle\Repository\StoredFileRepository;
 use Nowo\StorageKitBundle\Tests\Fixtures\Ports\CountingFileDelivery;
-use Nowo\StorageKitBundle\Tests\Fixtures\Ports\DualDeliveryDecorator;
 use Nowo\StorageKitBundle\Tests\Fixtures\Ports\LegacyDeliveryDecorator;
 use Nowo\StorageKitBundle\Tests\Fixtures\Ports\NotADelivery;
 use Nowo\StorageKitBundle\Tests\Support\HostBucketProfiles;
@@ -33,9 +32,9 @@ use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 
 /**
  * 1.5: `lint:container` (Symfony's CheckAliasValidityPass and the argument type checks included) passes with the new
- * ports as the bundle wires them, with the host's own download port, with a 1.4-style decorator of the deprecated
- * `FileDelivery` id, with a decorator of the port that also keeps `respond()`, and in a DDD host (dedicated entity
- * manager, no Instance Settings). The download controller calls the port the host chose and answers the same file;
+ * ports as the bundle wires them, with the host's own download port, with a decorator of the `FileDelivery` id, and in
+ * a DDD host (dedicated entity manager, no Instance Settings). 2.0 removed `FileDelivery::respond()` (and the 1.4-style
+ * decorator that only offered it). The download controller calls the port the host chose and answers the same file;
  * a port service that implements neither API fails the build.
  */
 final class PortsLintContainerKernelTest extends KernelTestCase
@@ -51,12 +50,9 @@ final class PortsLintContainerKernelTest extends KernelTestCase
             $container->services()->set(CountingFileDelivery::class)->public()->args([service(NowoStorageKitExtension::FILE_DELIVERY_ID)]);
             $container->services()->alias(FileDeliveryInterface::class, CountingFileDelivery::class)->public();
         }, CountingFileDelivery::class, null, false];
-        yield '1.4 decorator of the deprecated FileDelivery id' => [static function (ContainerConfigurator $container): void {
+        yield 'decorator of the FileDelivery id' => [static function (ContainerConfigurator $container): void {
             $container->services()->set(LegacyDeliveryDecorator::class)->public()->decorate(FileDelivery::class)->args([service('.inner')]);
         }, null, LegacyDeliveryDecorator::class, false];
-        yield 'decorator of the port with both APIs' => [static function (ContainerConfigurator $container): void {
-            $container->services()->set(DualDeliveryDecorator::class)->public()->decorate(FileDeliveryInterface::class)->args([service('.inner'), service(NowoStorageKitExtension::FILE_DELIVERY_ID)]);
-        }, DualDeliveryDecorator::class, null, false];
         yield 'DDD host' => [static function (ContainerConfigurator $container): void {
             $container->services()->set(HostBucketProfiles::class)->public();
         }, null, null, true];
@@ -65,7 +61,7 @@ final class PortsLintContainerKernelTest extends KernelTestCase
     /**
      * @param Closure(ContainerConfigurator): void $services
      * @param class-string|null $port the host port the controller calls (null: the bundle's FileDelivery)
-     * @param class-string|null $legacy what the deprecated FileDelivery id gives (null: FileDelivery)
+     * @param class-string|null $legacy what the FileDelivery id gives (null: FileDelivery)
      */
     #[DataProvider('hosts')]
     #[IgnoreDeprecations]
@@ -105,10 +101,8 @@ final class PortsLintContainerKernelTest extends KernelTestCase
         }
         if ($legacy !== null) {
             $decorator = $this->service($kernel, FileDelivery::class);
-            $file      = $this->service($kernel, StoredFileRepository::class)->findOneByUuid($view->uuid);
-            self::assertNotNull($file);
-            self::assertSame(200, $decorator->respond($file, 'original')->getStatusCode());
-            self::assertSame(1, (new ReflectionProperty($decorator, 'calls'))->getValue($decorator), 'host code calling the deprecated id keeps its decorator');
+            self::assertInstanceOf(DeliverableFile::class, $decorator->deliver($view->uuid, 'original'));
+            self::assertSame(1, (new ReflectionProperty($decorator, 'calls'))->getValue($decorator), 'host code calling the FileDelivery id keeps its decorator');
         }
     }
 

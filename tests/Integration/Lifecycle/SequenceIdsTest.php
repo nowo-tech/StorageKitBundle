@@ -7,12 +7,10 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Lifecycle;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\ORM\Id\SequenceGenerator;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
-use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Support\Images;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 
 /**
@@ -28,11 +26,10 @@ final class SequenceIdsTest extends KernelTestCase
         $user  = new InMemoryUser('alice', null);
         $files = [];
         for ($i = 0; $i < 3; ++$i) {
-            $files[] = $this->service($kernel, ImageUploader::class)->upload($user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+            $files[] = $this->uploadFile($kernel, $user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
         }
         $body = '';
         foreach ($files as $file) {
-            self::assertInstanceOf(StoredFile::class, $file);
             self::assertNotNull($file->getId());
             $body .= '![x](storage-file:' . $file->getUuid() . ') ';
         }

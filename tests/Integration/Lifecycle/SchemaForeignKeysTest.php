@@ -9,12 +9,10 @@ use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Doctrine\DBAL\Schema\ForeignKeyConstraint;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
-use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\Images;
-use Nowo\StorageKitBundle\Upload\ImageUploader;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 
@@ -59,8 +57,7 @@ final class SchemaForeignKeysTest extends KernelTestCase
             $connection->executeStatement('PRAGMA foreign_keys = ON');
         }
         $profile = $this->profile($kernel);
-        $file    = $this->service($kernel, ImageUploader::class)->upload(new InMemoryUser('alice', null), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
-        self::assertInstanceOf(StoredFile::class, $file);
+        $file    = $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(2000, 1000), 'photo.png');
         $note    = new Note('b1', '![a](storage-file:' . $file->getUuid() . ')');
         $manager = $this->entityManager($kernel);
         $manager->persist($note);

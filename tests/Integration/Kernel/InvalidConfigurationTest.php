@@ -116,7 +116,9 @@ final class InvalidConfigurationTest extends KernelTestCase
             $this->bootKernel([], ['settings']);
             self::fail('accepted');
         } catch (LogicException $e) {
-            self::assertStringContainsString('requires nowo-tech/instance-settings-bundle', $e->getMessage());
+            // Installed but not registered: the pass names the bundle to register (not installed: the extension says
+            // "composer require nowo-tech/instance-settings-bundle", WithoutInstanceSettingsKernelTest).
+            self::assertMatchesRegularExpression('/(requires|composer require) nowo-tech\/instance-settings-bundle/', $e->getMessage());
         }
         $kernel = $this->bootKernel(self::CONFIG_INSTANCE, ['settings']);
         self::assertFalse($this->container($kernel)->has(InstanceStorageSettings::class));

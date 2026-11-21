@@ -12,7 +12,6 @@ use Doctrine\DBAL\Schema\ColumnEditor;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\ORM\Tools\Event\GenerateSchemaEventArgs;
-use Doctrine\ORM\Tools\Event\GenerateSchemaTableEventArgs;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
@@ -53,6 +52,8 @@ use function version_compare;
  * - DBAL 4.5+ with `GenerateSchemaEventArgs::setSchema()` (ORM 3.7+): each table is rebuilt with its table editor
  *   (foreign keys and indexes included) and swapped into a new schema given back with `setSchema()`;
  * - otherwise: the columns' platform options are set in place (the DBAL 4.5+ deprecation silenced).
+ *
+ * 2.0 removed the no-op `postGenerateSchemaTable()` kept by 1.8.1 (deprecated there).
  *
  * Stateless: safe in FrankenPHP worker mode.
  */
@@ -157,17 +158,6 @@ final readonly class UploaderCollationListener
             }
             $args->setSchema($schemaEditor->create());
         }
-    }
-
-    /**
-     * No longer subscribed (1.8.1, audit XI-3): replacing the table there lost its foreign keys. Kept for BC; does
-     * nothing.
-     *
-     * @deprecated since 1.8.1, the collation is applied on postGenerateSchema ({@see self::postGenerateSchema()})
-     */
-    public function postGenerateSchemaTable(GenerateSchemaTableEventArgs $args): void
-    {
-        unset($args);
     }
 
     /**

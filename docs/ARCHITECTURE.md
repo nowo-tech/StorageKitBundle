@@ -72,7 +72,7 @@ for everything else.
 
 1. `POST /storage/upload/{type}/{id}`: CSRF header (token id bound to the context) → signed-in user with
    `upload.access_roles` → rate limiter (`u:` + SHA-256 of the user identifier) → PHP upload valid → `max_bytes`.
-2. `ImageUploader::upload()`: `writableTarget()` of the context (404) → profile and settings (409) →
+2. `ImageUploader::uploadImage()`: `writableTarget()` of the context (404) → profile and settings (409) →
    `ImageProcessor::process()` (sniff, pixels before decode, memory fit, re-encode, variants) → `UploadLimitInterface`.
 3. Key `gmdate('Y/m')/<uuid v4>` (variants `<key>-preview`, `<key>-thumb`) written through `FileStorage`; then the
    `StoredFile` row (orphan from now). Any failure removes the objects already written (`503 storage`).
@@ -82,7 +82,7 @@ for everything else.
 
 1. `GET /storage/files/{uuid}/{variant}`: `findOneByUuid()` → `FileContexts::readable(viewer, [file])` → 404 for missing
    and forbidden alike.
-2. `FileDelivery::respond()`: the file's own profile → settings (404 when the profile is no longer connectable) →
+2. `FileDelivery::deliver()` + `FileDeliveryResponder`: the file's own profile → settings (404 when the profile is no longer connectable) →
    `redirect` profiles: `302` to `StorageConnection::presign()` (signed for the public endpoint when set);
    others: `StorageConnection::read()` streamed with the sandbox / `nosniff` headers. Both private, `noindex`,
    `no-referrer`.
@@ -159,7 +159,10 @@ encrypted by Instance Settings) and the `profiles` tree do.
 
 Request-scoped memos (`FileStorage` connections, `StorageProfiles` profiles, `FileContexts` read decisions,
 `FileReferenceListener` pending texts) implement `ResetInterface` and are tagged `kernel.reset`; a `storage` section
-change resets the first two immediately. The entity manager is fetched per call. See
+change resets the first two immediately. The bundle entities are read and written through a private entity manager
+(2.0: the only mode, unless a dedicated `doctrine.entity_manager` is named), dropped at every request, Messenger
+message, console command and `kernel.reset` boundary; a dedicated manager is fetched per call and cleared at those
+boundaries. See
 [FRANKENPHP-WORKER-AUDIT.md](FRANKENPHP-WORKER-AUDIT.md).
 
 ## Extension points

@@ -38,7 +38,8 @@ final class ExtensionTest extends TestCase
         $container->setParameter('kernel.bundles', ['NowoDoctrineEncryptBundle' => 'x', 'SecurityBundle' => 'y']);
 
         $this->expectException(LogicException::class);
-        $this->expectExceptionMessage('which needs nowo-tech/instance-settings-bundle');
+        // 2.0 (rule 8, lesson XQ-2): the message starts with the command that fixes it.
+        $this->expectExceptionMessageMatches('/^composer require nowo-tech\/instance-settings-bundle: /');
         (new NowoStorageKitExtension(false))->load([[]], $container);
     }
 
@@ -58,7 +59,7 @@ final class ExtensionTest extends TestCase
         $registry = new class($manager) extends AbstractManagerRegistry {
             public function __construct(private readonly ObjectManager $manager)
             {
-                parent::__construct('x', [], ['default' => 'm'], 'default', 'default', 'Doctrine\Persistence\Proxy');
+                parent::__construct('x', [], ['default' => 'm', 'storage_kit' => 'm'], 'default', 'default', 'Doctrine\Persistence\Proxy');
             }
 
             protected function getService(string $name): ObjectManager
@@ -72,7 +73,8 @@ final class ExtensionTest extends TestCase
         };
 
         $this->expectException(LogicException::class);
-        (new StorageEntityManager($registry))->manager();
+        $this->expectExceptionMessage('needs a Doctrine ORM entity manager');
+        (new StorageEntityManager($registry, 'storage_kit'))->manager();
     }
 
     public function testThePrefixSkipsMissingIndexLists(): void

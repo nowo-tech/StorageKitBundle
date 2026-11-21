@@ -6,32 +6,35 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Removed](#removed)
+  - [Changed](#changed)
+  - [Security](#security)
 - [[1.8.1] - 2026-11-20](#181---2026-11-20)
   - [Fixed](#fixed)
 - [[1.8.0] - 2026-11-20](#180---2026-11-20)
   - [Added](#added)
   - [Deprecated](#deprecated)
-  - [Changed](#changed)
+  - [Changed](#changed-1)
 - [[1.7.1] - 2026-11-19](#171---2026-11-19)
   - [Fixed](#fixed-1)
 - [[1.7.0] - 2026-11-19](#170---2026-11-19)
   - [Added](#added-1)
   - [Fixed](#fixed-2)
-  - [Changed](#changed-1)
+  - [Changed](#changed-2)
 - [[1.6.1] - 2026-11-15](#161---2026-11-15)
   - [Fixed](#fixed-3)
   - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
   - [Added](#added-2)
-  - [Changed](#changed-2)
+  - [Changed](#changed-3)
   - [Tests](#tests-1)
 - [[1.5.3] - 2026-11-13](#153---2026-11-13)
-  - [Security](#security)
+  - [Security](#security-1)
   - [Added](#added-3)
-  - [Changed](#changed-3)
+  - [Changed](#changed-4)
   - [Tests](#tests-2)
 - [[1.5.2] - 2026-11-13](#152---2026-11-13)
-  - [Security](#security-1)
+  - [Security](#security-2)
   - [Fixed](#fixed-4)
   - [Tests](#tests-3)
 - [[1.5.1] - 2026-11-12](#151---2026-11-12)
@@ -39,35 +42,85 @@ All notable changes to this project are documented here. The format follows
   - [Tests](#tests-4)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
   - [Added](#added-4)
-  - [Changed](#changed-4)
+  - [Changed](#changed-5)
   - [Deprecated](#deprecated-1)
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Added](#added-5)
-  - [Security](#security-2)
+  - [Security](#security-3)
   - [Fixed](#fixed-6)
-  - [Changed](#changed-5)
+  - [Changed](#changed-6)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
   - [Fixed](#fixed-7)
   - [Added](#added-6)
-  - [Changed](#changed-6)
+  - [Changed](#changed-7)
   - [Deprecated](#deprecated-2)
 - [[1.2.0] - 2026-11-10](#120---2026-11-10)
-  - [Security](#security-3)
+  - [Security](#security-4)
   - [Added](#added-7)
-  - [Changed](#changed-7)
+  - [Changed](#changed-8)
 - [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-8)
-  - [Changed](#changed-8)
+  - [Changed](#changed-9)
   - [Fixed](#fixed-8)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
   - [Added](#added-9)
-  - [Security](#security-4)
+  - [Security](#security-5)
 
 ## [Unreleased]
 
+2.0.0: the major that removes what 1.x deprecated (REQ-BC-001) and closes REQ-ARCH-001 rules 6 and 8. An application
+that runs 1.8 without deprecation notices from this bundle upgrades without code changes; with the settings-backed
+instance bucket it also requires `nowo-tech/instance-settings-bundle` itself. See [UPGRADING](UPGRADING.md#unreleased).
+
+### Removed
+
+- **BREAKING:** the host mode of the bundle's entity manager (deprecated in 1.8.0): the bundle never reads, writes or
+  flushes its entities through your default entity manager any more. `doctrine.private_entity_manager: false` fails the
+  build where 1.8 warned about it (entities on your default manager); the two 1.8 notices
+  (`NowoStorageKitExtension::PRIVATE_ENTITY_MANAGER_UNSET_DEPRECATION` / `..._FALSE_DEPRECATION`) and
+  `NowoStorageKitExtension::privateEntityManagerNotice()` are gone, as is the DBAL write-unit branch of
+  `StorageEntityManager::transactional()` that flushed your manager.
+- **BREAKING:** the host-flush probe of 1.8 (`Doctrine\StorageHostFlushReporter`, `@internal`, and its service): there
+  is no host flush left to report.
+- **BREAKING:** `Download\FileDelivery::respond()` (deprecated in 1.5.0): call `FileDeliveryInterface::deliver()` and
+  `FileDeliveryResponder::toResponse()`.
+- **BREAKING:** `Upload\ImageUploader::upload()`, the upload that returned the `StoredFile` entity (deprecated in
+  1.3.0, runtime notice since 1.8.0): call `ImageUploaderInterface::uploadImage()` (a `StoredFileView`).
+- `Doctrine\UploaderCollationListener::postGenerateSchemaTable()`, the no-op kept by 1.8.1 (deprecated there; never
+  subscribed since 1.8.1). The `postGenerateSchema` collation and its foreign-key regression tests stay.
+- CI: the "host mode" database legs.
+
 ### Changed
 
+- **BREAKING:** `nowo-tech/instance-settings-bundle` moved from `require` to `suggest` (announced in 1.3.0, REQ-ARCH-001
+  rule 8), with `conflict: <1.3.1`. The settings-backed instance bucket (`instance_profile: null`, the default) needs
+  it: without it the container build fails with a message that starts with `composer require
+  nowo-tech/instance-settings-bundle` (also for an application that only had it through this package and lost it on
+  `composer update`). A config-pinned bucket does not need it; no class typed against it is registered then.
+- **BREAKING:** the bundle entities are always written through the private entity manager on your default manager's
+  connection, mapping and tables (the 1.8 opt-in): admin pages and console commands never flush your pending changes.
+  `doctrine.private_entity_manager` defaults to it; `true` has no effect there (a 2.0 deprecation; removed in 3.0).
+  `doctrine.entity_manager: <dedicated manager>` keeps working as in 1.x (used directly; with `true`, the private
+  manager on it, as in 1.8; with `false`, no effect and a 2.0 deprecation, since 1.x gave no notice for it).
+- `StorageEntityManager`: the fifth constructor argument (the 1.8 host-flush reporter) is kept, typed `?object` and
+  ignored (deprecated since 2.0, removed in 3.0). `manager()` refuses to return your default manager (no private
+  manager and no dedicated one). New `adopt()`: the bundle's own instance of a bundle entity.
+- The admin write services (`Sync\StorageMove`, `Sync\StorageSyncer`, `Ui\ProfileTester`) load a bundle entity your
+  manager handed them again through the bundle's manager (by id), so it is never taken for a new row; a row that no
+  longer exists fails with a clear `LogicException`.
+- The Flex recipe gets a 2.0 version: no `private_entity_manager` line, and the note that the Settings → Storage page
+  needs `composer require nowo-tech/instance-settings-bundle`.
+- CI triggers on the `1.x` maintenance branch; new "Without Instance Settings" job (`--no-coverage`); MySQL 8.4 and
+  MariaDB 11.4 database legs with DBAL 3; the dedicated-manager kernel test runs on every database.
 - Demo: runs in UiKit's demo platform shell (`@NowoUiKit/demo_platform/layout.html.twig`, UiKit ^2.60): the demo declares itself in `templates/base.html.twig` (aside items for the notes and the Storage / Move pages), the pages use the page header and section cards, the demo's own masthead and the inline styles on the notes are gone, a demo-platform e2e spec checks the layout rules, the drawer and axe, and the README screenshots no longer show the Symfony toolbar.
+- Demo: no `private_entity_manager` line, and the notes page uploads through `ImageUploaderInterface::uploadImage()`.
+- The bundle's Doctrine mapping no longer declares the `NowoStorageKit` alias: Doctrine ORM 3 has no entity namespace
+  aliases, and DoctrineBundle 3.4 deprecates the option. Nothing changes for applications.
+
+### Security
+
+- 1.x support after 2.0.0 (P5): the 1.x line receives security fixes for 6 months after 2.0.0; fixes rated Moderate
+  and above are backported to the last 1.x minor, Low ones are fixed in 2.x only. `.github/SECURITY.md` lists both lines.
 
 ## [1.8.1] - 2026-11-20
 
