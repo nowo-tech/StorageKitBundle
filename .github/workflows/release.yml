@@ -84,3 +84,5 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.tag.outputs.TAG_NAME, '-alpha') || contains(steps.tag.outputs.TAG_NAME, '-beta') || contains(steps.tag.outputs.TAG_NAME, '-rc') }}
           generate_release_notes: true
+          # 1.x maintenance line (security fixes for 6 months after 2.0.0): a 1.x patch never becomes "Latest".
+          make_latest: false
