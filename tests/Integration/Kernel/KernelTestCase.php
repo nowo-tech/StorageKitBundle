@@ -126,6 +126,12 @@ abstract class KernelTestCase extends TestCase
         self::assertInstanceOf(ManagerRegistry::class, $doctrine);
         foreach ($doctrine->getManagers() as $entityManager) {
             if ($entityManager instanceof EntityManagerInterface) {
+                // A server database outlives the kernel: the relation fixture of another test (a foreign key to the
+                // bundle's files) would block dropping the bundle tables of a kernel that does not map it.
+                $schemaManager = $entityManager->getConnection()->createSchemaManager();
+                if ($schemaManager->tablesExist(['test_product'])) {
+                    $schemaManager->dropTable('test_product');
+                }
                 $metadata = $entityManager->getMetadataFactory()->getAllMetadata();
                 $tool     = new SchemaTool($entityManager);
                 $tool->dropSchema($metadata);

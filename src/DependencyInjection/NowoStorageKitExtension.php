@@ -239,7 +239,6 @@ final class NowoStorageKitExtension extends Extension implements PrependExtensio
                         'type'      => 'attribute',
                         'dir'       => __DIR__ . '/../Entity',
                         'prefix'    => 'Nowo\StorageKitBundle\Entity',
-                        'alias'     => 'NowoStorageKit',
                         'is_bundle' => false,
                     ],
                 ],
