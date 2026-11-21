@@ -24,6 +24,7 @@ use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Support\Images;
+use Nowo\StorageKitBundle\Upload\ImageUploader;
 use Nowo\StorageKitBundle\Upload\UploadRefused;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\DomCrawler\Field\ChoiceFormField;
@@ -102,7 +103,7 @@ final class EdgeCasesTest extends KernelTestCase
 
     public function testUploaderCorners(): void
     {
-        $kernel   = $this->bootKernel();
+        $kernel = $this->bootKernel();
         $this->profile($kernel);
 
         try {
@@ -134,9 +135,9 @@ final class EdgeCasesTest extends KernelTestCase
 
     public function testTheHandlerQueuesTheNextSlice(): void
     {
-        $kernel   = $this->bootKernel();
-        $from     = $this->profile($kernel);
-        $to       = $this->profile($kernel, null, 'target', StorageProfile::STATE_TARGET);
+        $kernel = $this->bootKernel();
+        $from   = $this->profile($kernel);
+        $to     = $this->profile($kernel, null, 'target', StorageProfile::STATE_TARGET);
         $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'a.png');
         $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(10, 10), 'b.png');
         $syncer = $this->service($kernel, StorageSyncer::class);

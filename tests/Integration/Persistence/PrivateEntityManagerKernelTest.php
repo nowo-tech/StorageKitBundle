@@ -81,6 +81,25 @@ final class PrivateEntityManagerKernelTest extends KernelTestCase
         $this->bootKernel(['doctrine' => ['private_entity_manager' => false]]);
     }
 
+    /**
+     * Lesson W0-1: `entity_manager` naming the default manager (declared under `entity_managers`) is your manager, never
+     * a dedicated one: 2.0 writes through the private manager on it, without a notice, and never flushes it.
+     */
+    public function testNamingTheDefaultManagerWritesThroughThePrivateManagerOnIt(): void
+    {
+        $kernel = null;
+        $boot   = Deprecations::collect(function () use (&$kernel): void {
+            $kernel = $this->bootKernel(['doctrine' => ['entity_manager' => 'default']], orm: $this->twoManagers());
+        });
+        self::assertInstanceOf(StorageKitTestKernel::class, $kernel);
+        self::assertSame([], $this->storageNotices($boot));
+        $storage = $this->service($kernel, StorageEntityManager::class);
+        self::assertTrue($storage->isPrivate());
+        self::assertNotSame($this->registry($kernel)->getManager('default'), $storage->manager());
+        $this->profile($kernel);
+        self::assertSame(1, (int) $storage->connection()->fetchOne('SELECT COUNT(*) FROM storage_kit_profile'));
+    }
+
     public function testADedicatedManagerIsUsedDirectlyAndWithTrueCarriesThePrivateManager(): void
     {
         $dedicated = $this->bootKernel(['doctrine' => ['entity_manager' => 'storage_kit']], orm: $this->twoManagers());
@@ -170,9 +189,9 @@ final class PrivateEntityManagerKernelTest extends KernelTestCase
 
     public function testABundleEntityLoadedByYourManagerIsLoadedAgainByTheBundle(): void
     {
-        $kernel = $this->bootRelations();
-        $active = $this->profile($kernel);
-        $target = $this->profile($kernel, null, 'target', StorageProfile::STATE_TARGET);
+        $kernel                = $this->bootRelations();
+        $active                = $this->profile($kernel);
+        $target                = $this->profile($kernel, null, 'target', StorageProfile::STATE_TARGET);
         [$activeId, $targetId] = [(int) $active->getId(), (int) $target->getId()];
         $this->clearManagers($kernel);
         $host = $this->entityManager($kernel);
@@ -331,5 +350,4 @@ final class PrivateEntityManagerKernelTest extends KernelTestCase
     {
         return (int) $connection->fetchOne('SELECT COUNT(*) FROM test_note');
     }
-
 }

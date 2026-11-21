@@ -73,6 +73,7 @@ final readonly class StorageEntityManager
         private ?PrivateEntityManager $privateManager = null,
         ?object $hostFlushReporter = null,
     ) {
+        unset($hostFlushReporter); // deprecated since 2.0 and ignored (the host mode is gone); removed in 3.0
     }
 
     /**
@@ -536,12 +537,12 @@ final readonly class StorageEntityManager
             return $entity;
         }
         $class = $metadata->getName();
-        $own   = $manager->find($class, $id);
-        if (!$own instanceof $class) {
+        /** @var T|null $own the class of `$entity` (its own mapping's) */
+        $own = $manager->find($class, $id);
+        if ($own === null) {
             throw new LogicException(sprintf('%s %s no longer exists.', $class, implode(', ', array_map(static fn (mixed $value): string => is_scalar($value) ? (string) $value : get_debug_type($value), $id))));
         }
 
-        /* @var T $own */
         return $own;
     }
 

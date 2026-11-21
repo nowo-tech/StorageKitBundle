@@ -41,7 +41,7 @@ final readonly class ProfileTester
     public function test(StorageProfile $profile, ?object $actor): array
     {
         // 2.0 (lesson W1-2): a profile loaded through the application's manager is loaded again by the bundle's.
-        $profile = $this->entityManager->adopt($profile);
+        $profile  = $this->entityManager->adopt($profile);
         $settings = $this->profiles->settingsOf($profile);
         if (!$settings instanceof S3Settings) {
             return ['error', $this->trans('test.flash.unusable')];

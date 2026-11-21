@@ -35,8 +35,8 @@ use function interface_exists;
  */
 final class WithoutInstanceSettingsKernelTest extends KernelTestCase
 {
-    /** The instance bucket managed by the configuration (no Instance Settings section). */
-    private const PINNED = ['profiles' => ['main' => ['dsn' => 's3://test-key:test-secret-not-real@minio:9000/main?tls=0']], 'instance_profile' => 'main'];
+    /** The instance bucket managed by the configuration (no Instance Settings section), streamed by the application. */
+    private const PINNED = ['profiles' => ['main' => ['dsn' => 's3://test-key:test-secret-not-real@minio:9000/main?tls=0', 'delivery' => 'proxy']], 'instance_profile' => 'main'];
 
     public function testThePackageIsReallyAbsentInTheWithoutJob(): void
     {
@@ -65,7 +65,7 @@ final class WithoutInstanceSettingsKernelTest extends KernelTestCase
         $file   = $this->uploadFile($kernel, new InMemoryUser('alice', null), 'board', 'b1', Images::png(20, 20), 'a.png');
         $client = $this->client($kernel, 'alice');
         $client->request('GET', '/storage/files/' . $file->getUuid() . '/original');
-        self::assertSame(200, $client->getResponse()->getStatusCode());
+        self::assertSame(200, $client->getResponse()->getStatusCode(), (string) $client->getResponse()->headers->get('Location'));
 
         $admin = $this->client($kernel);
         $admin->request('GET', '/admin/storage');

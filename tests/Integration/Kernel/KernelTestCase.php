@@ -72,8 +72,8 @@ abstract class KernelTestCase extends TestCase
             'scopes'    => ['enabled' => true, 'access_checker' => ScopeAccess::class],
             'endpoints' => ['allowed_hosts' => ['minio'], 'resolve_dns' => false],
         ];
-        $id                 = (string) preg_replace('/\W+/', '_', static::class . '_' . $this->name() . '_' . count($this->kernels));
-        $kernel             = new StorageKitTestKernel(
+        $id     = (string) preg_replace('/\W+/', '_', static::class . '_' . $this->name() . '_' . count($this->kernels));
+        $kernel = new StorageKitTestKernel(
             $id,
             static function (ContainerConfigurator $container) use ($config, $extra, $memory, $without): void {
                 $container->extension('nowo_storage_kit', $config);

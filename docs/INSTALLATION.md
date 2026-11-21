@@ -20,8 +20,9 @@
 - Doctrine ORM 3.3+ with DoctrineBundle; `nowo-tech/doctrine-encrypt-bundle` ^2.10 **registered and configured** (the
   container refuses to compile without it: scope / move-target bucket secrets are encrypted at rest).
 - `nowo-tech/instance-settings-bundle` **^1.3.1** registered when the instance bucket is the `storage` section
-  (default, `instance_profile: null`). It is installed as a dependency until 2.0, which moves it to `suggest`: require
-  it yourself now. A config-pinned instance bucket (`instance_profile: <name>`) does not need it.
+  (default, `instance_profile: null`). It is a `suggest` since 2.0: require it yourself (without it the build fails with
+  `composer require nowo-tech/instance-settings-bundle` in the message). A config-pinned instance bucket
+  (`instance_profile: <name>`) does not need it.
 - `nowo-tech/ui-kit-bundle` **^2.23** and `nowo-tech/form-kit-bundle` ^2.17 (admin pages, bucket form, `visible-when`
   peer).
 - `async-aws/s3` ^2.8 || ^3.0 with `league/flysystem` / `league/flysystem-async-aws-s3` ^3.29 (installed as
@@ -38,14 +39,16 @@
 
 ```bash
 composer require nowo-tech/storage-kit-bundle
-# default settings-backed instance bucket (instance_profile: null); a suggest from 2.0:
-composer require nowo-tech/instance-settings-bundle
+# default settings-backed instance bucket (instance_profile: null), a suggest since 2.0:
+composer require nowo-tech/instance-settings-bundle:^1.3.1
 ```
 
-New installs: set `nowo_storage_kit.doctrine.private_entity_manager: true` (1.8, the 2.0 default; the recipe sets
-it): the bundle writes through a private entity manager on your connection, so no bundle write ever flushes your unit
-of work ([USAGE](USAGE.md#the-private-entity-manager-18)). A dedicated manager stays available for DDD hosts
-([USAGE](USAGE.md#a-dedicated-entity-manager-15)).
+The bundle writes through a private entity manager on your connection, so no bundle write ever flushes your unit of
+work ([USAGE](USAGE.md#the-private-entity-manager-18)); nothing to configure. A dedicated manager stays available for
+DDD hosts ([USAGE](USAGE.md#a-dedicated-entity-manager-15)). Without Instance Settings, pin the instance bucket to a
+`profiles` entry (`instance_profile: <name>`, [CONFIGURATION](CONFIGURATION.md)) before the first `cache:clear`: the
+recipe leaves `instance_profile` unset, so a fresh install without it stops at the post-install `cache:clear` with the
+`composer require` message above.
 
 ## Symfony Flex recipe
 

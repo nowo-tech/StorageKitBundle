@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Tests\Unit\Doctrine;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\Persistence\ManagerRegistry;
+use LogicException;
 use Nowo\StorageKitBundle\Doctrine\OwnEntityManagerSubscriber;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Tests\Support\NullRegistry;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
 use PHPUnit\Framework\TestCase;
-use LogicException;
 use stdClass;
 use Symfony\Contracts\Service\ResetInterface;
 
@@ -63,6 +64,23 @@ final class PrivateManagerWiringTest extends TestCase
         $dedicated = new StorageEntityManager(new NullRegistry(), 'storage_kit');
         self::assertTrue($dedicated->ownsManager());
         self::assertFalse($dedicated->isPrivate());
+    }
+
+    /**
+     * A dedicated manager (the DDD option) that a failed write closed is replaced through the registry; an open one is
+     * left alone.
+     */
+    public function testAClosedDedicatedManagerIsReplacedAndAnOpenOneIsNot(): void
+    {
+        foreach ([[false, 1], [true, 0]] as [$open, $resets]) {
+            $manager = $this->createStub(EntityManagerInterface::class);
+            $manager->method('isOpen')->willReturn($open);
+            $registry = $this->createMock(ManagerRegistry::class);
+            $registry->method('getManager')->with('storage_kit')->willReturn($manager);
+            $registry->expects(self::exactly($resets))->method('resetManager')->with('storage_kit');
+
+            (new StorageEntityManager($registry, 'storage_kit'))->resetIfClosed();
+        }
     }
 
     public function testTheBoundaryDropsThePrivateManagerAndNeverTheRegistrysManagers(): void

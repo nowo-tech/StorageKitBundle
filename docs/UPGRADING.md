@@ -2,8 +2,14 @@
 
 ## Table of contents
 
-- [Planned for 2.0](#planned-for-20)
+- [Done in 2.0](#done-in-20)
 - [Unreleased](#unreleased)
+  - [Before you upgrade](#before-you-upgrade)
+  - [The private entity manager is the only mode](#the-private-entity-manager-is-the-only-mode)
+  - [Removed](#removed)
+  - [Instance Settings is a suggest](#instance-settings-is-a-suggest)
+  - [Private manager only](#private-manager-only)
+  - [1.x support](#1x-support)
 - [To 1.8.1](#to-181)
 - [To 1.8.1](#to-181-1)
   - [Missing foreign keys on MySQL / MariaDB (1.5.2 to 1.8.0)](#missing-foreign-keys-on-mysql--mariadb-152-to-180)
@@ -34,24 +40,173 @@
   - [Template contract](#template-contract)
   - [Breaking changes](#breaking-changes)
 
-## Planned for 2.0
+## Done in 2.0
 
-Breaking changes announced in 1.x (deprecated now, applied in the next major per REQ-BC-001):
+The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([Unreleased](#unreleased)):
 
-1. **`nowo-tech/instance-settings-bundle` moves from `require` to `suggest`** (announced in 1.3.0; REQ-ARCH-001
-   rule 8). With the settings-backed instance bucket (`instance_profile: null`), require it in your own
-   `composer.json` now; a config-pinned bucket does not need it.
-2. **The bundle entities are written through a private entity manager on your default connection** (amended in 1.8.0:
-   announced until then as "a dedicated manager" default). `doctrine.private_entity_manager` defaults to `true` and
-   `false` is removed, so the bundle never flushes your default manager. The tables, the connection and the mapping do
-   not change, and no second Doctrine manager has to be declared. `doctrine.entity_manager: <name>` stays, for a
-   dedicated manager. Opt in now: [To 1.8.0](#to-180).
-3. **`FileDelivery::respond()` is removed** (deprecated in 1.5.0): use `FileDeliveryInterface` +
-   `FileDeliveryResponder`.
-4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0): use
-   `uploadImage()`.
+1. **`nowo-tech/instance-settings-bundle` moved from `require` to `suggest`** (announced in 1.3.0; REQ-ARCH-001
+   rule 8).
+2. **The bundle entities are written through a private entity manager on your default connection** (announced in
+   1.8.0): `doctrine.private_entity_manager: false` is removed (a build error), `true` is a no-op;
+   `doctrine.entity_manager: <name>` stays, for a dedicated manager.
+3. **`FileDelivery::respond()` is removed** (deprecated in 1.5.0).
+4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0).
 
 ## Unreleased
+
+From **1.8.x**:
+
+```bash
+composer require nowo-tech/storage-kit-bundle:^2.0 -W
+```
+
+With the settings-backed instance bucket (`instance_profile: null`, the default and what the 1.0 recipe sets up),
+require Instance Settings yourself first (see [Instance Settings is a suggest](#instance-settings-is-a-suggest)):
+
+```bash
+composer require nowo-tech/instance-settings-bundle:^1.3.1
+```
+
+2.0 contains only changes that 1.x announced through deprecation notices: an application that runs the last 1.x
+minor without deprecation notices from this bundle upgrades without code changes. After 2.0.0 is released, the 1.x
+line receives security fixes for 6 months: fixes rated Moderate and above are backported to the last 1.x minor; Low
+ones are fixed in 2.x only.
+
+### Before you upgrade
+
+On **1.8.1**, run your usual traffic, console commands and test suite with deprecations logged (the Symfony profiler,
+the `deprecation` log channel, or PHPUnit's deprecation report) and clear every notice of this bundle:
+
+1. The private entity manager notice at container build ([To 1.8.0](#the-private-entity-manager-notice)). Unset:
+
+   > Not setting "nowo_storage_kit.doctrine.private_entity_manager" is deprecated: the storage admin pages and console
+   > commands flush the application's default entity manager, including its own pending changes. 2.0 defaults to
+   > true: a private entity manager on the same connection and tables that never flushes them. Opt in now with
+   > "nowo_storage_kit: { doctrine: { private_entity_manager: true } }" (false keeps the current behaviour in 1.x
+   > only: 2.0 removes it; see UPGRADING.md "To 1.8.0").
+
+   Set to `false`:
+
+   > Setting "nowo_storage_kit.doctrine.private_entity_manager" to false is deprecated: the option is removed in 2.0,
+   > which always writes the bundle entities through a private entity manager on the same connection and tables, so
+   > the storage admin pages and console commands no longer flush the application's default entity manager and its
+   > pending changes. Opt in now with "nowo_storage_kit: { doctrine: { private_entity_manager: true } }", or name a
+   > dedicated manager with doctrine.entity_manager (see UPGRADING.md "To 1.8.0").
+
+2. Every host-flush probe line ([Reading the host-flush probe](#reading-the-host-flush-probe)): it is your migration
+   list.
+
+   > Your pending changes to App\Entity\Order were flushed by NowoStorageKitBundle; 2.0 no longer does.
+
+   Make the code that changes each listed class flush its own changes (see
+   [Private manager only](#private-manager-only)), then set `private_entity_manager: true` and check that no line is
+   left.
+3. The method notices:
+
+   > Method "Nowo\StorageKitBundle\Upload\ImageUploader::upload()" returning the
+   > "Nowo\StorageKitBundle\Entity\StoredFile" entity is deprecated and removed in 2.0: use
+   > "Nowo\StorageKitBundle\Upload\ImageUploaderInterface::uploadImage()", which returns a
+   > "Nowo\StorageKitBundle\Upload\StoredFileView".
+
+   > Method "Nowo\StorageKitBundle\Download\FileDelivery::respond()" is deprecated, use
+   > "Nowo\StorageKitBundle\Download\FileDeliveryInterface::deliver()" and
+   > "Nowo\StorageKitBundle\Download\FileDeliveryResponder" instead (removed in 2.0).
+
+   Both are runtime notices: a call left in code that your tests do not reach fails in 2.0 with "Call to undefined
+   method". Search your code (and your decorators of the `FileDelivery` / `ImageUploader` service ids) for `->respond(`
+   and `->upload(` on these services.
+4. With the settings-backed instance bucket, `nowo-tech/instance-settings-bundle` in your own `composer.json` (no
+   runtime notice exists for it).
+
+### The private entity manager is the only mode
+
+| 1.8 setting | 1.8 behaviour | 2.0 |
+|---|---|---|
+| neither `private_entity_manager` nor `entity_manager` | admin pages and commands flush your default manager; notice | private manager on your default manager's connection, mapping and tables; your manager is never flushed |
+| `private_entity_manager: true` | private manager | the same; the key has no effect (build-time deprecation, removed in 3.0): remove it |
+| `private_entity_manager: false` | 1.x behaviour; notice | **build error** (`InvalidConfigurationException`): remove the key |
+| `entity_manager: <the default manager's name>` | your default manager (host mode) | as the unset row: the private manager on it |
+| `entity_manager: <dedicated manager>` | the dedicated manager, directly | unchanged (the DDD option) |
+| dedicated `entity_manager` + `private_entity_manager: true` | the private manager on the dedicated one | unchanged |
+| dedicated `entity_manager` + `private_entity_manager: false` | the dedicated manager, directly | unchanged; the key has no effect (build-time deprecation): remove it |
+
+There is no way to keep the 1.x behaviour: an application that wants the bundle's rows in its own unit of work writes
+them through the bundle's services inside its own transaction (uploads, references and the erasure share the
+connection and join an open transaction as savepoints), or names a dedicated manager.
+
+### Removed
+
+| Removed | Deprecated since | Replacement |
+|---|---|---|
+| `doctrine.private_entity_manager: false` (on your default manager) | 1.8.0 | nothing to set; or a dedicated `doctrine.entity_manager` |
+| The host mode: bundle flushes of your default manager, `StorageEntityManager::transactional()`'s DBAL write-unit branch | 1.8.0 | the private manager |
+| `NowoStorageKitExtension::PRIVATE_ENTITY_MANAGER_UNSET_DEPRECATION`, `::PRIVATE_ENTITY_MANAGER_FALSE_DEPRECATION`, `::privateEntityManagerNotice()` | 1.8.0 | none |
+| `Doctrine\StorageHostFlushReporter` (`@internal`) and its service | 1.8.0 | none (no host flush left to report) |
+| `Download\FileDelivery::respond()` | 1.5.0 | `FileDeliveryInterface::deliver()` + `FileDeliveryResponder::toResponse()` |
+| `Upload\ImageUploader::upload()` (returned the `StoredFile` entity) | 1.3.0 (runtime notice since 1.8.0) | `ImageUploaderInterface::uploadImage()` (a `StoredFileView`; load the entity by `uuid` only if you need it) |
+| `Doctrine\UploaderCollationListener::postGenerateSchemaTable()` (`@internal`, a no-op) | 1.8.1 | none (the `postGenerateSchema` collation stays) |
+
+Kept, deprecated, removed in 3.0: the fifth argument of `StorageEntityManager::__construct()` (the 1.8 reporter, now
+`?object` and ignored) and `private_entity_manager: true`.
+
+No extension point is removed: decorators of the `FileDeliveryInterface`, `ImageUploaderInterface` and other port
+services keep working. A decorator of the `FileDelivery` or `ImageUploader` service id that calls `respond()` or
+`upload()` on the inner service must call `deliver()` / `uploadImage()` instead.
+
+### Instance Settings is a suggest
+
+`nowo-tech/instance-settings-bundle` moved from `require` to `suggest` (announced in 1.3.0), with a `conflict` on
+versions below 1.3.1.
+
+- **Settings-backed instance bucket** (`instance_profile: null`, the default): require it yourself
+  (`composer require nowo-tech/instance-settings-bundle:^1.3.1`) and keep it registered. An application that only had
+  it through this package loses it on `composer update` and Flex unregisters its bundle: the container build then
+  fails with a message that starts with `composer require nowo-tech/instance-settings-bundle`. Nothing falls back
+  silently.
+- **Config-pinned instance bucket** (`profiles` or `config_profile_provider` with `instance_profile` set): it does not
+  need it; you may remove it. No class of the bundle typed against Instance Settings is registered then.
+- **Fresh install** (`composer require nowo-tech/storage-kit-bundle` alone): the recipe leaves `instance_profile` unset,
+  so the post-install `cache:clear` stops with the same `composer require` message, by design. Require Instance
+  Settings, or pin the instance bucket to a `profiles` entry, and run it again.
+
+### Private manager only
+
+What 1.8 listed under [Opting in: what changes](#opting-in-what-changes) is now unconditional:
+
+- **Your pending changes are no longer flushed by the bundle.** A change of yours that was only stored because a
+  StorageKit write flushed your manager is no longer stored: typically in a listener of a StorageKit event
+  (`StorageAuditEvent`), of a Doctrine event of the bundle entities, an implementation of one of the bundle's ports, or
+  code that changes an entity and then calls a StorageKit service or runs a StorageKit command in-process. Your code
+  must commit its own change (flush your manager, or run it in your own transaction). The 1.8 probe lines are the list
+  of the classes concerned.
+- **The reverse, which the probe cannot see:** host code that loads a bundle row through the bundle's repository
+  services (on the private manager), changes it and flushes its own manager saves nothing; the private manager drops
+  the change at the next boundary with only a warning. Change bundle rows through the bundle's services, admin pages
+  and commands.
+- **Do not `persist()` or `flush()` bundle entities through your manager.** A bundle entity you loaded through your
+  own manager (`$em->find(StoredFile::class, …)`, a route value resolver) is your manager's instance: read it, but
+  change it only through the bundle's API. The admin write services load such an instance again by id in the private
+  manager, so it is never taken for a new row.
+- **Your associations to bundle entities hold your own manager's reference.** An entity of yours with a to-one
+  association to a bundle entity (for example `Product::$image` to `StoredFile`) must hold
+  `$yourManager->getReference(StoredFile::class, $id)`, never an instance of the private manager: your manager would
+  take it for a new entity ("A new entity was found through the relationship") and your flush would fail. Prefer
+  referencing files by `uuid` (`storage-file:<uuid>`), as documented.
+- The private manager is created on the connection, configuration (mapping, metadata cache) and event manager (your
+  Doctrine listeners, DoctrineEncrypt included) of your default manager; the SQL filters enabled on it are mirrored.
+  The tables, the connection and the mapping do not change: no migration.
+- The connection is shared: a transaction you open around an upload includes the row, and your rollback undoes it.
+  DBAL 3 with `use_savepoints` off: a failed private flush inside your transaction marks your transaction
+  rollback-only; turn savepoints on (always on in DBAL 4).
+- The private manager is dropped at the start and end of every request, Messenger message and outermost console
+  command and at `kernel.reset` (FrankenPHP worker mode with the kernel reset off included). The REQ-RUNTIME-003
+  conflict answer of the bundle's routes is unchanged (409 with `Retry-After` and `X-Conflict-Code: CONFLICT_001` when
+  nothing was committed, `CONFLICT_002` without `Retry-After` when part was).
+
+### 1.x support
+
+1.x receives security fixes for 6 months after 2.0.0 (Moderate and above backported to the last 1.x minor; Low fixed
+in 2.x only, upgrade). See [SECURITY](../.github/SECURITY.md).
 
 ## To 1.8.1
 
@@ -237,7 +392,7 @@ With `private_entity_manager: true`:
 
 ### Preparing for 2.0
 
-2.0 contains only the deprecations announced in 1.x ([Planned for 2.0](#planned-for-20)):
+2.0 contains only the deprecations announced in 1.x ([Done in 2.0](#done-in-20)):
 
 - `doctrine.private_entity_manager` defaults to `true` and `false` is removed; `doctrine.entity_manager: <name>` stays.
 - `nowo-tech/instance-settings-bundle` moves to `suggest`.
@@ -640,7 +795,7 @@ rules 1, 3 and 6): no schema change, no dependency removed, same routes, same re
    writes that still flush (profile save and test, bucket moves, purge, retired-profile cleanup, adoption) flush that
    manager only, and the bundle clears it at the end of every request, Messenger message and console command.
    Existing installs keep `null` (the default manager) unchanged — it stays the default in 1.x; 2.0 writes through a
-   private manager on your default connection instead (amended in 1.8.0, [Planned for 2.0](#planned-for-20)); switching later needs no migration (same tables), but
+   private manager on your default connection instead (amended in 1.8.0, [Done in 2.0](#done-in-20)); switching later needs no migration (same tables), but
    your own code must not hold Doctrine relations to the bundle entities (reference files by `uuid`, as documented)
    and must read them through the bundle's repositories or `doctrine.orm.storage_kit_entity_manager`.
 3. **Deprecated: `FileDelivery::respond()`** (removed in 2.0). Call the port and the adapter instead; the response is

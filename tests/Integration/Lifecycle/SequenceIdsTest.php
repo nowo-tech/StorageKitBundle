@@ -7,7 +7,6 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Lifecycle;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\ORM\Id\SequenceGenerator;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
-use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
@@ -31,7 +30,6 @@ final class SequenceIdsTest extends KernelTestCase
         }
         $body = '';
         foreach ($files as $file) {
-            self::assertInstanceOf(StoredFile::class, $file);
             self::assertNotNull($file->getId());
             $body .= '![x](storage-file:' . $file->getUuid() . ') ';
         }

@@ -202,9 +202,9 @@ final class ReferencesAndPurgeTest extends KernelTestCase
     {
         $kernel = $this->bootKernel();
         $this->profile($kernel);
-        $user     = new AppUser(7, 'alice');
-        $shown    = $this->uploadFile($kernel, $user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
-        $hidden   = $this->uploadFile($kernel, $user, 'board', 'b1', Images::png(2000, 1000), 'other.png');
+        $user   = new AppUser(7, 'alice');
+        $shown  = $this->uploadFile($kernel, $user, 'board', 'b1', Images::png(2000, 1000), 'photo.png');
+        $hidden = $this->uploadFile($kernel, $user, 'board', 'b1', Images::png(2000, 1000), 'other.png');
         self::assertSame(['alice', AppUser::class . ':7'], [$shown->getUploadedBy(), $shown->getUploadedByKey()]);
         $this->note($kernel, '![a](storage-file:' . $shown->getUuid() . ')');
         $data = $this->service($kernel, StoredFilesPersonalData::class);

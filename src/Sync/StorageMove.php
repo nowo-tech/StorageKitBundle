@@ -186,7 +186,7 @@ final readonly class StorageMove
     {
         $target = $this->entityManager->adopt($target);
         $uuid   = $target->getUuid();
-        $scope = $target->getScope();
+        $scope  = $target->getScope();
         // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
         $discarded = $this->entityManager->transactional(function () use ($target, $scope): bool {
             if (!$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET) || $this->syncs->hasOpenTo($target)) {

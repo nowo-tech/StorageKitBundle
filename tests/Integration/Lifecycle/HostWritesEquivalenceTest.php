@@ -160,7 +160,7 @@ final class HostWritesEquivalenceTest extends KernelTestCase
         self::assertTrue($active->isSettingsBacked());
         $active->recordTest(true, true);
         $this->bundleManager($kernel)->flush();
-        $manager = $this->entityManager($kernel);
+        $manager    = $this->entityManager($kernel);
         $connection = $manager->getConnection();
         $table      = $manager->getClassMetadata(StorageProfile::class)->getTableName();
         $connection->executeStatement('UPDATE ' . $table . ' SET tested_at = ?, created_at = ?, updated_at = ?, uuid = ?', ['2026-01-02 03:04:05', '2026-01-01 00:00:00', '2026-01-01 00:00:00', '00000000-0000-4000-8000-0000000000aa']);
