@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Form;
 
 use Nowo\FormKitBundle\Attribute\FormKitConfig;
 use Nowo\FormKitBundle\Form\FormOptionsTrait;
+use Nowo\StorageKitBundle\Concurrency\RowVersion;
 use Nowo\StorageKitBundle\NowoStorageKitBundle;
 use Nowo\StorageKitBundle\Security\EndpointGuard;
 use Nowo\StorageKitBundle\Storage\S3Settings;
@@ -15,6 +16,7 @@ use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\FileType;
+use Symfony\Component\Form\Extension\Core\Type\HiddenType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
@@ -28,7 +30,11 @@ use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
 use function assert;
+use function ctype_digit;
 use function is_array;
+use function is_int;
+use function is_string;
+use function strlen;
 use function trim;
 
 /**
@@ -52,6 +58,9 @@ use function trim;
 final class StorageProfileType extends AbstractType
 {
     use FormOptionsTrait;
+
+    /** 2.1: name of the hidden row-version field (option `row_version`; rendered with the other hidden fields). */
+    public const ROW_VERSION = 'rowVersion';
 
     /**
      * The SSRF guard checks the server-side endpoint of restricted profiles.
@@ -170,6 +179,11 @@ final class StorageProfileType extends AbstractType
             'disabled' => $readOnly,
             'row_attr' => $endpointOnly,
         ]);
+        if (is_int($options['row_version'])) {
+            // 2.1 (REQ-RUNTIME-003 rule 4): the row version the page was built from, unmapped; the save refuses the
+            // form when the bucket was saved by someone else since (RowVersion, StaleEditException).
+            $builder->add(self::ROW_VERSION, HiddenType::class, ['mapped' => false, 'required' => false, 'label' => false, 'data' => (string) $options['row_version']]);
+        }
         // The submitted provider decides which fields count (InstanceSettings 1.3 rules): the endpoint fields hidden
         // for Amazon S3 get their current values back, so they are neither validated nor changed.
         $builder->addEventListener(FormEvents::PRE_SUBMIT, static function (FormEvent $event): void {
@@ -205,11 +219,13 @@ final class StorageProfileType extends AbstractType
             'has_secret'         => false,
             'restricted'         => true,
             'with_enabled'       => true,
+            'row_version'        => null,
         ]);
         $resolver->setAllowedTypes('read_only', 'bool');
         $resolver->setAllowedTypes('has_secret', 'bool');
         $resolver->setAllowedTypes('restricted', 'bool');
         $resolver->setAllowedTypes('with_enabled', 'bool');
+        $resolver->setAllowedTypes('row_version', ['null', 'int']);
     }
 
     /**
@@ -223,4 +239,17 @@ final class StorageProfileType extends AbstractType
     /*
      * A non-empty value must (`$match`) or must not match `$regex`; the message is a bundle-domain key.
      */
+
+    /**
+     * 2.1: the row version a submitted form carries, or {@see RowVersion::MISSING} when the field is absent or not a
+     * whole number (never equal to a stored version, so such a save is refused as stale).
+     *
+     * @param FormInterface<mixed> $form
+     */
+    public static function submittedRowVersion(FormInterface $form): int
+    {
+        $token = $form->has(self::ROW_VERSION) ? $form->get(self::ROW_VERSION)->getData() : null;
+
+        return is_string($token) && $token !== '' && strlen($token) <= 18 && ctype_digit($token) ? (int) $token : RowVersion::MISSING;
+    }
 }

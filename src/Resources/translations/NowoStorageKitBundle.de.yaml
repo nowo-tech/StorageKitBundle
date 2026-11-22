@@ -15,6 +15,7 @@ settings:
     flash:
         saved: 'Die Speichereinstellungen wurden gespeichert.'
         changed: 'Jemand anderes hat diesen Bucket inzwischen geändert. Prüfen Sie ihn und speichern Sie erneut.'
+        stale: 'Jemand anderes hat diesen Bucket gespeichert, nachdem Sie die Seite geöffnet haben. Ihre Änderungen wurden nicht gespeichert: Laden Sie die Seite neu und übernehmen Sie sie erneut.'
     section:
         config: 'Konfiguration'
     field:
@@ -152,6 +153,7 @@ move:
         objects: '%copied% kopiert, %skipped% bereits vorhanden'
     flash:
         saved: 'Der neue Bucket wurde gespeichert. Testen Sie ihn und starten Sie dann das Kopieren.'
+        stale: 'Jemand anderes hat den neuen Bucket gespeichert, nachdem Sie die Seite geöffnet haben. Ihre Änderungen wurden nicht gespeichert: Laden Sie die Seite neu und übernehmen Sie sie erneut.'
         unavailable: 'Diese Aktion ist gerade nicht verfügbar.'
         started: 'Das Kopieren läuft im Hintergrund.'
         started_cli: 'Das Kopieren steht in der Warteschlange. Führen Sie aus: bin/console nowo:storage-kit:sync %from% %to%'

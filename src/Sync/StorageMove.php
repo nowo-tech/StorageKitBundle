@@ -8,6 +8,8 @@ use Doctrine\DBAL\Types\Types;
 use Nowo\InstanceSettingsBundle\Exception\InvalidSettingValueException;
 use Nowo\StorageKitBundle\Audit\AuditRecorder;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\StorageKitBundle\Concurrency\RowVersion;
+use Nowo\StorageKitBundle\Concurrency\StaleEditException;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StorageSync;
@@ -101,11 +103,19 @@ final readonly class StorageMove
      * boundary dropped the private manager), that connection is applied to the bundle's instance inside the unit; 2.0.0
      * saved the stored row unchanged and still reported it as saved.
      *
+     * 2.1 (REQ-RUNTIME-003 rule 4): a saved target is written only while it still has `$expectedVersion` (the row
+     * version of the Move page, {@see self::rowVersion()}), with one atomic compare-and-set inside the unit. Null
+     * (your own code, no page behind it) saves without the check but still advances the version, so a page opened
+     * before is refused instead of overwriting your save.
+     *
      * @param list<string> $fields names of the changed fields
      * @param (callable(StorageProfile): void)|null $configure applies the submitted fields (null: the connection set
      *                                                         on `$target` is saved as it is)
+     * @param int|null $expectedVersion the row version of the edited page, or null for an unchecked save
+     *
+     * @throws StaleEditException when `$expectedVersion` is no longer the target's version (nothing written)
      */
-    public function saveTarget(StorageProfile $target, ?object $actor, array $fields, ?callable $configure = null): bool
+    public function saveTarget(StorageProfile $target, ?object $actor, array $fields, ?callable $configure = null, ?int $expectedVersion = null): bool
     {
         // 2.0 (lesson W1-2): a saved target loaded through the application's manager is loaded again by the bundle's.
         $given  = $target;
@@ -115,9 +125,13 @@ final readonly class StorageMove
         }
         $scope = $target->getScope();
         // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
-        $saved = $this->entityManager->transactional(function () use ($target, $scope, $configure): bool {
+        $saved = $this->entityManager->transactional(function () use ($target, $scope, $configure, $expectedVersion): bool {
             if (!$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET)) {
                 return false;
+            }
+            $id = $target->getId();
+            if ($id !== null && !RowVersion::advance($this->entityManager->connection(), $this->entityManager->table(StorageProfile::class), $id, $expectedVersion)) {
+                throw new StaleEditException($id, $expectedVersion);
             }
             if ($configure !== null) {
                 $configure($target);
@@ -132,6 +146,17 @@ final readonly class StorageMove
         }
 
         return $saved;
+    }
+
+    /**
+     * 2.1: the current row version of a saved bucket, read from the database (the token of its form); null for a bucket
+     * not saved yet.
+     */
+    public function rowVersion(StorageProfile $profile): ?int
+    {
+        $id = $profile->getId();
+
+        return $id === null ? null : RowVersion::read($this->entityManager->connection(), $this->entityManager->table(StorageProfile::class), $id);
     }
 
     /**

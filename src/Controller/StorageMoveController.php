@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\StorageKitBundle\Controller;
 
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
+use Nowo\StorageKitBundle\Concurrency\StaleEditException;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Form\StorageProfileType;
@@ -141,6 +142,7 @@ final class StorageMoveController extends AbstractController
         $sync    = $this->move->sync($active, $target);
         $running = $sync instanceof StorageSync && $sync->isOpen();
         $form    = $this->form($target, $scope, $running);
+        $stale   = false;
         $form->handleRequest($request);
         if (!$running && $form->isSubmitted() && $form->isValid()) {
             /** @var array{provider: string|null, endpoint: string|null, public_endpoint: string|null, region: string|null, bucket: string|null, prefix: string|null, access_key: string|null, secret: string|null, path_style: bool|null} $data */
@@ -156,15 +158,23 @@ final class StorageMoveController extends AbstractController
                 if ($data['secret'] !== null && $data['secret'] !== '') {
                     $fields[] = 'secret';
                 }
-                $saved = $this->move->saveTarget($target, $this->guard->user(), $fields, $configure);
-                $this->addFlash($saved ? 'success' : 'error', $this->trans($saved ? 'move.flash.saved' : 'move.flash.unavailable'));
+                try {
+                    // 2.1 (REQ-RUNTIME-003 rule 4): a saved target is written only with the row version of this page.
+                    $saved = $this->move->saveTarget($target, $this->guard->user(), $fields, $configure, $target->getId() === null ? null : StorageProfileType::submittedRowVersion($form));
+                    $this->addFlash($saved ? 'success' : 'error', $this->trans($saved ? 'move.flash.saved' : 'move.flash.unavailable'));
 
-                return $this->redirectToRoute(...self::route($scope));
+                    return $this->redirectToRoute(...self::route($scope));
+                } catch (StaleEditException) {
+                    // Someone saved this target after the page was opened: nothing was written, the form is shown again.
+                    $stale = true;
+                    $this->addFlash('error', $this->trans('move.flash.stale'));
+                }
+            } else {
+                // Root errors are not part of the scaffold's child loop: attach it to the first missing field.
+                $missing = $submitted->getBucket() === '' ? 'bucket' : ($submitted->getAccessKey() === '' ? 'access_key' : 'secret');
+                // @igor-ignore - Request-scoped form built in this action.
+                $form->get($missing)->addError(new FormError($this->trans('profile.error.incomplete')));
             }
-            // Root errors are not part of the scaffold's child loop: attach it to the first missing field.
-            $missing = $submitted->getBucket() === '' ? 'bucket' : ($submitted->getAccessKey() === '' ? 'access_key' : 'secret');
-            // @igor-ignore - Request-scoped form built in this action.
-            $form->get($missing)->addError(new FormError($this->trans('profile.error.incomplete')));
         }
         [$settingsRoute, $settingsParams] = StorageSettingsController::route($scope);
         $usage                            = $active instanceof StorageProfile && $active->getId() !== null ? $this->files->usageOf($active) : ['files' => 0, 'bytes' => 0];
@@ -181,7 +191,14 @@ final class StorageMoveController extends AbstractController
             'sync'    => $sync,
             'running' => $running,
             'scope'   => $scope,
-        ], new Response(status: $form->isSubmitted() ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK));
+        ], new Response(status: match (true) {
+            $stale               => Response::HTTP_CONFLICT,
+            $form->isSubmitted() => Response::HTTP_UNPROCESSABLE_ENTITY,
+            default              => Response::HTTP_OK,
+        }));
+        if ($stale) {
+            $response->headers->set('X-Error-Code', StaleEditException::ERROR_CODE);
+        }
         $response->setPrivate();
         $response->headers->addCacheControlDirective('no-store');
 
@@ -328,6 +345,8 @@ final class StorageMoveController extends AbstractController
             'has_secret'    => $target->hasSecret(),
             'restricted'    => $this->resolver->isRestricted($scope),
             'with_enabled'  => false,
+            // 2.1: the version of a saved target, read from the database (none for a target not saved yet).
+            'row_version' => $this->move->rowVersion($target),
         ]);
     }
 

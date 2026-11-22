@@ -15,6 +15,7 @@ settings:
     flash:
         saved: 'Les paramètres de stockage ont été enregistrés.'
         changed: 'Quelqu’un d’autre a modifié ce bucket entre-temps. Vérifiez-le et enregistrez à nouveau.'
+        stale: 'Quelqu’un d’autre a enregistré ce bucket après l’ouverture de la page. Vos modifications n’ont pas été enregistrées : rechargez la page et appliquez-les à nouveau.'
     section:
         config: 'Configuration'
     field:
@@ -152,6 +153,7 @@ move:
         objects: '%copied% copiés, %skipped% déjà présents'
     flash:
         saved: 'Le nouveau bucket a été enregistré. Testez-le, puis lancez la copie.'
+        stale: 'Quelqu’un d’autre a enregistré le nouveau bucket après l’ouverture de la page. Vos modifications n’ont pas été enregistrées : rechargez la page et appliquez-les à nouveau.'
         unavailable: 'Cette action n''est pas disponible pour le moment.'
         started: 'La copie a commencé en arrière-plan.'
         started_cli: 'La copie est en file d''attente. Lancez : bin/console nowo:storage-kit:sync %from% %to%'
