@@ -7,11 +7,13 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Persistence;
 use Doctrine\DBAL\Connection;
 use Doctrine\Persistence\ManagerRegistry;
 use LogicException;
+use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
 use Nowo\StorageKitBundle\DependencyInjection\Compiler\StoragePrivateEntityManagerPass;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StorageSync;
 use Nowo\StorageKitBundle\Entity\StoredFile;
+use Nowo\StorageKitBundle\Storage\StorageProvider;
 use Nowo\StorageKitBundle\Sync\StorageMove;
 use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Tests\Fixtures\Entity\Note;
@@ -221,6 +223,59 @@ final class PrivateEntityManagerKernelTest extends KernelTestCase
         self::assertTrue($host->contains($hostActive));
     }
 
+    /**
+     * 2.0.1 (YH-1): `saveTarget()` without `$configure` saves the connection set on the target it is given, also when
+     * the bundle loads that target again (yours, or one of its own loaded before the private manager was dropped).
+     */
+    public function testSavingATargetWithoutConfigureKeepsTheConnectionSetOnIt(): void
+    {
+        $kernel = $this->bootRelations();
+        $target = $this->profile($kernel, 'acme', 'old-bucket', StorageProfile::STATE_TARGET);
+        $id     = (int) $target->getId();
+        $this->clearManagers($kernel);
+        $host       = $this->entityManager($kernel);
+        $connection = $host->getConnection();
+        $move       = $this->service($kernel, StorageMove::class);
+
+        // Your instance, a new bucket and a new secret set on it: both saved; your manager is not flushed.
+        $hostTarget = $host->find(StorageProfile::class, $id);
+        self::assertInstanceOf(StorageProfile::class, $hostTarget);
+        $hostTarget->configure(StorageProvider::AWS_S3, false, null, 'https://cdn.example.test', 'eu-west-1', 'new-bucket', 'files/', 'new-key', 'new-secret-not-real', false);
+        self::assertTrue($move->saveTarget($hostTarget, null, ['provider', 'bucket', 'secret']));
+        $row = $connection->fetchAssociative('SELECT provider, enabled, endpoint, public_endpoint, region, bucket, prefix, access_key, secret, path_style FROM storage_kit_profile WHERE id = ?', [$id]);
+        self::assertIsArray($row);
+        self::assertSame([StorageProvider::AWS_S3, null, 'https://cdn.example.test', 'eu-west-1', 'new-bucket', 'files', 'new-key'], [$row['provider'], $row['endpoint'], $row['public_endpoint'], $row['region'], $row['bucket'], $row['prefix'], $row['access_key']]);
+        self::assertSame([false, false], [(bool) $row['enabled'], (bool) $row['path_style']]);
+        self::assertNotSame('new-secret-not-real', $row['secret'], 'the secret is stored encrypted');
+        self::assertSame('new-secret-not-real', $this->reloaded($kernel, $id)->getSecret());
+        self::assertTrue($host->contains($hostTarget), 'yours stays in your manager');
+        self::assertSame(1, (int) $connection->fetchOne('SELECT COUNT(*) FROM storage_kit_profile'), 'no duplicate row');
+        self::assertContains(StorageAuditEvent::MOVE_TARGET_SAVED, $this->audit($kernel)->actions());
+
+        // No new secret: the stored one is kept (never written again, never encrypted twice).
+        $this->clearManagers($kernel);
+        $hostTarget = $host->find(StorageProfile::class, $id);
+        self::assertInstanceOf(StorageProfile::class, $hostTarget);
+        $hostTarget->configure(StorageProvider::AWS_S3, false, null, null, 'eu-west-1', 'third-bucket', '', 'new-key', null, false);
+        self::assertTrue($move->saveTarget($hostTarget, null, ['bucket', 'public_endpoint']));
+        $saved = $this->reloaded($kernel, $id);
+        self::assertSame(['third-bucket', null, 'new-secret-not-real'], [$saved->getBucket(), $saved->getPublicEndpoint(), $saved->getSecret()]);
+
+        // An uninitialised proxy of yours, nothing changed: the row stays as it is.
+        $this->clearManagers($kernel);
+        self::assertTrue($move->saveTarget($host->getReference(StorageProfile::class, $id) ?? self::fail('reference'), null, []));
+        $saved = $this->reloaded($kernel, $id);
+        self::assertSame(['third-bucket', 'new-key', 'new-secret-not-real'], [$saved->getBucket(), $saved->getAccessKey(), $saved->getSecret()]);
+
+        // Worker mode: the bundle's own instance, loaded before a unit-of-work boundary dropped the private manager.
+        $own = $saved;
+        $this->clearManagers($kernel);
+        $own->configure(StorageProvider::AWS_S3, false, null, null, 'eu-west-1', 'fourth-bucket', '', 'new-key', null, false);
+        self::assertTrue($move->saveTarget($own, null, ['bucket']));
+        self::assertSame('fourth-bucket', $connection->fetchOne('SELECT bucket FROM storage_kit_profile WHERE id = ?', [$id]));
+        self::assertSame('new-secret-not-real', $this->reloaded($kernel, $id)->getSecret());
+    }
+
     public function testARowThatIsGoneFailsClearly(): void
     {
         $kernel  = $this->bootRelations();
@@ -296,6 +351,19 @@ final class PrivateEntityManagerKernelTest extends KernelTestCase
             }
         }
         self::assertLessThan(2 * 1024 * 1024, memory_get_usage() - $baseline, 'no per-request growth');
+    }
+
+    /**
+     * The row of `$id` as the bundle's manager loads it now (its identity map cleared first).
+     */
+    private function reloaded(StorageKitTestKernel $kernel, int $id): StorageProfile
+    {
+        $manager = $this->bundleManager($kernel);
+        $manager->clear();
+        $profile = $manager->find(StorageProfile::class, $id);
+        self::assertInstanceOf(StorageProfile::class, $profile);
+
+        return $profile;
     }
 
     /**

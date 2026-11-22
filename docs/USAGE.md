@@ -58,7 +58,8 @@
 
 Nothing to configure beyond the [installation](INSTALLATION.md): require and register `NowoInstanceSettingsBundle`
 (`nowo-tech/instance-settings-bundle` ^1.3.1, a `suggest` since 2.0) and the instance bucket is the
-`storage` settings section; the bundle entities are attribute-mapped on your default entity manager; your texts are
+`storage` settings section; the bundle entities are attribute-mapped on your default manager's mapping and written
+through the bundle's private manager on its connection (2.0); your texts are
 Doctrine entities whose `FileReferenceSourceInterface` makes the references automatic; downloads, rendering and GDPR
 hooks are services you inject (`StoredImageResolver`, `StoredFilesPersonalData::exportUser()` / `eraseUser()`).
 
@@ -219,8 +220,8 @@ Use `forget('comment', [$id])` when a text is deleted.
 Inject `Upload\ImageUploaderInterface` and call `uploadImage($user, $contextType, $contextId, $bytes, $name)`: it
 returns a `StoredFileView` DTO (`uuid`, `scope`, context, name, type, sizes, variants, `uploadedBy`, `createdAt`);
 reference the file by its `uuid`. The row is written with a DBAL insert built from the entity metadata: **no entity
-manager is flushed**, so an upload never commits what your own unit of work left pending (standard applications get
-the same guarantee through the deprecated `upload()`, which still returns the `StoredFile` entity).
+manager is flushed**, so an upload never commits what your own unit of work left pending (2.0 removed the 1.3
+`upload()` that returned the `StoredFile` entity; load the row by `uuid` if you need it).
 
 - *Outside a transaction* the row is committed at once and the `file_uploaded` audit event follows.
 - *Inside your transaction* (the host controls the unit of work) the row joins it in a savepoint (a failed insert rolls
@@ -453,7 +454,8 @@ WebP are re-encoded (EXIF / GPS / XMP dropped, JPEGs turned upright); GIF and an
 | 503 | `storage` | the bucket failed (objects already written are removed) |
 
 `message` is the translated `upload.error.<reason>`. Answers are `private, no-store`, `nosniff`. A refused upload
-stores nothing. The PHP API behind it is `Upload\ImageUploader::upload($user, $type, $id, $bytes, $name)`.
+stores nothing. The PHP API behind it is `Upload\ImageUploaderInterface::uploadImage($user, $type, $id, $bytes, $name)`
+(a `StoredFileView`; [Uploading from your code](#uploading-from-your-code-13)).
 
 A new file is an orphan until a text that points at it is saved ([References](#references-and-the-purge)).
 

@@ -96,15 +96,24 @@ final readonly class StorageMove
      * inside the unit; false (nothing written) when the owner's target changed since the page was read (another target
      * saved, or this one discarded or switched to).
      *
+     * Without `$configure` the connection already set on `$target` is saved. 2.0.1: when `$target` is a saved target
+     * the bundle loads again through its own manager (one your manager handed it, or one loaded before a unit-of-work
+     * boundary dropped the private manager), that connection is applied to the bundle's instance inside the unit; 2.0.0
+     * saved the stored row unchanged and still reported it as saved.
+     *
      * @param list<string> $fields names of the changed fields
-     * @param (callable(StorageProfile): void)|null $configure applies the submitted fields (null: already applied
-     *                                                         to an unsaved target)
+     * @param (callable(StorageProfile): void)|null $configure applies the submitted fields (null: the connection set
+     *                                                         on `$target` is saved as it is)
      */
     public function saveTarget(StorageProfile $target, ?object $actor, array $fields, ?callable $configure = null): bool
     {
         // 2.0 (lesson W1-2): a saved target loaded through the application's manager is loaded again by the bundle's.
+        $given  = $target;
         $target = $this->entityManager->adopt($target);
-        $scope  = $target->getScope();
+        if ($configure === null && $target !== $given) {
+            $configure = $this->copyConnection($given);
+        }
+        $scope = $target->getScope();
         // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
         $saved = $this->entityManager->transactional(function () use ($target, $scope, $configure): bool {
             if (!$this->profiles->isCurrent($target, $scope, StorageProfile::STATE_TARGET)) {
@@ -123,6 +132,23 @@ final readonly class StorageMove
         }
 
         return $saved;
+    }
+
+    /**
+     * 2.0.1 (YH-1): applies the connection set on `$given` (provider, enabled, endpoints, region, bucket, prefix,
+     * access key, path style and, when it differs, the secret) to the bundle's own instance of the same row.
+     *
+     * @return callable(StorageProfile): void
+     */
+    private function copyConnection(StorageProfile $given): callable
+    {
+        return static function (StorageProfile $own) use ($given): void {
+            $own->configure($given->getProvider(), $given->isEnabled(), $given->getEndpoint(), $given->getPublicEndpoint(), $given->getRegion(), $given->getBucket(), $given->getPrefix(), $given->getAccessKey(), null, $given->isPathStyle());
+            $secret = $given->getSecret();
+            if ($secret !== null && $secret !== '' && $secret !== $own->getSecret()) {
+                $own->setSecret($secret);
+            }
+        };
     }
 
     /**

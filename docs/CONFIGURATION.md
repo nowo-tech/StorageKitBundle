@@ -257,7 +257,7 @@ Buckets per scope (organisation, tenant, workspace…).
 | Key | Default | Validation / effect |
 | --- | --- | --- |
 | `table_prefix` | `''` | `[A-Za-z0-9_]*`. Prefixes the tables and index names: `app_` gives `app_storage_kit_file`. |
-| `entity_manager` | `null` | `\w+` or `null` (1.5). Null: the bundle writes through a private manager on the connection, mapping and event manager of your default manager (2.0; your manager itself is never used). A name: the bundle entities are mapped on that manager **only** (removed from the others, `auto_mapping` and a default metadata driver — DoctrineBundle 3.4 `auto_discover_entities`, fixed in Unreleased — included), every bundle read and write uses it, the bundle recovers it when closed and clears it at the end of every request, Messenger message and console command; the build fails when the manager is not declared under `doctrine.orm.entity_managers` or does not map the entities. The DDD option, on the same connection as your default manager (see below). |
+| `entity_manager` | `null` | `\w+` or `null` (1.5). Null: the bundle writes through a private manager on the connection, mapping and event manager of your default manager (2.0; your manager itself is never used). A name: the bundle entities are mapped on that manager **only** (removed from the others, `auto_mapping` and a default metadata driver — DoctrineBundle 3.4 `auto_discover_entities`, fixed in 1.5.2 — included), every bundle read and write uses it, the bundle recovers it when closed and clears it at the end of every request, Messenger message and console command; the build fails when the manager is not declared under `doctrine.orm.entity_managers` or does not map the entities. The DDD option, on the same connection as your default manager (see below). |
 | `private_entity_manager` | `null` | Deprecated since 2.0 (REQ-ARCH-001 rule 6; removed in 3.0). The bundle always reads and writes through a private entity manager created on the connection, mapping and event manager of your default manager: same tables, nothing else to declare, no bundle flush ever writes your pending changes; dropped at every request / message / command boundary and replaced when closed. Unset: that private manager (or, with a dedicated `entity_manager`, that manager directly). `true`: a no-op with a build-time deprecation; with a dedicated `entity_manager`, the private manager on it (as in 1.8). `false`: the build fails ([UPGRADING "To 2.0.0"](UPGRADING.md#to-200)); with a dedicated `entity_manager` it is ignored with a deprecation. |
 
 Tables: `storage_kit_profile`, `storage_kit_file`, `storage_kit_file_reference`, `storage_kit_sync` (see
@@ -265,9 +265,10 @@ Tables: `storage_kit_profile`, `storage_kit_file`, `storage_kit_file_reference`,
 
 ### Standard Symfony host
 
-Keep `entity_manager: null`: the entities are attribute-mapped on your default manager. Uploads, references, the GDPR
-erasure and the settings listener never flush it (DBAL statements); the admin pages and console commands do flush it
-(profile save and test, moves, purge).
+Keep `entity_manager: null`: the entities are attribute-mapped on your default manager's mapping and written through
+the bundle's private manager on its connection (2.0). Uploads, references, the GDPR erasure and the settings listener
+never flush a manager (DBAL statements); the admin pages and console commands (profile save and test, moves, purge)
+flush only the private manager, never yours (1.x flushed your default manager there).
 
 ### DDD / hexagonal host (and new installs)
 
