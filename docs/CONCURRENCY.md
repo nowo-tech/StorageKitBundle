@@ -57,8 +57,14 @@ A lock conflict, deadlock, lock wait timeout or serialization failure (MySQL / M
   Nothing is written, repeating the request can never succeed, so it is a domain answer: 409, the form rendered again
   with "Someone else saved this bucket after you opened the page…", `X-Error-Code: STORAGE_KIT_STALE_EDIT`, no
   `X-Conflict-Code` and no `Retry-After`. The admin reloads the page. A missing or malformed `rowVersion` counts as
-  stale. The version is read from the database for each page (never from the identity map) and is never written by
-  the ORM (`insertable: false, updatable: false`), so it cannot go backwards.
+  stale. The hidden field carries `<row id>:<row version>`, so **a page of another bucket is stale** too: a page opened
+  before its bucket was replaced (a target discarded and saved again, or a Move switch that made another row active)
+  never saves the new row, even when the versions are equal. The version comes from the same load as the values
+  (the bundle's manager is fresh for each request) and is never written by the ORM (`insertable: false,
+  updatable: false`), so it cannot go backwards.
+- **What advances the version:** the Storage page's save, `StorageMove::saveTarget()` (with or without an expected
+  version). Direct ORM writes of your own to a `StorageProfile` do **not** advance it: a page opened before such a
+  write can still overwrite it. Save through `StorageMove::saveTarget()` (null version) to make open pages stale.
 - The upload endpoint keeps its JSON error shape and adds the code: `{"error": "conflict", "message": "…", "code": "CONFLICT_001"}`.
 - The download endpoint answers `text/plain`.
 - Not conflicts, never mapped: unique (and other constraint) violations and lost connections. They stay real errors.
@@ -125,7 +131,10 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
   the nesting level, the page answers 409 `CONFLICT_001` (never a 500), the connection is back at level 0 and the
   next save works.
 - `tests/Integration/Functional/StaleEditTest.php` (2.1, SQLite and the database jobs): stale, missing and forged
-  versions on the Storage and Move pages, a first save, a bucket created meanwhile, an unchecked save from your code.
+  versions on the Storage and Move pages, a first save, a bucket created meanwhile, an unchecked save from your code,
+  and the pages of a replaced bucket (audit ZK-M1): a Move page of a discarded target saved after a new target, a
+  Storage page saved after a switch at an equal version, and a token that names another row; each answers 409 with
+  the new row unchanged.
 - `tests/Unit/Concurrency`, `tests/Unit/EventListener/StorageKitConflictListenerTest.php`,
   `tests/Unit/Doctrine/OwnerLockTest.php`: the mapping (001 / 002, unique violations and lost connections excluded) and
   the lock per platform.

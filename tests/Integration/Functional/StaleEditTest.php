@@ -80,7 +80,7 @@ final class StaleEditTest extends KernelTestCase
         // Both admins open the page at version 1.
         $mineForm   = $this->settingsForm($mine, 'mine');
         $theirsForm = $this->settingsForm($theirs, 'theirs');
-        self::assertSame('1', $mineForm->getValues()['storage_profile[rowVersion]'] ?? null);
+        self::assertSame($profile->getId() . ':1', $mineForm->getValues()['storage_profile[rowVersion]'] ?? null);
 
         // The other admin saves first: the version advances by one.
         $theirs->submit($theirsForm);
@@ -108,7 +108,8 @@ final class StaleEditTest extends KernelTestCase
         $profile = $this->profile($kernel, 'acme');
         $client  = $this->client($kernel, 'scopeadmin');
 
-        foreach (['', 'abc', '-1', '1e3', '99999999999999999999', null] as $token) {
+        $id = (string) $profile->getId();
+        foreach (['', 'abc', '-1', '1e3', '1', $id, $id . ':', ':1', $id . ':0', $id . ':01', $id . ':1:1', '0' . $id . ':1', $id . ':99999999999999999999', null] as $token) {
             $form   = $this->settingsForm($client, 'forged');
             $values = $form->getPhpValues();
             if ($token === null) {
@@ -146,7 +147,7 @@ final class StaleEditTest extends KernelTestCase
         $theirs = $this->client($kernel);
 
         $mineForm = $this->moveForm($mine, 'mine');
-        self::assertSame('1', $mineForm->getValues()['storage_target[rowVersion]'] ?? null);
+        self::assertSame($target->getId() . ':1', $mineForm->getValues()['storage_target[rowVersion]'] ?? null);
         $theirs->submit($this->moveForm($theirs, 'theirs'));
         self::assertSame(302, $theirs->getResponse()->getStatusCode());
 
@@ -158,6 +159,72 @@ final class StaleEditTest extends KernelTestCase
         $mine->submit($this->moveForm($mine, 'mine'));
         self::assertSame(302, $mine->getResponse()->getStatusCode());
         self::assertSame('mine', $this->bucket($kernel, $target));
+    }
+
+    /**
+     * Audit ZK-M1 (a): a Move page opened on target T1; another admin discards T1 and saves a new target T2, which
+     * starts at the same version (1). The old page names T1, so its save is stale and T2 is unchanged.
+     */
+    public function testAMovePageOfADiscardedTargetIsStaleForTheNewTarget(): void
+    {
+        $kernel = $this->bootKernel();
+        $this->profile($kernel);
+        $first = $this->profile($kernel, null, 'first-target', StorageProfile::STATE_TARGET);
+        $mine  = $this->client($kernel);
+        $form  = $this->moveForm($mine, 'mine');
+
+        $move = $this->service($kernel, StorageMove::class);
+        self::assertTrue($move->discard($first, null));
+        $second = $this->profile($kernel, null, 'theirs', StorageProfile::STATE_TARGET);
+        self::assertSame(1, $this->version($kernel, $second), 'the same version as the page');
+
+        $mine->submit($form);
+        $this->assertStale($mine, 'Someone else saved the new bucket after you opened the page.');
+        self::assertSame('theirs', $this->bucket($kernel, $second));
+        self::assertSame(1, $this->version($kernel, $second));
+    }
+
+    /**
+     * Audit ZK-M1 (b): a Storage page opened on the active bucket P; a switch makes another row active, at the same
+     * version. The old page names P, so its save is stale and the new active bucket is unchanged.
+     */
+    public function testAStoragePageOfTheBucketBeforeASwitchIsStaleForTheNewActiveBucket(): void
+    {
+        $kernel = $this->bootKernel();
+        $before = $this->profile($kernel, 'acme', 'before');
+        $mine   = $this->client($kernel, 'scopeadmin');
+        $form   = $this->settingsForm($mine, 'mine');
+
+        // The switch: the former bucket retires and another row becomes the active one (version 1, like the page).
+        $this->storage($kernel)->connection()->executeStatement('UPDATE storage_kit_profile SET state = ? WHERE id = ?', [StorageProfile::STATE_RETIRED, $before->getId()]);
+        $after = $this->profile($kernel, 'acme', 'after');
+        self::assertSame($this->version($kernel, $before), $this->version($kernel, $after), 'equal versions');
+
+        $mine->submit($form);
+        $this->assertStale($mine, 'Someone else saved this bucket after you opened the page.');
+        self::assertSame('after', $this->bucket($kernel, $after));
+        self::assertSame('before', $this->bucket($kernel, $before));
+        self::assertSame(1, $this->version($kernel, $after));
+    }
+
+    /**
+     * Audit ZK-M1 (c): a token that names another row (with that row's current version) is stale.
+     */
+    public function testATokenOfAnotherRowIsStale(): void
+    {
+        $kernel  = $this->bootKernel();
+        $profile = $this->profile($kernel, 'acme');
+        $other   = $this->profile($kernel, 'other', 'other-files');
+        $client  = $this->client($kernel, 'scopeadmin');
+
+        $values                                  = $this->settingsForm($client, 'forged')->getPhpValues();
+        $values['storage_profile']['rowVersion'] = $other->getId() . ':' . $this->version($kernel, $other);
+        $client->request('POST', '/storage/scopes/acme', $values);
+
+        $this->assertStale($client, 'Someone else saved this bucket after you opened the page.');
+        self::assertSame('files', $this->bucket($kernel, $profile));
+        self::assertSame(1, $this->version($kernel, $profile));
+        self::assertSame('other-files', $this->bucket($kernel, $other));
     }
 
     public function testASaveOfYourCodeAdvancesTheVersionUnchecked(): void

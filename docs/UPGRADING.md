@@ -77,7 +77,11 @@ What changes for you:
   the hidden `rowVersion` field (`form_rest()` does); without it every save of an existing bucket is refused as stale.
 - **Your code** calling `StorageMove::saveTarget()` is unchanged: without the new fifth argument the save is not
   checked, but it advances the version, so a Move page opened before is refused. Pass the version the user saw to
-  get the check (`StaleEditException` when it no longer matches).
+  get the check (`StaleEditException` when it no longer matches). Direct ORM writes of your own to a
+  `StorageProfile` do not advance the version.
+- **The hidden token is `<row id>:<row version>`** (`StorageProfileType` options `row_id` + `row_version`), so a page
+  built for another bucket row (one replaced since) is refused. Code of yours reading the submitted token uses
+  `StorageProfileType::submittedRowVersion($form, $profile)`.
 
 ## To 2.0.1
 

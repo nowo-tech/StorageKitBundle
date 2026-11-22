@@ -219,7 +219,7 @@ final class StorageSettingsController extends AbstractController
      */
     private function save(FormInterface $form, StorageProfile $profile, ?string $scope): bool
     {
-        $expected = StorageProfileType::submittedRowVersion($form);
+        $expected = StorageProfileType::submittedRowVersion($form, $profile);
         /** @var array{provider: string|null, enabled: bool|null, endpoint: string|null, public_endpoint: string|null, region: string|null, bucket: string|null, prefix: string|null, access_key: string|null, secret: string|null, path_style: bool|null} $data */
         $data = $form->getData();
         // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
@@ -327,19 +327,11 @@ final class StorageSettingsController extends AbstractController
             'csrf_token_id' => self::formTokenId($scope),
             'has_secret'    => $profile->hasSecret(),
             'restricted'    => $this->resolver->isRestricted($scope),
-            // 2.1: the version of the stored bucket, read from the database (none for a bucket not saved yet).
-            'row_version' => $this->rowVersion($this->entityManager, $profile),
+            // 2.1: the row and its version, from the same load as the values (audit ZK-L1; none for a bucket not saved
+            // yet). The bundle's private manager is fresh for each request.
+            'row_id'      => $profile->getId(),
+            'row_version' => $profile->getId() === null ? null : $profile->getRowVersion(),
         ]);
-    }
-
-    /**
-     * 2.1: the current row version of a saved bucket, read from the database; null for a bucket not saved yet.
-     */
-    private function rowVersion(StorageEntityManager $entityManager, StorageProfile $profile): ?int
-    {
-        $id = $profile->getId();
-
-        return $id === null ? null : RowVersion::read($entityManager->connection(), $entityManager->table(StorageProfile::class), $id);
     }
 
     private function scopeOrNotFound(string $scope): string

@@ -237,8 +237,8 @@ becomes the settings-backed active profile; existing files keep downloading.
   the owner read again inside it, compare-and-set sync status changes, and the bundle routes' conflict answer (409 or
   503, `X-Conflict-Code` `CONFLICT_001` with `Retry-After` / `CONFLICT_002` without); see `docs/CONCURRENCY.md`.
 - **FR-RUN-003** — `RowVersion`, `StaleEditException`, `StorageProfile::$rowVersion` (2.1, REQ-RUNTIME-003 rule 4): the
-  Storage and Move bucket forms carry the row version they were built from (hidden `rowVersion`, read from the
-  database); the save advances it with one atomic compare-and-set inside its unit, and a page that is no longer
+  Storage and Move bucket forms carry the row and the version they were built from (hidden `rowVersion` =
+  `<row id>:<row version>`, from the same load as the values; a token of another row is stale, audit ZK-M1); the save advances it with one atomic compare-and-set inside its unit, and a page that is no longer
   current writes nothing and answers 409 `X-Error-Code: STORAGE_KIT_STALE_EDIT` (a domain answer, no
   `X-Conflict-Code`); `StorageMove::saveTarget()` without a version advances it unchecked.
 

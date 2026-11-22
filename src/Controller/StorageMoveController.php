@@ -160,7 +160,7 @@ final class StorageMoveController extends AbstractController
                 }
                 try {
                     // 2.1 (REQ-RUNTIME-003 rule 4): a saved target is written only with the row version of this page.
-                    $saved = $this->move->saveTarget($target, $this->guard->user(), $fields, $configure, $target->getId() === null ? null : StorageProfileType::submittedRowVersion($form));
+                    $saved = $this->move->saveTarget($target, $this->guard->user(), $fields, $configure, $target->getId() === null ? null : StorageProfileType::submittedRowVersion($form, $target));
                     $this->addFlash($saved ? 'success' : 'error', $this->trans($saved ? 'move.flash.saved' : 'move.flash.unavailable'));
 
                     return $this->redirectToRoute(...self::route($scope));
@@ -345,8 +345,10 @@ final class StorageMoveController extends AbstractController
             'has_secret'    => $target->hasSecret(),
             'restricted'    => $this->resolver->isRestricted($scope),
             'with_enabled'  => false,
-            // 2.1: the version of a saved target, read from the database (none for a target not saved yet).
-            'row_version' => $this->move->rowVersion($target),
+            // 2.1: the row and its version, from the same load as the values (audit ZK-L1; none for a target not saved
+            // yet).
+            'row_id'      => $target->getId(),
+            'row_version' => $target->getId() === null ? null : $target->getRowVersion(),
         ]);
     }
 

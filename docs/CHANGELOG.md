@@ -79,15 +79,20 @@ All notable changes to this project are documented here. The format follows
 - **Row versions on the bucket forms (REQ-RUNTIME-003 rule 4, lost update).** The Storage page and the Move page's
   new-bucket form were last-write-wins: two admins editing the same bucket both saved, and the second save silently
   replaced the first. `storage_kit_profile` gets an additive `row_version INT NOT NULL DEFAULT 1` column (migration in
-  [UPGRADING](UPGRADING.md#unreleased)). Each form carries the version it was built from in a hidden `rowVersion`
-  field (read from the database, not the identity map); the save advances it with one atomic compare-and-set inside
-  its existing write unit (`Concurrency\RowVersion`). A page that is no longer current writes nothing and answers 409
+  [UPGRADING](UPGRADING.md#unreleased)). Each form carries the row and the version it was built from in a hidden
+  `rowVersion` field (`<row id>:<row version>`, from the same load as the values); the save advances the version with
+  one atomic compare-and-set inside its existing write unit (`Concurrency\RowVersion`). A page of another bucket is
+  stale too: a page opened before its bucket was replaced (a target discarded and saved again, or a Move switch) never
+  saves the new row, even at an equal version. A page that is no longer current writes nothing and answers 409
   with the form, a translated message (7 locales) and `X-Error-Code: STORAGE_KIT_STALE_EDIT` (a domain answer: no
   `X-Conflict-Code`, no `Retry-After`). Lock conflicts keep `CONFLICT_001` / `CONFLICT_002`.
 - `StorageMove::saveTarget()` takes an optional fifth argument `?int $expectedVersion` (throws
   `Concurrency\StaleEditException` when it no longer matches); without it the version is advanced unchecked, so a
   Move page opened before your save is refused. `StorageMove::rowVersion()` reads the current version.
-  `StorageProfileType` takes a `row_version` option (default null: no field) and `StorageProfile::getRowVersion()`.
+  `StorageProfileType` takes the `row_id` and `row_version` options (default null: no field),
+  `StorageProfileType::submittedRowVersion($form, $profile)` returns the version only for the token of `$profile`'s
+  row, and `StorageProfile::getRowVersion()`. Direct ORM writes of your own to a `StorageProfile` do not advance the
+  version; save through `StorageMove::saveTarget()` for that.
 
 ### Changed
 
