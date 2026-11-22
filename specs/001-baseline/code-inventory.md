@@ -1,6 +1,6 @@
 # Code inventory — 001-baseline
 
-**Last audited**: 2026-11-22 (v2.0.1)
+**Last audited**: 2026-11-22 (v2.0.1 + Unreleased 2.1 row versions)
 **Scope**: every production file under `src/` (`find src -type f | wc -l`). Tests, demo and generated caches are out of scope.
 
 ## Bundle / DI
@@ -26,6 +26,8 @@
 | `src/EventListener/StorageKitConflictListener.php` | Bundle / DI | FR-RUN-002 |
 | `src/Doctrine/OwnerLock.php` | Bundle / DI | FR-RUN-002 |
 | `src/DependencyInjection/Compiler/StoragePrivateEntityManagerPass.php` | Bundle / DI | FR-DI-011 |
+| `src/Concurrency/RowVersion.php` | Bundle / DI | FR-RUN-003 |
+| `src/Concurrency/StaleEditException.php` | Bundle / DI | FR-RUN-003 |
 
 ## Storage
 
@@ -55,7 +57,7 @@
 
 | Source path | Spec section | Requirement IDs |
 | --- | --- | --- |
-| `src/Entity/StorageProfile.php` | Profiles | FR-PROF-001 |
+| `src/Entity/StorageProfile.php` | Profiles | FR-PROF-001, FR-RUN-003 |
 | `src/Profile/StorageProfiles.php` | Profiles | FR-PROF-002 |
 | `src/Profile/ConfigProfiles.php` | Profiles | FR-PROF-003 |
 | `src/Repository/StorageProfileRepository.php` | Profiles | FR-PROF-004 |
@@ -132,7 +134,7 @@
 
 | Source path | Spec section | Requirement IDs |
 | --- | --- | --- |
-| `src/Sync/StorageMove.php` | Moves | FR-MOVE-001 |
+| `src/Sync/StorageMove.php` | Moves | FR-MOVE-001, FR-RUN-003 |
 | `src/Sync/StorageSyncer.php` | Moves | FR-MOVE-002 |
 | `src/Sync/SyncFailure.php` | Moves | FR-MOVE-002 |
 | `src/Entity/StorageSync.php` | Moves | FR-MOVE-003 |
@@ -172,9 +174,9 @@
 
 | Source path | Spec section | Requirement IDs |
 | --- | --- | --- |
-| `src/Controller/StorageSettingsController.php` | Admin UI and access | FR-UI-001 |
-| `src/Controller/StorageMoveController.php` | Admin UI and access | FR-UI-002 |
-| `src/Form/StorageProfileType.php` | Admin UI and access | FR-UI-003, FR-UI-007 |
+| `src/Controller/StorageSettingsController.php` | Admin UI and access | FR-UI-001, FR-RUN-003 |
+| `src/Controller/StorageMoveController.php` | Admin UI and access | FR-UI-002, FR-RUN-003 |
+| `src/Form/StorageProfileType.php` | Admin UI and access | FR-UI-003, FR-UI-007, FR-RUN-003 |
 | `src/Form/AwsAccessKeyCsv.php` | Admin UI and access | FR-UI-007 |
 | `src/Form/AwsAccessKeyCsvException.php` | Admin UI and access | FR-UI-007 |
 | `src/Form/AwsCsvImport.php` | Admin UI and access | FR-UI-007 |
@@ -222,7 +224,7 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 
 | Category | Files |
 | --- | --- |
-| Bundle / DI | 19 |
+| Bundle / DI | 21 |
 | Storage | 12 |
 | SSRF | 2 |
 | Profiles | 5 |
@@ -237,4 +239,4 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 | Admin UI and access | 20 |
 | Translations | 7 |
 | Removal port and default remover | 3 |
-| **Total production sources** | **138 / 138** (`find src -type f \| wc -l` = 138) |
+| **Total production sources** | **140 / 140** (`find src -type f \| wc -l` = 140) |

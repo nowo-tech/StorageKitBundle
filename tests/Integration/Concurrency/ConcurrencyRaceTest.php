@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Concurrency;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
+use Nowo\StorageKitBundle\Concurrency\StaleEditException;
 use Nowo\StorageKitBundle\Concurrency\StorageConflicts;
 use Nowo\StorageKitBundle\Controller\FileUploadController;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
@@ -119,7 +120,16 @@ final class ConcurrencyRaceTest extends KernelTestCase
         }, StorageProfileRepository::ownerLock('acme'));
         $this->assertUsable($this->b);
 
-        // B's retry edits A's bucket: still one active bucket for the owner.
+        // B's retry of the same page would overwrite A's bucket, which that page never showed: stale since 2.1.
+        $client->submit($form);
+        self::assertSame(409, $client->getResponse()->getStatusCode());
+        self::assertSame(StaleEditException::ERROR_CODE, $client->getResponse()->headers->get('X-Error-Code'));
+        self::assertSame(0, $this->rows("SELECT COUNT(*) FROM storage_kit_profile WHERE bucket = 'from-b'"));
+
+        // Reloaded, B edits A's bucket: still one active bucket for the owner.
+        $form                            = $client->request('GET', '/storage/scopes/acme')->selectButton('Save')->form()->disableValidation();
+        $form['storage_profile[bucket]'] = 'from-b';
+        $form['storage_profile[secret]'] = 'test-secret-not-real';
         $client->submit($form);
         self::assertStringContainsString('The storage settings were saved.', $this->follow($client));
         self::assertSame(1, $this->rows("SELECT COUNT(*) FROM storage_kit_profile WHERE scope = 'acme' AND state = 'active'"));

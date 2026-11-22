@@ -15,6 +15,7 @@ settings:
     flash:
         saved: 'As definições de armazenamento foram guardadas.'
         changed: 'Outra pessoa alterou este bucket entretanto. Reveja-o e guarde novamente.'
+        stale: 'Outra pessoa guardou este bucket depois de abrir a página. As suas alterações não foram guardadas: recarregue a página e aplique-as novamente.'
     section:
         config: 'Configuração'
     field:
@@ -152,6 +153,7 @@ move:
         objects: '%copied% copiados, %skipped% já existentes'
     flash:
         saved: 'O bucket novo foi guardado. Teste-o e comece a copiar.'
+        stale: 'Outra pessoa guardou o novo bucket depois de abrir a página. As suas alterações não foram guardadas: recarregue a página e aplique-as novamente.'
         unavailable: 'Esta ação não está disponível agora.'
         started: 'A cópia começou em segundo plano.'
         started_cli: 'A cópia está em fila. Execute: bin/console nowo:storage-kit:sync %from% %to%'

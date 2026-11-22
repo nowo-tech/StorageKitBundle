@@ -15,6 +15,7 @@ settings:
     flash:
         saved: 'The storage settings were saved.'
         changed: 'Someone else changed this bucket meanwhile. Review it and save again.'
+        stale: 'Someone else saved this bucket after you opened the page. Your changes were not saved: reload the page and apply them again.'
     section:
         config: 'Configuration'
     field:
@@ -152,6 +153,7 @@ move:
         objects: '%copied% copied, %skipped% already there'
     flash:
         saved: 'The new bucket was saved. Test it, then start copying.'
+        stale: 'Someone else saved the new bucket after you opened the page. Your changes were not saved: reload the page and apply them again.'
         unavailable: 'This action is not available now.'
         started: 'Copying started in the background.'
         started_cli: 'Copying is queued. Run: bin/console nowo:storage-kit:sync %from% %to%'

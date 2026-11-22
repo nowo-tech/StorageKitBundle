@@ -15,6 +15,7 @@ settings:
     flash:
         saved: 'De opslaginstellingen zijn opgeslagen.'
         changed: 'Iemand anders heeft deze bucket intussen gewijzigd. Controleer hem en sla opnieuw op.'
+        stale: 'Iemand anders heeft deze bucket opgeslagen nadat je de pagina opende. Je wijzigingen zijn niet opgeslagen: laad de pagina opnieuw en breng ze opnieuw aan.'
     section:
         config: 'Configuratie'
     field:
@@ -152,6 +153,7 @@ move:
         objects: '%copied% gekopieerd, %skipped% al aanwezig'
     flash:
         saved: 'De nieuwe bucket is opgeslagen. Test hem en start dan het kopiëren.'
+        stale: 'Iemand anders heeft de nieuwe bucket opgeslagen nadat je de pagina opende. Je wijzigingen zijn niet opgeslagen: laad de pagina opnieuw en breng ze opnieuw aan.'
         unavailable: 'Deze actie is nu niet beschikbaar.'
         started: 'Het kopiëren is op de achtergrond gestart.'
         started_cli: 'Het kopiëren staat in de wachtrij. Voer uit: bin/console nowo:storage-kit:sync %from% %to%'

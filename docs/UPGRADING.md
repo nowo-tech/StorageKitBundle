@@ -54,6 +54,35 @@ The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([To 2.0.0](#to-
 
 ## Unreleased
 
+From **2.0.1**: `composer update nowo-tech/storage-kit-bundle`, then add the new column **in the same deploy as the
+code** (the pages read and write `row_version`; without the column the Storage and Move pages fail).
+
+`storage_kit_profile` gets `row_version` (REQ-RUNTIME-003 rule 4: the bucket forms refuse a page that is no longer
+current instead of overwriting another admin's save). `php bin/console doctrine:migrations:diff` (or
+`doctrine:schema:update --dump-sql`) produces it; the SQL is the same on MySQL 8.4, MariaDB 11.4 and PostgreSQL 16,
+an instant, additive change (existing rows start at version 1):
+
+```sql
+ALTER TABLE storage_kit_profile ADD row_version INT DEFAULT 1 NOT NULL;
+```
+
+With `doctrine.table_prefix`, use your prefixed table name.
+
+What changes for you:
+
+- **Admins:** a save from a page opened before someone else saved the same bucket shows "Someone else saved this
+  bucket after you opened the page…" and writes nothing (409, `X-Error-Code: STORAGE_KIT_STALE_EDIT`). They reload
+  the page and apply their change again.
+- **Custom templates** (`web_ui.templates.settings` / `move`) that list the form fields one by one must also render
+  the hidden `rowVersion` field (`form_rest()` does); without it every save of an existing bucket is refused as stale.
+- **Your code** calling `StorageMove::saveTarget()` is unchanged: without the new fifth argument the save is not
+  checked, but it advances the version, so a Move page opened before is refused. Pass the version the user saw to
+  get the check (`StaleEditException` when it no longer matches). Direct ORM writes of your own to a
+  `StorageProfile` do not advance the version.
+- **The hidden token is `<row id>:<row version>`** (`StorageProfileType` options `row_id` + `row_version`), so a page
+  built for another bucket row (one replaced since) is refused. Code of yours reading the submitted token uses
+  `StorageProfileType::submittedRowVersion($form, $profile)`.
+
 ## To 2.0.1
 
 From **2.0.0**:

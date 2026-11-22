@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use Doctrine\ORM\Mapping as ORM;
 use InvalidArgumentException;
 use Nowo\DoctrineEncryptBundle\Configuration\Encrypted;
+use Nowo\StorageKitBundle\Concurrency\RowVersion;
 use Nowo\StorageKitBundle\Scope\ScopeResolverInterface;
 use Nowo\StorageKitBundle\Scope\StorageScope;
 use Nowo\StorageKitBundle\Storage\S3Settings;
@@ -116,6 +117,14 @@ class StorageProfile
 
     #[ORM\Column(name: 'updated_at')]
     private DateTimeImmutable $updatedAt;
+
+    /**
+     * 2.1 (REQ-RUNTIME-003 rule 4): the row version of the bucket form, advanced by one atomic SQL statement for every
+     * save of the connection fields ({@see RowVersion}). Never written by the ORM (not insertable, not updatable), so a
+     * flush can never move it backwards; the value here is the one loaded and may lag behind the database.
+     */
+    #[ORM\Column(name: 'row_version', insertable: false, updatable: false, options: ['default' => 1])]
+    private int $rowVersion = 1;
 
     /**
      * @param string|null $scope owner scope key (null = the instance)
@@ -478,5 +487,13 @@ class StorageProfile
     public function getUpdatedAt(): DateTimeImmutable
     {
         return $this->updatedAt;
+    }
+
+    /**
+     * 2.1: the row version as loaded (the bucket form reads the current one from the database, {@see RowVersion::read()}).
+     */
+    public function getRowVersion(): int
+    {
+        return $this->rowVersion;
     }
 }

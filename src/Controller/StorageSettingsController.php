@@ -7,6 +7,8 @@ namespace Nowo\StorageKitBundle\Controller;
 use Nowo\FormKitBundle\Form\CsrfOnlyFormFactory;
 use Nowo\StorageKitBundle\Audit\AuditRecorder;
 use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
+use Nowo\StorageKitBundle\Concurrency\RowVersion;
+use Nowo\StorageKitBundle\Concurrency\StaleEditException;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Form\StorageProfileType;
@@ -149,14 +151,22 @@ final class StorageSettingsController extends AbstractController
         };
         $profile = $managed !== null ? $this->resolver->activeOf(null) : $this->profiles->activeOf($scope);
         $profile ??= new StorageProfile($scope);
-        $form = $managed !== null ? null : $this->form($profile, $scope);
+        $form  = $managed !== null ? null : $this->form($profile, $scope);
+        $stale = false;
         if ($form instanceof FormInterface) {
             $form->handleRequest($request);
             if ($form->isSubmitted() && $form->isValid()) {
-                $saved = $this->save($form, $profile, $scope);
-                $this->addFlash($saved ? 'success' : 'error', $this->trans($saved ? 'settings.flash.saved' : 'settings.flash.changed'));
+                try {
+                    $saved = $this->save($form, $profile, $scope);
+                    $this->addFlash($saved ? 'success' : 'error', $this->trans($saved ? 'settings.flash.saved' : 'settings.flash.changed'));
 
-                return $this->redirectToRoute(...self::route($scope));
+                    return $this->redirectToRoute(...self::route($scope));
+                } catch (StaleEditException) {
+                    // 2.1 (REQ-RUNTIME-003 rule 4): someone saved this bucket after the page was opened. Nothing was
+                    // written (the profile is only changed after the version check); the form is shown again.
+                    $stale = true;
+                    $this->addFlash('error', $this->trans('settings.flash.stale'));
+                }
             }
         }
         $usage   = $profile->getId() === null ? ['files' => 0, 'bytes' => 0] : $this->files->usageOf($profile);
@@ -182,7 +192,14 @@ final class StorageSettingsController extends AbstractController
             'scope'       => $scope,
             'managed'     => $managed,
             'env_managed' => $managed === self::MANAGED_CONFIG,
-        ], new Response(status: $form?->isSubmitted() === true ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK));
+        ], new Response(status: match (true) {
+            $stale                         => Response::HTTP_CONFLICT,
+            $form?->isSubmitted() === true => Response::HTTP_UNPROCESSABLE_ENTITY,
+            default                        => Response::HTTP_OK,
+        }));
+        if ($stale) {
+            $response->headers->set('X-Error-Code', StaleEditException::ERROR_CODE);
+        }
 
         return $this->noStore($response);
     }
@@ -193,16 +210,26 @@ final class StorageSettingsController extends AbstractController
      * not edited. False (nothing written) when the owner changed since the page was read; the audit event is recorded
      * after the commit.
      *
+     * 2.1 (rule 4): an existing bucket is saved only while it still has the row version of the page (one atomic
+     * compare-and-set inside the unit, which also holds the row lock until the commit).
+     *
      * @param FormInterface<mixed> $form
+     *
+     * @throws StaleEditException when the bucket was saved by someone else since the page was opened (nothing written)
      */
     private function save(FormInterface $form, StorageProfile $profile, ?string $scope): bool
     {
+        $expected = StorageProfileType::submittedRowVersion($form, $profile);
         /** @var array{provider: string|null, enabled: bool|null, endpoint: string|null, public_endpoint: string|null, region: string|null, bucket: string|null, prefix: string|null, access_key: string|null, secret: string|null, path_style: bool|null} $data */
         $data = $form->getData();
         // @igor-ignore - The closure runs synchronously inside the unit of work; it is not stored on the service.
-        $changed = $this->entityManager->transactional(function () use ($data, $profile, $scope): ?array {
+        $changed = $this->entityManager->transactional(function () use ($data, $profile, $scope, $expected): ?array {
             if (!$this->profiles->isCurrent($profile, $scope, StorageProfile::STATE_ACTIVE)) {
                 return null;
+            }
+            $id = $profile->getId();
+            if ($id !== null && !RowVersion::advance($this->entityManager->connection(), $this->entityManager->table(StorageProfile::class), $id, $expected)) {
+                throw new StaleEditException($id, $expected);
             }
             $before = $this->snapshot($profile);
             $profile->configure(
@@ -300,6 +327,10 @@ final class StorageSettingsController extends AbstractController
             'csrf_token_id' => self::formTokenId($scope),
             'has_secret'    => $profile->hasSecret(),
             'restricted'    => $this->resolver->isRestricted($scope),
+            // 2.1: the row and its version, from the same load as the values (audit ZK-L1; none for a bucket not saved
+            // yet). The bundle's private manager is fresh for each request.
+            'row_id'      => $profile->getId(),
+            'row_version' => $profile->getId() === null ? null : $profile->getRowVersion(),
         ]);
     }
 
