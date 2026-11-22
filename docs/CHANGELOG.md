@@ -6,24 +6,25 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Fixed](#fixed)
 - [[2.0.0] - 2026-11-21](#200---2026-11-21)
   - [Removed](#removed)
   - [Changed](#changed)
   - [Security](#security)
 - [[1.8.1] - 2026-11-20](#181---2026-11-20)
-  - [Fixed](#fixed)
+  - [Fixed](#fixed-1)
 - [[1.8.0] - 2026-11-20](#180---2026-11-20)
   - [Added](#added)
   - [Deprecated](#deprecated)
   - [Changed](#changed-1)
 - [[1.7.1] - 2026-11-19](#171---2026-11-19)
-  - [Fixed](#fixed-1)
+  - [Fixed](#fixed-2)
 - [[1.7.0] - 2026-11-19](#170---2026-11-19)
   - [Added](#added-1)
-  - [Fixed](#fixed-2)
+  - [Fixed](#fixed-3)
   - [Changed](#changed-2)
 - [[1.6.1] - 2026-11-15](#161---2026-11-15)
-  - [Fixed](#fixed-3)
+  - [Fixed](#fixed-4)
   - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
   - [Added](#added-2)
@@ -36,10 +37,10 @@ All notable changes to this project are documented here. The format follows
   - [Tests](#tests-2)
 - [[1.5.2] - 2026-11-13](#152---2026-11-13)
   - [Security](#security-2)
-  - [Fixed](#fixed-4)
+  - [Fixed](#fixed-5)
   - [Tests](#tests-3)
 - [[1.5.1] - 2026-11-12](#151---2026-11-12)
-  - [Fixed](#fixed-5)
+  - [Fixed](#fixed-6)
   - [Tests](#tests-4)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
   - [Added](#added-4)
@@ -48,10 +49,10 @@ All notable changes to this project are documented here. The format follows
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Added](#added-5)
   - [Security](#security-3)
-  - [Fixed](#fixed-6)
+  - [Fixed](#fixed-7)
   - [Changed](#changed-6)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
-  - [Fixed](#fixed-7)
+  - [Fixed](#fixed-8)
   - [Added](#added-6)
   - [Changed](#changed-7)
   - [Deprecated](#deprecated-2)
@@ -62,12 +63,27 @@ All notable changes to this project are documented here. The format follows
 - [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-8)
   - [Changed](#changed-9)
-  - [Fixed](#fixed-8)
+  - [Fixed](#fixed-9)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
   - [Added](#added-9)
   - [Security](#security-5)
 
 ## [Unreleased]
+
+### Fixed
+
+- `Sync\StorageMove::saveTarget()` without its fourth argument (`$configure`) saved nothing for a saved target the
+  bundle loads again through its own manager (2.0): a target your manager loaded, or one the bundle loaded before a
+  unit-of-work boundary dropped the private manager (FrankenPHP worker mode included). The connection you set on it
+  was replaced by the stored row, yet the call returned `true` and audited `move_target_saved`. The connection set on
+  the target you pass (provider, enabled, endpoints, region, bucket, prefix, access key, path style and a new secret)
+  is now applied to the bundle's instance inside the same write unit under the owner lock; without a new secret the
+  stored one is kept. The Move page always passes `$configure` and was not affected (audit YH-1).
+- Docs after 2.0 (audit YH-2): USAGE and CONFIGURATION no longer describe the removed `ImageUploader::upload()` or the
+  1.x flushes of your default manager by the admin pages and commands; README lists `nowo-tech/transaction-doctrine`;
+  the `FileDeliveryPortsPass` docblock no longer calls the `FileDelivery` id deprecated or mentions `respond()`;
+  UPGRADING links and duplicated 1.8.0 / 1.8.1 headings fixed; `make test-with-db` runs the CI database files instead
+  of the removed host-mode runs.
 
 ## [2.0.0] - 2026-11-21
 

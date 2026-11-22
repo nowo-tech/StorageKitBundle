@@ -170,8 +170,8 @@ check-twig-extra:
 validate-translations: ensure-up
 	$(COMPOSE) exec -T $(SERVICE_PHP) php .scripts/validate-translations.php
 
-# REQ-TEST-005: the Integration suite on SQLite, then the lifecycle tests (tests/Integration/Lifecycle: purge, references, moves) on the MySQL 8.4
-# service of the root compose (`db` profile, data in tmpfs), like the "Lifecycle on …" CI jobs.
+# REQ-TEST-005: the Integration suite on SQLite, then the database files (lifecycle, concurrency, private / dedicated manager) on
+# the MySQL 8.4 service of the root compose (`db` profile, data in tmpfs), like the "Lifecycle on …" CI jobs.
 STORAGE_KIT_TEST_DATABASE_URL ?= mysql://root:ci-throwaway@db:3306/storagekit?serverVersion=8.4&charset=utf8mb4
 
 db-up:
@@ -179,10 +179,10 @@ db-up:
 
 test-with-db: ensure-up db-up
 	$(COMPOSE) exec -T $(SERVICE_PHP) vendor/bin/phpunit --testsuite Integration
-	$(COMPOSE) exec -T -e STORAGE_KIT_TEST_DATABASE_URL='$(STORAGE_KIT_TEST_DATABASE_URL)' $(SERVICE_PHP) vendor/bin/phpunit --no-coverage tests/Integration/Lifecycle
-	# 1.8: the same in host mode (the suites default to doctrine.private_entity_manager: true).
-	$(COMPOSE) exec -T -e STORAGE_KIT_TEST_HOST_EM=1 $(SERVICE_PHP) vendor/bin/phpunit --testsuite Integration
-	$(COMPOSE) exec -T -e STORAGE_KIT_TEST_HOST_EM=1 -e STORAGE_KIT_TEST_DATABASE_URL='$(STORAGE_KIT_TEST_DATABASE_URL)' $(SERVICE_PHP) vendor/bin/phpunit --no-coverage tests/Integration/Lifecycle
+	# The database files of the CI "Lifecycle on …" jobs (2.0: the private manager only; the 1.8 host-mode runs are gone).
+	@for path in tests/Integration/Lifecycle tests/Integration/Functional/ArchitectureBarTest.php tests/Integration/Concurrency tests/Integration/Functional/ConcurrentWritesTest.php tests/Integration/Persistence/PrivateEntityManagerKernelTest.php tests/Integration/Persistence/DedicatedEntityManagerKernelTest.php; do \
+		$(COMPOSE) exec -T -e STORAGE_KIT_TEST_DATABASE_URL='$(STORAGE_KIT_TEST_DATABASE_URL)' $(SERVICE_PHP) vendor/bin/phpunit --no-coverage $$path || exit 1; \
+	done
 
 test-coverage-with-db: ensure-up db-up
 	$(COMPOSE) exec -T -e STORAGE_KIT_TEST_DATABASE_URL='$(STORAGE_KIT_TEST_DATABASE_URL)' $(SERVICE_PHP) vendor/bin/phpunit tests/Integration/Lifecycle --coverage-text

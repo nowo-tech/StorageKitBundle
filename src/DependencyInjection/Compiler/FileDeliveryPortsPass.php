@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\DependencyInjection\Compiler;
 
 use LogicException;
 use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
+use Nowo\StorageKitBundle\Download\FileDeliveryResponder;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 
@@ -18,14 +19,14 @@ use function sprintf;
  * Checks the service behind the download port {@see FileDeliveryInterface} (1.5, REQ-ARCH-001 rule 3), once the
  * container knows its final class (after decoration, so a host decorator decides). Runs before the removing passes.
  *
- * - By default the port is the bundle's own delivery (`nowo_storage_kit.file_delivery`), the service the deprecated
- *   `FileDelivery` id also points at.
+ * - By default the port is the bundle's own delivery (`nowo_storage_kit.file_delivery`), the service the `FileDelivery`
+ *   class id also points at.
  * - The host's port wins: an alias of `FileDeliveryInterface` to its own service, or a decorator of
  *   `FileDeliveryInterface`, is what the download controller calls. It must implement the port, or the container build
  *   fails — a file is never served by a service that cannot serve it.
- * - A decorator of the deprecated `FileDelivery` id (a 1.4 decorator offering `respond()`) keeps decorating that id for
- *   the host code that calls it; the port and the download controller are not affected (in 1.4 the controller required
- *   the final `FileDelivery` class, so no decorator could run there).
+ * - A decorator of the `FileDelivery` class id decorates that id only, for the host code that calls it; the port and
+ *   the download controller are not affected. (2.0 removed `FileDelivery::respond()`, deprecated since 1.5: a decorator
+ *   calls `deliver()` and builds the response with {@see FileDeliveryResponder}.)
  *
  * A service whose class cannot be known before the container is compiled (factory, synthetic, unknown class) is left
  * to the controller's typed constructor.

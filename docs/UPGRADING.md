@@ -12,10 +12,8 @@
   - [Private manager only](#private-manager-only)
   - [1.x support](#1x-support)
 - [To 1.8.1](#to-181)
-- [To 1.8.1](#to-181-1)
   - [Missing foreign keys on MySQL / MariaDB (1.5.2 to 1.8.0)](#missing-foreign-keys-on-mysql--mariadb-152-to-180)
 - [To 1.8.0](#to-180)
-- [To 1.8.0](#to-180-1)
   - [The private entity manager notice](#the-private-entity-manager-notice)
   - [Reading the host-flush probe](#reading-the-host-flush-probe)
   - [Opting in: what changes](#opting-in-what-changes)
@@ -43,7 +41,7 @@
 
 ## Done in 2.0
 
-The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([Unreleased](#unreleased)):
+The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([To 2.0.0](#to-200)):
 
 1. **`nowo-tech/instance-settings-bundle` moved from `require` to `suggest`** (announced in 1.3.0; REQ-ARCH-001
    rule 8).
@@ -54,6 +52,12 @@ The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([Unreleased](#u
 4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0).
 
 ## Unreleased
+
+From **2.0.0**: `composer update nowo-tech/storage-kit-bundle`. No configuration or code change.
+
+If your code calls `StorageMove::saveTarget($target, $actor, $fields)` without the fourth argument on a target your
+own manager loaded (or one kept across requests in a worker), 2.0.0 saved the stored row unchanged and still returned
+`true`: save that target again after the update. The Move page was not affected.
 
 ## To 2.0.0
 
@@ -225,14 +229,6 @@ From **1.8.0**:
 composer update nowo-tech/storage-kit-bundle
 ```
 
-## To 1.8.1
-
-From **1.8.0**:
-
-```bash
-composer update nowo-tech/storage-kit-bundle
-```
-
 ### Missing foreign keys on MySQL / MariaDB (1.5.2 to 1.8.0)
 
 Only MySQL / MariaDB databases whose bundle tables were created or migrated with doctrine/orm 3.7.0 to 3.8.0 and
@@ -274,15 +270,7 @@ ALTER TABLE storage_kit_file_reference ADD CONSTRAINT FK_AAE94DBE93CB796C FOREIG
 
 ## To 1.8.0
 
-From **1.7.1**:
-
-```bash
-composer update nowo-tech/storage-kit-bundle
-```
-
-## To 1.8.0
-
-From **1.7.x**:
+From **1.7.x** (1.8.0 requires `nowo-tech/transaction-doctrine` ^1.9.1, so update it with the bundle):
 
 ```bash
 composer update nowo-tech/storage-kit-bundle nowo-tech/transaction-doctrine
@@ -512,7 +500,7 @@ From 1.4.0 to 1.6.1 two first uploads at the same time (or the first selection o
 section racing an upload) could create two active instance rows that read the `storage` section; config profiles
 could get two rows the same way. 1.7 creates these rows once, under a lock, but does not repair existing duplicates.
 On MySQL / MariaDB 1.7.0 could still create one when the first use ran inside a transaction you opened (fixed in
-1.7.1, [Unreleased](#unreleased)). Check once after upgrading (`<prefix>` is `doctrine.table_prefix`, empty by default):
+1.7.1, [To 1.7.1](#to-171)). Check once after upgrading (`<prefix>` is `doctrine.table_prefix`, empty by default):
 
 ```sql
 -- More than one row: the instance has duplicate active rows
