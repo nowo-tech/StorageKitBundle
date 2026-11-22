@@ -1,6 +1,6 @@
 # Code inventory — 001-baseline
 
-**Last audited**: 2026-11-20 (v1.7.1)
+**Last audited**: 2026-11-22 (v2.0.1)
 **Scope**: every production file under `src/` (`find src -type f | wc -l`). Tests, demo and generated caches are out of scope.
 
 ## Bundle / DI
@@ -25,6 +25,7 @@
 | `src/Concurrency/StorageConflicts.php` | Bundle / DI | FR-RUN-002 |
 | `src/EventListener/StorageKitConflictListener.php` | Bundle / DI | FR-RUN-002 |
 | `src/Doctrine/OwnerLock.php` | Bundle / DI | FR-RUN-002 |
+| `src/DependencyInjection/Compiler/StoragePrivateEntityManagerPass.php` | Bundle / DI | FR-DI-011 |
 
 ## Storage
 
@@ -221,7 +222,7 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 
 | Category | Files |
 | --- | --- |
-| Bundle / DI | 18 |
+| Bundle / DI | 19 |
 | Storage | 12 |
 | SSRF | 2 |
 | Profiles | 5 |
@@ -236,4 +237,4 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 | Admin UI and access | 20 |
 | Translations | 7 |
 | Removal port and default remover | 3 |
-| **Total production sources** | **137 / 137** (`find src -type f \| wc -l` = 137) |
+| **Total production sources** | **138 / 138** (`find src -type f \| wc -l` = 138) |
