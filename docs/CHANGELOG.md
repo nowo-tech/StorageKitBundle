@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.1.0] - 2026-11-22](#210---2026-11-22)
   - [Added](#added)
   - [Changed](#changed)
   - [Fixed](#fixed)
@@ -74,12 +75,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-22
+
 ### Added
 
 - **Row versions on the bucket forms (REQ-RUNTIME-003 rule 4, lost update).** The Storage page and the Move page's
   new-bucket form were last-write-wins: two admins editing the same bucket both saved, and the second save silently
   replaced the first. `storage_kit_profile` gets an additive `row_version INT NOT NULL DEFAULT 1` column (migration in
-  [UPGRADING](UPGRADING.md#unreleased)). Each form carries the row and the version it was built from in a hidden
+  [UPGRADING](UPGRADING.md#to-210)). Each form carries the row and the version it was built from in a hidden
   `rowVersion` field (`<row id>:<row version>`, from the same load as the values); the save advances the version with
   one atomic compare-and-set inside its existing write unit (`Concurrency\RowVersion`). A page of another bucket is
   stale too: a page opened before its bucket was replaced (a target discarded and saved again, or a Move switch) never

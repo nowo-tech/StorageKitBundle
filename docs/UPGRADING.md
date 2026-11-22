@@ -4,6 +4,7 @@
 
 - [Done in 2.0](#done-in-20)
 - [Unreleased](#unreleased)
+- [To 2.1.0](#to-210)
 - [To 2.0.1](#to-201)
 - [To 2.0.0](#to-200)
   - [Before you upgrade](#before-you-upgrade)
@@ -53,6 +54,14 @@ The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([To 2.0.0](#to-
 4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0).
 
 ## Unreleased
+
+## To 2.1.0
+
+From **2.0.1**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
 
 From **2.0.1**: `composer update nowo-tech/storage-kit-bundle`, then add the new column **in the same deploy as the
 code** (the pages read and write `row_version`; without the column the Storage and Move pages fail).
