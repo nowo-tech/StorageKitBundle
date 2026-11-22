@@ -4,6 +4,7 @@
 
 - [Done in 2.0](#done-in-20)
 - [Unreleased](#unreleased)
+- [To 2.0.1](#to-201)
 - [To 2.0.0](#to-200)
   - [Before you upgrade](#before-you-upgrade)
   - [The private entity manager is the only mode](#the-private-entity-manager-is-the-only-mode)
@@ -52,6 +53,14 @@ The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([To 2.0.0](#to-
 4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0).
 
 ## Unreleased
+
+## To 2.0.1
+
+From **2.0.0**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
 
 From **2.0.0**: `composer update nowo-tech/storage-kit-bundle`. No configuration or code change.
 
