@@ -6,70 +6,93 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
-- [[2.0.1] - 2026-11-22](#201---2026-11-22)
+  - [Added](#added)
+  - [Changed](#changed)
   - [Fixed](#fixed)
+- [[2.0.1] - 2026-11-22](#201---2026-11-22)
+  - [Fixed](#fixed-1)
 - [[2.0.0] - 2026-11-21](#200---2026-11-21)
   - [Removed](#removed)
-  - [Changed](#changed)
+  - [Changed](#changed-1)
   - [Security](#security)
 - [[1.8.1] - 2026-11-20](#181---2026-11-20)
-  - [Fixed](#fixed-1)
-- [[1.8.0] - 2026-11-20](#180---2026-11-20)
-  - [Added](#added)
-  - [Deprecated](#deprecated)
-  - [Changed](#changed-1)
-- [[1.7.1] - 2026-11-19](#171---2026-11-19)
   - [Fixed](#fixed-2)
-- [[1.7.0] - 2026-11-19](#170---2026-11-19)
+- [[1.8.0] - 2026-11-20](#180---2026-11-20)
   - [Added](#added-1)
-  - [Fixed](#fixed-3)
+  - [Deprecated](#deprecated)
   - [Changed](#changed-2)
-- [[1.6.1] - 2026-11-15](#161---2026-11-15)
+- [[1.7.1] - 2026-11-19](#171---2026-11-19)
+  - [Fixed](#fixed-3)
+- [[1.7.0] - 2026-11-19](#170---2026-11-19)
+  - [Added](#added-2)
   - [Fixed](#fixed-4)
+  - [Changed](#changed-3)
+- [[1.6.1] - 2026-11-15](#161---2026-11-15)
+  - [Fixed](#fixed-5)
   - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
-  - [Added](#added-2)
-  - [Changed](#changed-3)
+  - [Added](#added-3)
+  - [Changed](#changed-4)
   - [Tests](#tests-1)
 - [[1.5.3] - 2026-11-13](#153---2026-11-13)
   - [Security](#security-1)
-  - [Added](#added-3)
-  - [Changed](#changed-4)
+  - [Added](#added-4)
+  - [Changed](#changed-5)
   - [Tests](#tests-2)
 - [[1.5.2] - 2026-11-13](#152---2026-11-13)
   - [Security](#security-2)
-  - [Fixed](#fixed-5)
+  - [Fixed](#fixed-6)
   - [Tests](#tests-3)
 - [[1.5.1] - 2026-11-12](#151---2026-11-12)
-  - [Fixed](#fixed-6)
+  - [Fixed](#fixed-7)
   - [Tests](#tests-4)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
-  - [Added](#added-4)
-  - [Changed](#changed-5)
+  - [Added](#added-5)
+  - [Changed](#changed-6)
   - [Deprecated](#deprecated-1)
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
-  - [Added](#added-5)
-  - [Security](#security-3)
-  - [Fixed](#fixed-7)
-  - [Changed](#changed-6)
-- [[1.3.0] - 2026-11-11](#130---2026-11-11)
-  - [Fixed](#fixed-8)
   - [Added](#added-6)
+  - [Security](#security-3)
+  - [Fixed](#fixed-8)
   - [Changed](#changed-7)
+- [[1.3.0] - 2026-11-11](#130---2026-11-11)
+  - [Fixed](#fixed-9)
+  - [Added](#added-7)
+  - [Changed](#changed-8)
   - [Deprecated](#deprecated-2)
 - [[1.2.0] - 2026-11-10](#120---2026-11-10)
   - [Security](#security-4)
-  - [Added](#added-7)
-  - [Changed](#changed-8)
-- [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-8)
   - [Changed](#changed-9)
-  - [Fixed](#fixed-9)
-- [[1.0.0] - 2026-11-03](#100---2026-11-03)
+- [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-9)
+  - [Changed](#changed-10)
+  - [Fixed](#fixed-10)
+- [[1.0.0] - 2026-11-03](#100---2026-11-03)
+  - [Added](#added-10)
   - [Security](#security-5)
 
 ## [Unreleased]
+
+### Added
+
+- **Row versions on the bucket forms (REQ-RUNTIME-003 rule 4, lost update).** The Storage page and the Move page's
+  new-bucket form were last-write-wins: two admins editing the same bucket both saved, and the second save silently
+  replaced the first. `storage_kit_profile` gets an additive `row_version INT NOT NULL DEFAULT 1` column (migration in
+  [UPGRADING](UPGRADING.md#unreleased)). Each form carries the version it was built from in a hidden `rowVersion`
+  field (read from the database, not the identity map); the save advances it with one atomic compare-and-set inside
+  its existing write unit (`Concurrency\RowVersion`). A page that is no longer current writes nothing and answers 409
+  with the form, a translated message (7 locales) and `X-Error-Code: STORAGE_KIT_STALE_EDIT` (a domain answer: no
+  `X-Conflict-Code`, no `Retry-After`). Lock conflicts keep `CONFLICT_001` / `CONFLICT_002`.
+- `StorageMove::saveTarget()` takes an optional fifth argument `?int $expectedVersion` (throws
+  `Concurrency\StaleEditException` when it no longer matches); without it the version is advanced unchecked, so a
+  Move page opened before your save is refused. `StorageMove::rowVersion()` reads the current version.
+  `StorageProfileType` takes a `row_version` option (default null: no field) and `StorageProfile::getRowVersion()`.
+
+### Changed
+
+- A first save of a bucket whose page did not show it (another admin created the owner's bucket meanwhile) now answers
+  the stale 409 instead of overwriting that bucket.
 
 ### Fixed
 

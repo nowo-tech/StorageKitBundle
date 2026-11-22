@@ -23,9 +23,9 @@ MySQL / MariaDB `GET_LOCK()`, PostgreSQL `pg_advisory_xact_lock()` (both wait at
 
 | Path | Transaction | Control (rule 4) | Conflict answer |
 | --- | --- | --- | --- |
-| Storage page: save the bucket (`StorageSettingsController`) | Unit | Owner lock; the owner's active profile is read again inside the unit (a first save racing another, or a profile switched away meanwhile, writes nothing and shows "Someone else changed this bucket meanwhile") | 409 page (HttpException) |
+| Storage page: save the bucket (`StorageSettingsController`) | Unit | Owner lock; the owner's active profile is read again inside the unit (a first save racing another, or a profile switched away meanwhile, writes nothing and shows "Someone else changed this bucket meanwhile"); 2.1: row version of the page, compare-and-set inside the unit (`UPDATE … SET row_version = row_version + 1 WHERE id = ? AND row_version = ?`, which also holds the row lock until the commit), so a page opened before another save writes nothing | Lock conflict: 409 page (HttpException). Stale page: 409 form, `X-Error-Code: STORAGE_KIT_STALE_EDIT` |
 | Storage / Move page: *Test connection* (`ProfileTester`) | One DBAL `UPDATE` of the test fields (no flush) | Last test wins (a probe result, not user data) | 409 page |
-| Move page: save the new bucket (`StorageMove::saveTarget`) | Unit | Owner lock; the owner's target read again inside the unit (at most one target) | 409 page |
+| Move page: save the new bucket (`StorageMove::saveTarget`) | Unit | Owner lock; the owner's target read again inside the unit (at most one target); 2.1: row version of the page, compare-and-set inside the unit (your code without a version: advanced unchecked, so a page opened before is stale) | Lock conflict: 409 page. Stale page: 409 form, `X-Error-Code: STORAGE_KIT_STALE_EDIT`; your code: `StaleEditException` |
 | Move page: start / resume copying (`StorageMove::start`) | Unit; the Messenger message is dispatched after the commit | Owner lock; both profiles and the pair's sync read again inside the unit (never two open syncs, never dispatched twice) | 409 page |
 | Move page: stop copying (`StorageMove::cancel`) | One guarded `UPDATE` | Compare-and-set on `status` (only from queued / running: a runner that completed or failed meanwhile is not overwritten) | 409 page |
 | Move page: switch (`StorageMove::switch`) | Unit (the `storage` Instance Settings write, the file re-pointing `UPDATE` and both profiles) | Owner lock; the sync, the files uploaded since it and both profiles read again inside the unit | 409 page |
@@ -53,6 +53,12 @@ A lock conflict, deadlock, lock wait timeout or serialization failure (MySQL / M
 | `CONFLICT_002` | Part of the request was committed (transaction-doctrine's request commit mark, or the bundle's own mark on its connection since 1.7.1; a Messenger handler that already completed; a lost savepoint): read again, do not repeat | 409 (or 503) | `X-Conflict-Code: CONFLICT_002`, no `Retry-After` |
 
 - The Storage and Move pages become an `HttpException` with that status and those headers, rendered by your error page.
+- **A stale bucket form is not a lock conflict** (2.1, rule 4): someone saved the bucket after the page was opened.
+  Nothing is written, repeating the request can never succeed, so it is a domain answer: 409, the form rendered again
+  with "Someone else saved this bucket after you opened the page…", `X-Error-Code: STORAGE_KIT_STALE_EDIT`, no
+  `X-Conflict-Code` and no `Retry-After`. The admin reloads the page. A missing or malformed `rowVersion` counts as
+  stale. The version is read from the database for each page (never from the identity map) and is never written by
+  the ORM (`insertable: false, updatable: false`), so it cannot go backwards.
 - The upload endpoint keeps its JSON error shape and adds the code: `{"error": "conflict", "message": "…", "code": "CONFLICT_001"}`.
 - The download endpoint answers `text/plain`.
 - Not conflicts, never mapped: unique (and other constraint) violations and lost connections. They stay real errors.
@@ -112,14 +118,20 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
   your transaction keeping your write and your `SET LOCAL lock_timeout`.
 - `tests/Integration/Functional/ConcurrentWritesTest.php`: the same re-checks on one connection (SQLite and the three
   databases) with a statement hook as the other writer, plus a deadlock on the settings page and on the upload insert.
+- `tests/Integration/Concurrency/RowVersionRaceTest.php` (2.1): two editors with the same version on two
+  connections (one wins, the other gets the stale 409, the stored row is the winner's); a save waiting on the row lock
+  of an open save answers `CONFLICT_001`, then its retry is stale; and (MySQL / MariaDB, audit ZH-M1) a real deadlock
+  inside the save's flush, against a second process: the deadlock destroys the ORM's savepoint, the runner repairs
+  the nesting level, the page answers 409 `CONFLICT_001` (never a 500), the connection is back at level 0 and the
+  next save works.
+- `tests/Integration/Functional/StaleEditTest.php` (2.1, SQLite and the database jobs): stale, missing and forged
+  versions on the Storage and Move pages, a first save, a bucket created meanwhile, an unchecked save from your code.
 - `tests/Unit/Concurrency`, `tests/Unit/EventListener/StorageKitConflictListenerTest.php`,
   `tests/Unit/Doctrine/OwnerLockTest.php`: the mapping (001 / 002, unique violations and lost connections excluded) and
   the lock per platform.
 
 ## Residual risks
 
-- **Stale form, last writer wins.** Two admins editing the same existing bucket both save; the second save overwrites
-  the first (both are audited with the changed field names). The owner lock prevents duplicates, not this.
 - **Owner lock inside your transaction.** If you call a Move / Storage write inside a transaction you opened, the
   MySQL / MariaDB lock is released when the bundle's unit ends, before your commit (`GET_LOCK()` is session-scoped).
   The Storage / Move writes are the bundle's own pages, which open no transaction around them. The first-use rows,
