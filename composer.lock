@@ -1539,16 +1539,16 @@
         },
         {
             "name": "nowo-tech/outbound-url-guard-bundle",
-            "version": "v1.3.0",
+            "version": "v1.5.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/OutboundUrlGuard.git",
-                "reference": "e4be2bdc46a4804ba26a6beb7e884ee776e4cc94"
+                "reference": "46394f7e6ebfa710e7814b357e8f3cf9b4c09f1e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/OutboundUrlGuard/zipball/e4be2bdc46a4804ba26a6beb7e884ee776e4cc94",
-                "reference": "e4be2bdc46a4804ba26a6beb7e884ee776e4cc94",
+                "url": "https://api.github.com/repos/nowo-tech/OutboundUrlGuard/zipball/46394f7e6ebfa710e7814b357e8f3cf9b4c09f1e",
+                "reference": "46394f7e6ebfa710e7814b357e8f3cf9b4c09f1e",
                 "shasum": ""
             },
             "require": {
@@ -1626,7 +1626,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-26T16:56:09+00:00"
+            "time": "2026-11-10T08:08:32+00:00"
         },
         {
             "name": "nowo-tech/transaction-contract",
