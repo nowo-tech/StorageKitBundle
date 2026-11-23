@@ -82,7 +82,7 @@
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.0",
-        "igor-php/igor-php": "^0.10.1",
+        "igor-php/igor-php": "^0.11.0",
         "league/flysystem-memory": "^3.29",
         "nowo-tech/http-hardening-bundle": "^1.8",
         "nowo-tech/instance-settings-bundle": "^1.3.1",
