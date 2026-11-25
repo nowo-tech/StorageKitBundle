@@ -1,6 +1,6 @@
 # Code inventory — 001-baseline
 
-**Last audited**: 2026-11-22 (v2.0.1 + Unreleased 2.1 row versions)
+**Last audited**: 2026-11-27 (v2.1.0; 140/140 re-verified)
 **Scope**: every production file under `src/` (`find src -type f | wc -l`). Tests, demo and generated caches are out of scope.
 
 ## Bundle / DI
@@ -215,10 +215,10 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 | --- | --- | --- |
 | `src/Context/SquareImageContextInterface.php` | Contexts and scopes: A file context that holds square images only (1.6: profile pictures, logos). | FR-CTX-001 |
 | `src/Lifecycle/FileRemover.php` | Default FileRemoverInterface (1.6). | FR-PURGE-001 |
-| `src/Lifecycle/FileRemoverInterface.php` | Removal port (1.6, public API, SemVer): drops one stored file of a known context without waiting for the purge — a re... | FR-PURGE-001 |
+| `src/Lifecycle/FileRemoverInterface.php` | Public removal port (1.6): `remove()` deletes one stored file's bucket objects, references and row (after the caller's own commit; falls back to the purge when the bucket refuses) and `expire()` only drops the references and marks the file an expired orphan for the next purge (no bucket call, safe in a GDPR erasure). The file is matched by public id AND context, byte for byte (REQ-SEC-006); both return a `RemovedFile` or null and audit after the commit. | FR-PURGE-001 |
 | `src/Lifecycle/RemovedFile.php` | What FileRemoverInterface removed or expired (1.6). | FR-PURGE-001 |
-| `src/Upload/SquareImageProcessor.php` | Upload: Square image checks (GD, 1.6) for profile pictures and logos: accepts PNG, JPEG and still WebP by their content — nev... | FR-UP-003 |
-| `src/Upload/SquareImageUploaderInterface.php` | Upload: Port of the square image upload (1.6, public API, SemVer): profile pictures, logos and any other image shown as a squ... | FR-UP-003 |
+| `src/Upload/SquareImageProcessor.php` | Square image checks with GD (1.6) for profile pictures and logos: accepts PNG, JPEG and still WebP by content only (never name or declared type), refuses beyond `upload.square.max_bytes` and `upload.max_pixels` (read from the header, no decompression bomb) or when the decoded image would not fit in the remaining memory, then re-encodes a centred square as WebP with `preview` and `thumb` squares | FR-UP-003 |
+| `src/Upload/SquareImageUploaderInterface.php` | Public port of the square image upload (1.6), aliased to `ImageUploader`: `uploadSquareImage()` has the same flow and guarantees as `uploadImage()` (the context decides who may write, DBAL insert, no entity manager flushed, audit after the commit) with `SquareImageProcessor`'s checks; rethrows retryable / transient / lost-savepoint failures | FR-UP-003 |
 
 ## Coverage summary
 
