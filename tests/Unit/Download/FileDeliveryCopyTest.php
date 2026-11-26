@@ -20,6 +20,7 @@ use RuntimeException;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
+use function fclose;
 use function implode;
 use function iterator_to_array;
 use function str_repeat;
@@ -109,5 +110,46 @@ final class FileDeliveryCopyTest extends TestCase
 
         $chunks = iterator_to_array($connection->readRange('k', StorageConnection::CHUNK + 10), false);
         self::assertSame([StorageConnection::CHUNK, 11], [strlen($chunks[0]), strlen($chunks[1])]);
+    }
+
+    public function testARangeAsksTheBucketForThatPartAndRefusesABucketThatIgnoresIt(): void
+    {
+        $requests = [];
+        $http     = new MockHttpClient(static function (string $method, string $url, array $options) use (&$requests): MockResponse {
+            $range      = $options['normalized_headers']['range'] ?? [];
+            $requests[] = $range;
+            if ($range === ['Range: bytes=5-9']) {
+                return new MockResponse('fghij', ['http_code' => 206, 'response_headers' => ['Content-Range' => 'bytes 5-9/20']]);
+            }
+
+            // A bucket that ignores the range sends the object from its first byte.
+            return new MockResponse('abcdefghijklmnopqrst', ['http_code' => 200]);
+        });
+        $settings   = new S3Settings('files', 'test-key', 'test-secret-not-real', endpoint: 'https://93.184.216.34', prefix: 'app', restricted: true);
+        $connection = (new S3StorageConnectionFactory(new EndpointGuard([], false, false, new FakeDns()), $http))->connect($settings);
+
+        self::assertSame('fghij', implode('', iterator_to_array($connection->readRange('k', 5, 5, false), false)));
+        try {
+            iterator_to_array($connection->readRange('k', 5, 6, false), false);
+            self::fail('a later part was served from the first byte');
+        } catch (RuntimeException $e) {
+            self::assertStringContainsString('did not honour the byte range', $e->getMessage());
+        }
+        self::assertSame([['Range: bytes=5-9'], ['Range: bytes=6-10']], $requests);
+        self::assertSame([], iterator_to_array($connection->readRange('k', 5, -1)));
+    }
+
+    public function testWithoutAnS3ClientAPartIsReadFromItsOffsetToItsLastByte(): void
+    {
+        $filesystem = new Filesystem(new InMemoryFilesystemAdapter());
+        $filesystem->write('k', str_repeat('a', StorageConnection::CHUNK + 5) . 'XYZ' . str_repeat('b', 100));
+        $settings   = new S3Settings('files', 'test-key', 'test-secret-not-real');
+        $connection = new StorageConnection($filesystem, new FakePresigner($settings), $settings);
+
+        self::assertSame('XYZ', implode('', iterator_to_array($connection->readRange('k', 3, StorageConnection::CHUNK + 5, false), false)));
+        self::assertSame('XYZb', implode('', iterator_to_array($connection->readRange('k', 3, StorageConnection::CHUNK + 5), false)), 'a whole read looks one byte further');
+        $stream = $connection->readStream('k');
+        self::assertIsResource($stream);
+        fclose($stream);
     }
 }

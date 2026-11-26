@@ -45,6 +45,11 @@ worker. See [docs/FRANKENPHP-WORKER-AUDIT.md](docs/FRANKENPHP-WORKER-AUDIT.md).
   64 px by default), PNG / JPEG / still WebP by content, 2 MiB and pixel caps before decoding, re-encoded (no
   metadata, no polyglot payload; needs PHP GD with WebP); `FileRemoverInterface` drops a replaced picture at once or
   expires it (no longer served) for the next purge.
+- **Generic files (2.2)** — `FileUploaderInterface`: any allow-listed type (PDF, office, audio, video…) stored as
+  uploaded into contexts that accept it (`GenericFileContextInterface`: exact type list, size limit), streamed and
+  hashed in chunks; generated `thumb` / `preview` variants (`FileVariantWriterInterface`), the GD pipeline as a port
+  (`ImageThumbnailerInterface`), a bounded server-side reader (`FileReaderInterface`) and context-bound downloads with
+  `Range` (`206`) for host routes (`FileRangeDeliveryInterface`); active content is never served as itself.
 - **Host-decided access** — `FileContextInterface` says who may write in a context (and which scope / owner pays) and
   who may read it, batched per context type.
 - **Downloads** — 404 for missing and forbidden alike; streamed with `nosniff`, a sandbox CSP and `attachment`, or `302`

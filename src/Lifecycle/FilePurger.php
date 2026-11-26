@@ -43,7 +43,8 @@ use function max;
  * 2. files whose context no longer exists lose their references;
  * 3. files no text points at become orphans (`orphaned_since` = now; an orphan keeps its first date);
  * 4. orphans older than the retention are deleted: their objects from their own profile's bucket, then the row. A
- *    bucket that refuses keeps the row for the next run. A file a text points at again is never deleted: each batch
+ *    bucket that refuses keeps the row for the next run (2.2: expired, so it is no longer served, and its keys read
+ *    under a row lock first, {@see FileClaims}). A file a text points at again is never deleted: each batch
  *    re-checks that no reference appeared in between.
  *
  * Every step is bounded: at most `purge.max_batches` batches per step and run, so a huge backlog is spread over runs.
@@ -283,27 +284,32 @@ final readonly class FilePurger
                 ->getQuery()
                 ->getResult();
             foreach ($batch as $file) {
-                if ($this->deleteObjects($file)) {
-                    // @igor-ignore - Entity manager of the current unit of work (reset between requests by Doctrine).
-                    $manager->remove($file);
+                // 2.2 (audit ZCK-SK-M1): lock, re-check and expire the row, and read its object keys under that lock,
+                // so a variant written meanwhile is in the list or refused; then the bucket calls, with no lock held.
+                $keys = FileClaims::claim($this->entityManager, (int) $file->getId(), $cutoff);
+                if ($keys === null) {
+                    continue;
+                }
+                if ($this->deleteObjects($file, $keys)) {
+                    FileClaims::delete($this->entityManager, (int) $file->getId());
                     ++$purged;
                 } else {
                     ++$failed;
                 }
             }
-            $this->entityManager->flush($manager);
-            // Kept files leave the unit of work (a long purge does not grow it); removed ones already have.
+            // The loaded files leave the unit of work (a long purge does not grow it).
             foreach ($batch as $file) {
-                if ($manager->contains($file)) {
-                    $manager->detach($file);
-                }
+                $manager->detach($file);
             }
         }
 
         return [$purged, $failed];
     }
 
-    private function deleteObjects(StoredFile $file): bool
+    /**
+     * @param list<string> $keys
+     */
+    private function deleteObjects(StoredFile $file, array $keys): bool
     {
         $settings = $this->profiles->settingsOf($file->getProfile());
         if (!$settings instanceof S3Settings) {
@@ -313,7 +319,7 @@ final readonly class FilePurger
         }
         try {
             $connection = $this->storage->connection($settings);
-            foreach ($file->objectKeys() as $key) {
+            foreach ($keys as $key) {
                 $connection->delete($key);
             }
 

@@ -53,6 +53,8 @@ nowo_storage_kit:
         max_bytes: 10485760      # 10 MiB, 1024 – 50 MiB
         max_pixels: 24000000     # 1 – 100 000 000
         variants: { preview: 1600, thumb: 400 }
+        files:                   # 2.2: FileUploaderInterface (generic files, GenericFileContextInterface contexts)
+            max_bytes: 104857600 # 100 MiB ceiling, 1024 B – 1 GiB; a context's maxBytes() is capped by it
         square:                  # 1.6: SquareImageUploaderInterface (profile pictures, logos)
             max_bytes: 2097152   # 2 MiB, 1024 – 50 MiB
             max_pixels: 16000000 # 1 – 100 000 000 (the smaller of this and upload.max_pixels applies)
@@ -195,6 +197,7 @@ Upload and download endpoints: `POST <path_prefix>/upload/{type}/{id}` and `GET 
 | `max_bytes` | `10485760` | Largest upload in bytes (1024 – 52428800). Keep PHP `upload_max_filesize` / `post_max_size` above it. |
 | `max_pixels` | `24000000` | Largest image (width × height), read from the header before decoding (1 – 100 000 000). Every JPEG is also budgeted about 6 bytes per pixel of (progressive) decoder memory: see [SECURITY](SECURITY.md#size-pixel-and-memory-limits). |
 | `variants` | `{preview: 1600, thumb: 400}` | Longest side per variant (16–8192 px). Names `preview` and `thumb` only; a variant is made only for larger images. |
+| `files.max_bytes` | `104857600` | 2.2: ceiling of a generic file (`FileUploaderInterface::uploadFile()`, 1024 – 1073741824): a context's `maxBytes()` above it is cut to it. Also the largest source `ImageThumbnailerInterface` reads. Keep PHP `upload_max_filesize` / `post_max_size` and the web server's request body limit (FrankenPHP / Caddy `request_body max_size`) at or above the largest limit you allow. |
 | `square.max_bytes` | `2097152` | 1.6: largest square image upload (`SquareImageUploaderInterface`), checked before anything is parsed (1024 – 52428800). |
 | `square.max_pixels` | `16000000` | 1.6: largest square image (width × height), read from the header before decoding (1 – 100 000 000); the smaller of this and `max_pixels` applies. The browser crop usually sends ≤ 512 px. |
 | `square.size` | `256` | 1.6: side of the stored WebP square (64 – 1024 px); `preview` is half of it, `thumb` a quarter. Square images need PHP GD with WebP (else uploads are refused with `off`). |
@@ -431,7 +434,9 @@ streamed downloads.
   `Reference\FileReferences`, `Context\FileContexts`, `Lifecycle\FilePurger`, `Sync\StorageSyncer`, `Sync\StorageMove`,
   `PersonalData\StoredFilesPersonalData`, `Http\StorageCspSources`, `Security\EndpointGuard`, `Security\AccessGuard`,
   `Audit\AuditRecorder`, the three repositories and, when the section is registered, `Settings\InstanceStorageSettings`
-  and `Settings\StorageSettingsSection`.
+  and `Settings\StorageSettingsSection`. 2.2: `Upload\FileUploader` (aliases `FileUploaderInterface`,
+  `FileVariantWriterInterface`), `Upload\GdImageThumbnailer` (`ImageThumbnailerInterface`), `Download\FileReader`
+  (`FileReaderInterface`) and the alias `Download\FileRangeDeliveryInterface` of the bundle's delivery.
 - `nowo_storage_kit.connection_factory` (alias of `S3StorageConnectionFactory`, interface
   `StorageConnectionFactoryInterface`): replace it in tests with an in-memory factory.
 - Autoconfigured tags: `nowo_storage_kit.file_context` (`FileContextInterface`) and

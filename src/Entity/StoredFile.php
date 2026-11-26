@@ -7,6 +7,9 @@ namespace Nowo\StorageKitBundle\Entity;
 use DateTimeImmutable;
 use Doctrine\ORM\Mapping as ORM;
 use Nowo\StorageKitBundle\PersonalData\UploaderKeyResolverInterface;
+use Nowo\StorageKitBundle\Upload\FileUploaderInterface;
+use Nowo\StorageKitBundle\Upload\FileVariantWriterInterface;
+use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Symfony\Component\Uid\Uuid;
 
 use function array_map;
@@ -49,6 +52,12 @@ class StoredFile
 
     /** Name kept after a personal-data erasure. */
     public const ANONYMOUS_NAME = 'image';
+
+    /** 2.2: name of a generic file uploaded without a usable name. */
+    public const FILE_NAME = 'file';
+
+    /** 2.2: longest stored media type (`mime_type`, 32 characters before 2.2). */
+    public const MIME_TYPE_LENGTH = 127;
 
     /**
      * 1.6: an `orphaned_since` before this marks an expired file (erased, or removed while its bucket refused): it is
@@ -103,7 +112,7 @@ class StoredFile
         private string $storageKey,
         #[ORM\Column(name: 'original_name', length: 255)]
         private string $originalName,
-        #[ORM\Column(name: 'mime_type', length: 32)]
+        #[ORM\Column(name: 'mime_type', length: self::MIME_TYPE_LENGTH)]
         private string $mimeType,
         #[ORM\Column(type: 'bigint')]
         private int|string $size,
@@ -306,6 +315,35 @@ class StoredFile
         return $variant === null
             ? ['key' => $this->storageKey, 'mime' => $this->mimeType, 'width' => $this->width, 'height' => $this->height, 'size' => $this->getSize()]
             : ['key' => $variant['key'], 'mime' => $variant['mime'], 'width' => $variant['width'], 'height' => $variant['height'], 'size' => (int) $variant['size']];
+    }
+
+    /**
+     * 2.2: whether the original was stored as uploaded (a generic file, {@see FileUploaderInterface}): no image
+     * StorageKit decoded, so it has no width or height, is never served `inline` and never stands in for a variant.
+     * Images uploaded through {@see ImageUploaderInterface} always have both dimensions.
+     */
+    public function isStoredAsUploaded(): bool
+    {
+        return $this->width < 1 || $this->height < 1;
+    }
+
+    /**
+     * 2.2: the object a variant is served from, or null when it cannot be served: a variant that was not generated
+     * falls back to the original only for an image StorageKit re-encoded (smaller than the variant size); a file stored
+     * as uploaded has only the variants written for it ({@see FileVariantWriterInterface}).
+     *
+     * @return array{key: string, mime: string, width: int, height: int, size: int, reencoded: bool}|null
+     */
+    public function servedVariant(string $name): ?array
+    {
+        if ($name !== self::VARIANT_ORIGINAL && !isset($this->variants[$name]) && $this->isStoredAsUploaded()) {
+            return null;
+        }
+        $object = $this->variant($name);
+
+        // A variant is always an image checked by StorageKit (re-encoded, or written through the variant port); an
+        // original only for an image upload.
+        return [...$object, 'reencoded' => $name !== self::VARIANT_ORIGINAL || !$this->isStoredAsUploaded()];
     }
 
     /**

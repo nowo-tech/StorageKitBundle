@@ -179,6 +179,7 @@ upload:
         csrf: 'The page expired. Reload it and try again.'
         rate: 'Too many uploads. Wait a moment and try again.'
         access: 'You are not allowed to upload files.'
+        source: 'The file could not be read. Try again.'
 provider:
     aws_s3: 'Amazon S3'
     s3_compatible: 'S3-compatible service (R2, B2, Wasabi, RustFS…)'

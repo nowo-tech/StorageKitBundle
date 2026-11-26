@@ -149,7 +149,8 @@ final readonly class StorageEntityManager
      * Inserts one new bundle entity with DBAL, built from its class metadata (1.3, architecture bar rule 6): no entity
      * manager is flushed, so nothing the application left pending in it is written. Inside an open transaction the
      * insert runs in a savepoint (the generated id is read before the savepoint is released; a failed insert rolls
-     * back only the savepoint and rethrows the original error, even when the savepoint rollback fails too). The generated id is set on the entity, which stays
+     * back only the savepoint and rethrows the original error; 2.2: when the savepoint is gone too, the connection is
+     * closed, {@see self::rollBackSavepoint()}). The generated id is set on the entity, which stays
      * unmanaged.
      *
      * @return int|string the generated identifier
@@ -196,12 +197,7 @@ final readonly class StorageEntityManager
             $this->noteWrite();
         } catch (Throwable $e) {
             if ($savepoint !== null) {
-                try {
-                    $connection->rollbackSavepoint($savepoint);
-                } catch (Throwable) {
-                    // The savepoint is gone too (the database rolled back more than the statement): the original
-                    // error explains what happened, so it is the one rethrown.
-                }
+                self::rollBackSavepoint($connection, $savepoint);
             }
 
             throw $e;
@@ -334,7 +330,8 @@ final readonly class StorageEntityManager
      * Runs `$work` with the bundle connection as one unit (1.5, audit NH-1 / NH-2): inside an open transaction (the
      * host's) in a savepoint of its own, released on success and rolled back on failure, so the host's transaction
      * stays usable and its own work can still be committed; otherwise in a transaction of its own. The original error
-     * is rethrown, even when the rollback fails too.
+     * is rethrown, even when the rollback fails too; 2.2: the connection is then closed ({@see self::rollBackTo()},
+     * {@see self::rollBackSavepoint()}), so a lost savepoint never leaves a broken nesting level behind.
      *
      * @template T
      *
@@ -347,7 +344,18 @@ final readonly class StorageEntityManager
     {
         $connection = $this->connection();
         if (!$connection->isTransactionActive()) {
-            return $connection->transactional(static fn (Connection $connection): mixed => $work($connection));
+            $level = $connection->getTransactionNestingLevel();
+            $connection->beginTransaction();
+            try {
+                $result = $work($connection);
+                $connection->commit();
+            } catch (Throwable $e) {
+                self::rollBackTo($connection, $level);
+
+                throw $e;
+            }
+
+            return $result;
         }
         // Inside the host's transaction: a later rollback of it undoes this unit (1.8: the private manager then knows).
         $this->noteWrite();
@@ -358,16 +366,44 @@ final readonly class StorageEntityManager
             $result = $work($connection);
             $connection->releaseSavepoint($savepoint);
         } catch (Throwable $e) {
-            try {
-                $connection->rollbackSavepoint($savepoint);
-            } catch (Throwable) {
-                // The savepoint is gone too: the original error explains what happened, so it is the one rethrown.
-            }
+            self::rollBackSavepoint($connection, $savepoint);
 
             throw $e;
         }
 
         return $result;
+    }
+
+    /**
+     * Rolls the connection back to the nesting level `$level` the unit started at (2.2, REQ-RUNTIME-003 rule 3, the
+     * lost-savepoint pattern). When that fails too — the database already rolled back more than the unit (a MySQL /
+     * MariaDB deadlock ends the whole transaction) or the connection is gone — the connection is closed, so its next
+     * use reconnects with a clean nesting level instead of failing every later request of a worker. The caller then
+     * rethrows its original error.
+     */
+    public static function rollBackTo(Connection $connection, int $level): void
+    {
+        try {
+            while ($connection->getTransactionNestingLevel() > $level) {
+                $connection->rollBack();
+            }
+        } catch (Throwable) {
+            $connection->close();
+        }
+    }
+
+    /**
+     * Rolls back to the unit's own savepoint (2.2, same pattern as {@see self::rollBackTo()}): when the savepoint is gone
+     * (a deadlock rolled back the whole transaction, "SAVEPOINT does not exist"), the connection is closed, never
+     * treated as rolled back.
+     */
+    public static function rollBackSavepoint(Connection $connection, string $savepoint): void
+    {
+        try {
+            $connection->rollbackSavepoint($savepoint);
+        } catch (Throwable) {
+            $connection->close();
+        }
     }
 
     /**

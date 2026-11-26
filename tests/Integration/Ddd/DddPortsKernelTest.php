@@ -6,18 +6,26 @@ namespace Nowo\StorageKitBundle\Tests\Integration\Ddd;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
+use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Download\FileDeliveryInterface;
 use Nowo\StorageKitBundle\Download\FileNotDeliverable;
+use Nowo\StorageKitBundle\Download\FileRangeDeliveryInterface;
+use Nowo\StorageKitBundle\Download\FileReaderInterface;
 use Nowo\StorageKitBundle\Download\StoredImageResolverInterface;
 use Nowo\StorageKitBundle\Entity\StoredFile;
+use Nowo\StorageKitBundle\Lifecycle\FileRemoverInterface;
 use Nowo\StorageKitBundle\PersonalData\StoredFilesPersonalDataInterface;
 use Nowo\StorageKitBundle\Reference\FileReferencesInterface;
+use Nowo\StorageKitBundle\Tests\Fixtures\ChatContext;
 use Nowo\StorageKitBundle\Tests\Fixtures\Ddd\HostAttachments;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
 use Nowo\StorageKitBundle\Tests\Support\HostBucketProfiles;
 use Nowo\StorageKitBundle\Tests\Support\Images;
+use Nowo\StorageKitBundle\Upload\FileUploaderInterface;
+use Nowo\StorageKitBundle\Upload\FileVariantWriterInterface;
 use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
+use Nowo\StorageKitBundle\Upload\StoredFileSource;
 use stdClass;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\ConsoleEvents;
@@ -34,6 +42,7 @@ use Symfony\Component\Security\Core\User\InMemoryUser;
 
 use function array_column;
 use function array_keys;
+use function file_put_contents;
 use function gc_collect_cycles;
 use function memory_get_usage;
 use function ob_get_clean;
@@ -41,6 +50,9 @@ use function ob_start;
 use function str_starts_with;
 use function strtoupper;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
+use function sys_get_temp_dir;
+use function tempnam;
+use function unlink;
 
 /**
  * 1.5 DDD / hexagonal host (REQ-ARCH-001): no Instance Settings, named buckets from its own provider, the bundle
@@ -142,6 +154,38 @@ final class DddPortsKernelTest extends KernelTestCase
         self::assertLessThan(2 * 1024 * 1024, memory_get_usage() - $before, 'Memory must stay flat over 1,000 requests.');
     }
 
+    /**
+     * 2.2: generic files through their ports only, on the dedicated manager without Instance Settings: upload, variant,
+     * server-side read, ranged delivery, removal. The ports take and return scalars and bundle VOs.
+     */
+    public function testADddHostStoresGenericFilesThroughThePorts(): void
+    {
+        $kernel = $this->bootDdd();
+        $path   = (string) tempnam(sys_get_temp_dir(), 'sk220d');
+        file_put_contents($path, 'plain text');
+        try {
+            $view = $this->service($kernel, FileUploaderInterface::class)->uploadFile(new InMemoryUser('alice', null), 'chat', 'c1', StoredFileSource::fromPath($path), 'notes.txt', 'text/plain');
+        } finally {
+            @unlink($path);
+        }
+        $updated = $this->service($kernel, FileVariantWriterInterface::class)->putVariant($view->uuid, 'chat', 'c1', 'thumb', Images::png(10, 5), 'image/png');
+        self::assertSame(['thumb'], array_keys($updated->variants));
+        $stream = $this->service($kernel, FileReaderInterface::class)->open($view->uuid, 'chat', 'c1', 'original');
+        try {
+            self::assertSame('plain text', $stream->read());
+        } finally {
+            $stream->close();
+        }
+        $part = $this->service($kernel, FileRangeDeliveryInterface::class)->deliverInContext($view->uuid, 'chat', 'c1', 'original', 'bytes=6-');
+        $body = '';
+        $part->writeTo(static function (string $chunk) use (&$body): void {
+            $body .= $chunk;
+        });
+        self::assertSame([206, 'text'], [$part->statusCode, $body]);
+        self::assertNotNull($this->service($kernel, FileRemoverInterface::class)->remove($view->uuid, 'chat', 'c1'));
+        self::assertSame(0, (int) $this->service($kernel, StorageEntityManager::class)->connection()->fetchOne('SELECT COUNT(*) FROM storage_kit_file'));
+    }
+
     private function bootDdd(): StorageKitTestKernel
     {
         return $this->bootKernel(
@@ -150,6 +194,7 @@ final class DddPortsKernelTest extends KernelTestCase
             extra: static function (ContainerConfigurator $container): void {
                 $services = $container->services();
                 $services->set(HostBucketProfiles::class)->public();
+                $services->set('test.chat_context', ChatContext::class)->public()->tag('nowo_storage_kit.file_context');
                 $services->set(HostAttachments::class)->public()->args([
                     service(ImageUploaderInterface::class),
                     service(FileReferencesInterface::class),

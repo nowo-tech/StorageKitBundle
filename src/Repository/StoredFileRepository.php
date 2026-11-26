@@ -6,12 +6,16 @@ namespace Nowo\StorageKitBundle\Repository;
 
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\ORM\QueryBuilder;
+use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
+use Nowo\StorageKitBundle\Download\FileRangeDeliveryInterface;
+use Nowo\StorageKitBundle\Download\FileReaderInterface;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
 use Nowo\StorageKitBundle\Entity\StoredFile;
 use Nowo\StorageKitBundle\Entity\StoredFileReference;
 use Nowo\StorageKitBundle\Identifier\ExactIdentifier;
 use Nowo\StorageKitBundle\PersonalData\UploaderIdentity;
+use Nowo\StorageKitBundle\Upload\FileVariantWriterInterface;
 
 use function array_map;
 use function array_slice;
@@ -22,12 +26,16 @@ use function count;
 use function in_array;
 use function is_array;
 use function is_scalar;
+use function preg_match;
 
 /**
  * Queries of {@see StoredFile}. Every list is bounded.
  */
 final readonly class StoredFileRepository
 {
+    /** A canonical public id (lower-case RFC 4122 UUID). */
+    public const UUID = '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/D';
+
     /** Files resolved by one {@see self::byUuids()} call at most (a text's images). */
     public const UUIDS_LIMIT = 200;
 
@@ -45,6 +53,30 @@ final readonly class StoredFileRepository
     public function findOneByUuid(string $uuid): ?StoredFile
     {
         return $this->entityManager->manager()->getRepository(StoredFile::class)->findOneBy(['uuid' => $uuid]);
+    }
+
+    /**
+     * 2.2: the file with exactly that public id (a canonical lower-case UUID), stored in exactly that context and not
+     * expired; null otherwise. The context is compared on a DBAL read first and again with `===` on the loaded row
+     * (REQ-SEC-006, no SQL collation decides), so a file of another context is never loaded (audit QJ-I2) and a
+     * look-alike id never matches: `ABC` is not `abc`, and an upper-case UUID is not the stored one. For the ports that
+     * take a context ({@see FileVariantWriterInterface}, {@see FileReaderInterface}, {@see FileRangeDeliveryInterface}).
+     */
+    public function findInContext(string $uuid, string $contextType, string $contextId): ?StoredFile
+    {
+        if (preg_match(self::UUID, $uuid) !== 1 || !FileContexts::isType($contextType) || !FileContexts::isId($contextId)) {
+            return null;
+        }
+        $row = $this->entityManager->connection()->fetchAssociative(
+            'SELECT context_type, context_id FROM ' . $this->entityManager->table(StoredFile::class) . ' WHERE uuid = ?',
+            [$uuid],
+        );
+        if ($row === false || !ExactIdentifier::same($row['context_type'], $contextType) || !ExactIdentifier::same($row['context_id'], $contextId)) {
+            return null;
+        }
+        $file = $this->findOneByUuid($uuid);
+
+        return $file instanceof StoredFile && $file->getUuid() === $uuid && $file->getContextType() === $contextType && $file->getContextId() === $contextId && !$file->isExpired() ? $file : null;
     }
 
     /**

@@ -179,6 +179,7 @@ upload:
         csrf: 'A página expirou. Recarregue-a e tente novamente.'
         rate: 'Demasiados envios. Aguarde um momento e tente novamente.'
         access: 'Não tem permissão para enviar ficheiros.'
+        source: 'Não foi possível ler o ficheiro. Tente novamente.'
 provider:
     aws_s3: 'Amazon S3'
     s3_compatible: 'Serviço compatível com S3 (R2, B2, Wasabi, RustFS…)'

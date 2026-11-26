@@ -12,10 +12,10 @@ use RuntimeException;
  */
 final class UploadRefused extends RuntimeException
 {
-    /** Not a PNG, JPEG, GIF or WebP image (by content). */
+    /** Not a PNG, JPEG, GIF or WebP image (by content); 2.2: a generic file type the context does not accept, or a declared image type its bytes do not match. */
     public const TYPE = 'type';
 
-    /** Larger than `upload.max_bytes`. */
+    /** Larger than `upload.max_bytes` (2.2: generic files, the context's limit or `upload.files.max_bytes`). */
     public const SIZE = 'size';
 
     /** More than `upload.max_pixels`, or too large to decode in the memory left. */
@@ -44,6 +44,9 @@ final class UploadRefused extends RuntimeException
 
     /** Not allowed to upload at all. */
     public const ACCESS = 'access';
+
+    /** 2.2: the local source file of a generic upload cannot be read, or its size changed ({@see StoredFileSource}). */
+    public const SOURCE = 'source';
 
     /**
      * @param string $reason one of the constants

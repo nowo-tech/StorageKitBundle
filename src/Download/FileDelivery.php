@@ -17,13 +17,16 @@ use Symfony\Component\HttpFoundation\HeaderUtils;
 
 use function in_array;
 use function max;
+use function min;
 use function pathinfo;
+use function preg_match;
 use function preg_replace;
 use function strlen;
 use function strtolower;
 use function substr;
 use function trim;
 
+use const PATHINFO_EXTENSION;
 use const PATHINFO_FILENAME;
 
 /**
@@ -38,7 +41,7 @@ use const PATHINFO_FILENAME;
  * {@see FileDeliveryInterface} port); {@see FileDeliveryResponder} builds the HttpFoundation response (2.0 removed the
  * 1.4 `respond()`, deprecated since 1.5).
  */
-final readonly class FileDelivery implements FileDeliveryInterface
+final readonly class FileDelivery implements FileDeliveryInterface, FileRangeDeliveryInterface
 {
     /** CSP of a streamed file. */
     public const SANDBOX_CSP = "default-src 'none'; sandbox";
@@ -81,34 +84,77 @@ final readonly class FileDelivery implements FileDeliveryInterface
     }
 
     /**
-     * The delivery of a variant of a file the viewer may read (1.5).
+     * 2.2 ({@see FileRangeDeliveryInterface}): a variant of the file `$uuid` stored in exactly that context, with
+     * `Range` and the disposition choice. Access is the caller's job.
      *
-     * @internal entity-typed: call {@see self::deliver()} (the port) from host code
-     *
-     * @throws FileNotDeliverable when the profile is not connectable any more
+     * @throws FileNotDeliverable when there is no such file, variant or context, or its profile is not connectable any more
+     * @throws LogicException when the service was built without the file repository
      */
-    public function prepare(StoredFile $file, string $variant): DeliverableFile
+    public function deliverInContext(string $uuid, string $contextType, string $contextId, string $variant, ?string $range = null, ?bool $inline = null, ?int $ttl = null): DeliverableFile
     {
-        $object      = $file->variant($variant);
-        $settings    = $this->profiles->settingsOf($file->getProfile()) ?? throw new FileNotDeliverable('The bucket of this file is not connectable.');
-        $connection  = $this->storage->connection($settings);
-        $disposition = $this->disposition($file, $object['mime']);
-        $maxAge      = max(0, $this->ttl - 60);
-        if ($this->profiles->deliveryOf($file->getProfile()) === ConfigProfiles::DELIVERY_REDIRECT) {
-            return DeliverableFile::redirect($connection->presign($object['key'], $object['mime'], $disposition, new DateTimeImmutable('+' . $this->ttl . ' seconds')), $maxAge);
+        if (!in_array($variant, StoredFile::VARIANTS, true)) {
+            throw new FileNotDeliverable('Unknown file variant.');
         }
-        $key  = $object['key'];
-        $size = $object['size'];
+        $files = $this->files ?? throw new LogicException('FileDelivery::deliverInContext() needs the StoredFileRepository (constructor argument $files).');
+        $file  = $files->findInContext($uuid, $contextType, $contextId) ?? throw new FileNotDeliverable('No such file.');
 
-        // @igor-ignore - The closure is the body source of this delivery only (kept by the per-request VO).
-        return DeliverableFile::stream(static fn (): iterable => $connection->readRange($key, $size), $size, $maxAge, [
+        return $this->prepare($file, $variant, $range, $inline, $ttl);
+    }
+
+    /**
+     * The delivery of a variant of a file the viewer may read (1.5; 2.2: `Range`, disposition and lifetime).
+     *
+     * @internal entity-typed: call {@see self::deliver()} or {@see self::deliverInContext()} (the ports) from host code
+     *
+     * @throws FileNotDeliverable when the variant cannot be served or the profile is not connectable any more
+     */
+    public function prepare(StoredFile $file, string $variant, ?string $range = null, ?bool $inline = null, ?int $ttl = null): DeliverableFile
+    {
+        $object     = $file->servedVariant($variant) ?? throw new FileNotDeliverable('No such file variant.');
+        $settings   = $this->profiles->settingsOf($file->getProfile()) ?? throw new FileNotDeliverable('The bucket of this file is not connectable.');
+        $connection = $this->storage->connection($settings);
+        $ttl        = $ttl === null ? $this->ttl : max(1, min($ttl, $this->ttl));
+        $asUploaded = $file->isStoredAsUploaded();
+        $type       = $asUploaded ? MediaTypes::served($object['mime']) : (in_array($object['mime'], ImageProcessor::MIME_TYPES, true) ? $object['mime'] : 'application/octet-stream');
+        // Image uploads keep their 1.4 disposition on the bundle's own route; an explicit choice is checked for safety.
+        $disposition = $this->disposition($file, $object['mime'], $inline === null && !$asUploaded ? $this->disposition : $this->dispositionType($object, $inline));
+        $maxAge      = max(0, $ttl - 60);
+        if ($this->profiles->deliveryOf($file->getProfile()) === ConfigProfiles::DELIVERY_REDIRECT) {
+            // Image uploads keep their 1.4 pre-signed type (the stored, sniffed one); generic files the served type.
+            return DeliverableFile::redirect($connection->presign($object['key'], $asUploaded ? $type : $object['mime'], $disposition, new DateTimeImmutable('+' . $ttl . ' seconds')), $maxAge);
+        }
+        $key     = $object['key'];
+        $size    = $object['size'];
+        $headers = [
             'Content-Length'               => (string) $size,
-            'Content-Type'                 => in_array($object['mime'], ImageProcessor::MIME_TYPES, true) ? $object['mime'] : 'application/octet-stream',
+            'Content-Type'                 => $type,
             'Content-Disposition'          => $disposition,
             'X-Content-Type-Options'       => 'nosniff',
             'Content-Security-Policy'      => self::SANDBOX_CSP,
             'Cross-Origin-Resource-Policy' => 'same-origin',
-        ]);
+        ];
+        if ($asUploaded) {
+            // 2.2: generic files advertise ranges (media seeking); image downloads keep their 1.4 headers.
+            $headers['Accept-Ranges'] = 'bytes';
+        }
+        $part = ByteRange::parse($range, $size);
+        if ($part === false) {
+            unset($headers['Content-Length']);
+
+            return DeliverableFile::unsatisfiable($size, $maxAge, $headers);
+        }
+        if ($part instanceof ByteRange) {
+            unset($headers['Content-Length']);
+            $headers['Accept-Ranges'] = 'bytes';
+            $start                    = $part->start;
+            $length                   = $part->length();
+
+            // @igor-ignore - The closure is the body source of this delivery only (kept by the per-request VO).
+            return DeliverableFile::partial(static fn (): iterable => $connection->readRange($key, $length, $start, false), $part, $size, $maxAge, $headers);
+        }
+
+        // @igor-ignore - The closure is the body source of this delivery only (kept by the per-request VO).
+        return DeliverableFile::stream(static fn (): iterable => $connection->readRange($key, $size), $size, $maxAge, $headers);
     }
 
     /**
@@ -137,12 +183,48 @@ final readonly class FileDelivery implements FileDeliveryInterface
         return $sent;
     }
 
-    private function disposition(StoredFile $file, string $mime): string
+    /**
+     * `attachment` or `inline` for an object (2.2): inline only when asked (or configured) **and** safe.
+     *
+     * @param array{mime: string, reencoded: bool} $object
+     */
+    private function dispositionType(array $object, ?bool $inline): string
     {
+        $wanted = $inline ?? $this->disposition === HeaderUtils::DISPOSITION_INLINE;
+
+        return $wanted && MediaTypes::inlineSafe($object['mime'], $object['reencoded']) ? HeaderUtils::DISPOSITION_INLINE : HeaderUtils::DISPOSITION_ATTACHMENT;
+    }
+
+    private function disposition(StoredFile $file, string $mime, string $type): string
+    {
+        if ($file->isStoredAsUploaded()) {
+            return self::fileDisposition($type, $file->getOriginalName(), $mime);
+        }
         $extension = self::EXTENSIONS[$mime] ?? 'bin';
         $base      = trim((string) preg_replace('/[^A-Za-z0-9._-]+/', '_', pathinfo($file->getOriginalName(), PATHINFO_FILENAME)), '._');
         $ascii     = ($base === '' ? StoredFile::ANONYMOUS_NAME : $base) . '.' . $extension;
 
-        return HeaderUtils::makeDisposition($this->disposition, $ascii);
+        return HeaderUtils::makeDisposition($type, $ascii);
+    }
+
+    /**
+     * 2.2: the disposition of a generic file: its stored name as `filename*` (RFC 6266 / RFC 8187, UTF-8) and an ASCII
+     * `filename` fallback (unsafe characters replaced, the extension kept when it is 1–16 letters or digits; an active
+     * type always gets `.bin`, so a saved file never opens as a page).
+     */
+    public static function fileDisposition(string $type, string $name, string $mime): string
+    {
+        $active    = MediaTypes::isActive($mime);
+        $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        $suffix    = match (true) {
+            $active                                             => '.bin',
+            preg_match('/^[a-z0-9]{1,16}$/D', $extension) === 1 => '.' . $extension,
+            default                                             => $extension === '' ? '' : '.bin',
+        };
+        $base  = trim((string) preg_replace('/[^A-Za-z0-9._-]+/', '_', pathinfo($name, PATHINFO_FILENAME)), '._');
+        $ascii = ($base === '' ? StoredFile::FILE_NAME : $base) . $suffix;
+
+        // An active type is offered under its ASCII name only (never `.html` or `.svg`).
+        return HeaderUtils::makeDisposition($type, $active ? $ascii : (string) preg_replace('~["\\\\/\x00-\x1F\x7F]+~', '_', $name), $ascii);
     }
 }

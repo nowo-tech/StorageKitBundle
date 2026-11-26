@@ -179,6 +179,7 @@ upload:
         csrf: 'La página ha caducado. Recárgala y vuelve a intentarlo.'
         rate: 'Demasiadas subidas. Espera un momento y vuelve a intentarlo.'
         access: 'No tienes permiso para subir archivos.'
+        source: 'No se ha podido leer el archivo. Inténtalo de nuevo.'
 provider:
     aws_s3: 'Amazon S3'
     s3_compatible: 'Servicio compatible con S3 (R2, B2, Wasabi, RustFS…)'

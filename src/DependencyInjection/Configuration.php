@@ -12,6 +12,7 @@ use Nowo\StorageKitBundle\Reference\FileUris;
 use Nowo\StorageKitBundle\Storage\S3Settings;
 use Nowo\StorageKitBundle\Sync\StorageSyncer;
 use Nowo\StorageKitBundle\Ui\StorageKitPages;
+use Nowo\StorageKitBundle\Upload\FileUploader;
 use Nowo\StorageKitBundle\Upload\ImageProcessor;
 use Nowo\StorageKitBundle\Upload\SquareImageProcessor;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
@@ -494,6 +495,18 @@ final class Configuration implements ConfigurationInterface
                     ->validate()
                         ->ifTrue(static fn (array $v): bool => array_diff(array_keys($v), ['preview', 'thumb']) !== [])
                         ->thenInvalid('nowo_storage_kit.upload.variants accepts the names "preview" and "thumb" only.')
+                    ->end()
+                ->end()
+                ->arrayNode('files')
+                    ->info('Generic files (2.2, FileUploaderInterface::uploadFile(): stored as uploaded, into contexts implementing GenericFileContextInterface only, which set their own allow-list and size).')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->integerNode('max_bytes')
+                            ->info('Ceiling of a generic file, in bytes: a context\'s maxBytes() above it is cut to it. Also the largest source ImageThumbnailerInterface reads. Check upload_max_filesize, post_max_size and the web server\'s request body limit too.')
+                            ->defaultValue(FileUploader::MAX_BYTES)
+                            ->min(1024)
+                            ->max(1024 * 1024 * 1024)
+                        ->end()
                     ->end()
                 ->end()
                 ->arrayNode('square')

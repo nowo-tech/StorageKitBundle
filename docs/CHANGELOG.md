@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Added](#added-unreleased)
+  - [Changed](#changed-unreleased)
+  - [Fixed](#fixed-unreleased)
 - [[2.1.0] - 2026-11-22](#210---2026-11-22)
   - [Added](#added)
   - [Changed](#changed)
@@ -74,6 +77,86 @@ All notable changes to this project are documented here. The format follows
   - [Security](#security-5)
 
 ## [Unreleased]
+
+Generic, non-image files (a prerequisite of ChatKit 2.7 attachments, Beacon spec 259). Minor, no BC break; one
+additive schema change ([UPGRADING](UPGRADING.md#unreleased)).
+
+<a id="added-unreleased"></a>
+
+### Added
+
+- **Generic file uploads (`Upload\FileUploaderInterface::uploadFile()`).** Bytes stored as they are, from a local
+  file (`Upload\StoredFileSource`: path + size), streamed to the bucket and hashed in chunks (never one PHP string).
+  The caller declares the type it sniffed; StorageKit accepts it only when it is exactly (`===`) one of the context's
+  `acceptedTypes()` and checks a declared PNG / JPEG / GIF / WebP against its magic bytes. Only contexts implementing the
+  new optional `Context\GenericFileContextInterface` (`acceptedTypes()`, `maxBytes()`) take generic files (deny by
+  default). Same DBAL insert, savepoint, owner quota and `afterCommit()` rules as `uploadImage()`; no lock is held
+  while the bytes travel. Refusal reason `UploadRefused::SOURCE` (`source`: the local file is not a regular file of the
+  declared size) with its message in the 7 catalogues. Names are kept as labels (`Upload\FileNames`: no path, control
+  or bidi characters, ≤ 200 characters).
+- **Generated variants (`Upload\FileVariantWriterInterface::putVariant()`).** Attaches a `thumb` / `preview` raster
+  image to a stored file found by exact UUID and context: object first under a new random key, then one short unit that
+  locks the row (`SELECT … FOR UPDATE`), re-checks the context and expiry and writes the variant list and byte total;
+  the replaced object is deleted after the commit. Inside your transaction the unit is a savepoint, so nothing is
+  deleted until you call `afterVariantCommit($view)` (the replaced object) or `afterVariantRollback($view)` (the new
+  one) once you know how it ended (audit ZCK-SK-L1).
+- **The image pipeline as a port (`Upload\ImageThumbnailerInterface`, `Upload\GdImageThumbnailer`).** Pixel cap before
+  decoding, memory guard, always re-encoded (EXIF / GPS / XMP dropped; a GIF becomes a PNG of its first frame), longest
+  side 16–4096 px (`ImageProcessor::thumbnail()`, `ImageProcessor::header()`).
+- **Server-side reads (`Download\FileReaderInterface::open()` → `Download\FileStream`).** A bounded read stream of a
+  variant (exact UUID and context, optional byte limit) for scanners and preview builders, with `close()`; it cannot
+  be cloned or serialized.
+- **Context-bound delivery with `Range` (`Download\FileRangeDeliveryInterface::deliverInContext()`,** implemented by
+  `FileDelivery`). A single `bytes=` range answers `206` (`Content-Range`), one past the end `416`
+  (`DeliverableFile::partial()` / `unsatisfiable()`, `Download\ByteRange`); an inline request is honoured only for
+  re-encoded images and audio / video; an optional shorter pre-signed lifetime. `Download\MediaTypes` holds the type
+  rules: active content (HTML, SVG, XML, script) is always served as `application/octet-stream`, `attachment`, `.bin`.
+- **Size limit per context**: `GenericFileContextInterface::maxBytes()`, capped by the new `upload.files.max_bytes`
+  (default 100 MiB, at most 1 GiB; also the thumbnailer's largest source). Image contexts keep `upload.max_bytes`.
+- `StoredFileRepository::findInContext()`, `StoredFile::isStoredAsUploaded()` / `servedVariant()`,
+  `StorageConnection::writeStream()` / `readStream()` and an `$offset` for `readRange()`.
+- `Audit\StorageAuditEvent::$occurredAt` (REQ-ARCH-001 rule 4: events carry ids and the time).
+- Tests: generic files on SQLite and the three databases, two-connection races (`GenericFilesRaceTest`: row lock wait,
+  removal committed before the locking read, two writers of one variant, a real deadlock inside the host transaction)
+  and a 300-round worker test.
+
+<a id="changed-unreleased"></a>
+
+### Changed
+
+- **The download route answers `Range`.** `GET <prefix>/files/{uuid}/{variant}` passes a single `Range` to the port when
+  it implements `FileRangeDeliveryInterface` (the bundle's does): `206` / `416`, the whole file with `If-Range`. Image
+  downloads keep their 1.4 headers and disposition; generic files are always `attachment` unless audio / video with
+  `download.disposition: inline`, carry `Accept-Ranges: bytes`, and a variant that was not written is a 404 (only
+  re-encoded images fall back to the original). A host port that implements only `FileDeliveryInterface` keeps `200`.
+- **`storage_kit_file.mime_type` holds 127 characters** (was 32), for types such as
+  `application/vnd.openxmlformats-officedocument.presentationml.presentation`.
+- **Bucket moves stream each object** through a 2 MiB memory buffer that spills to a temporary file, and hash it in
+  chunks (was: the object read whole into memory twice), so 100 MiB files move without the memory to match.
+- An image upload into a `GenericFileContextInterface` context also follows the context's type list and size limit.
+- **Removal and purge read the object keys under a row lock (audit ZCK-SK-M1).** `FileRemoverInterface::remove()` and
+  the purge now lock the file row, drop its references, expire it and read every object key under that lock
+  (`Lifecycle\FileClaims`), then delete the objects with no lock held, then the row. A variant written concurrently is
+  either in that list or refused (its locking read sees the expiry), so no derived copy (a thumbnail of a deleted
+  photo) is left in the bucket with no row. A bucket that refuses now leaves the row expired (no longer served) for
+  the next purge, which retries every key on it.
+- `StoredFileSource` refuses stream wrappers (`php://`, `phar://`, `data:`…): a source is a local file path
+  (`StoredFileSource::isLocal()`, audit ZCK-SK-I2).
+
+<a id="fixed-unreleased"></a>
+
+### Fixed
+
+- **Lost savepoint (REQ-RUNTIME-003 rule 3).** When a unit's own rollback failed (a MySQL / MariaDB deadlock already
+  rolled back the whole transaction, so its savepoint was gone), `StorageEntityManager::atomically()` and `insert()`
+  swallowed that failure and left the connection with a stale transaction nesting level: the original error was
+  rethrown, but the connection was not repaired. They now roll back to the level the unit started at and, when that
+  fails, close the connection (`StorageEntityManager::rollBackTo()` / `rollBackSavepoint()`) before rethrowing the
+  original error, so the next use reconnects clean. Contention only (no data loss): no GHSA.
+- **Owner quota under contention (all versions, audit ZCK-SK-L2).** `UploadLimitInterface::allows()` is asked before
+  the bytes are stored, without a lock, for images (since 1.0) and generic files: concurrent uploads of one owner can
+  together exceed a quota that had room for one of them (by up to N × the largest upload). Not changed in code; now
+  documented in CONCURRENCY.md with the way to bound it (your own per-owner lock or counter). Contention only: no GHSA.
 
 ## [2.1.0] - 2026-11-22
 
