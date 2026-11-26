@@ -10,6 +10,7 @@ use Nowo\StorageKitBundle\Audit\StorageAuditEvent;
 use Nowo\StorageKitBundle\Concurrency\StorageConflicts;
 use Nowo\StorageKitBundle\Context\FileContexts;
 use Nowo\StorageKitBundle\Context\FileContextTarget;
+use Nowo\StorageKitBundle\Context\GenericFileContextInterface;
 use Nowo\StorageKitBundle\Context\SquareImageContextInterface;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StoredFile;
@@ -29,6 +30,7 @@ use Throwable;
 use function basename;
 use function gmdate;
 use function hash;
+use function in_array;
 use function mb_substr;
 use function preg_replace;
 use function str_replace;
@@ -129,7 +131,14 @@ final readonly class ImageUploader implements ImageUploaderInterface, SquareImag
         }
         $profile  = $this->profiles->forTarget($target) ?? throw new UploadRefused(UploadRefused::OFF);
         $settings = $this->profiles->settingsOf($profile) ?? throw new UploadRefused(UploadRefused::OFF);
-        $image    = $square ? $this->squareProcessor->process($bytes) : $this->processor->process($bytes);
+        // 2.2: a context that takes generic files keeps its own size limit and allow-list for images too.
+        if ($context instanceof GenericFileContextInterface && strlen($bytes) > $context->maxBytes()) {
+            throw new UploadRefused(UploadRefused::SIZE);
+        }
+        $image = $square ? $this->squareProcessor->process($bytes) : $this->processor->process($bytes);
+        if ($context instanceof GenericFileContextInterface && !in_array($image->original['mime'], $context->acceptedTypes(), true)) {
+            throw new UploadRefused(UploadRefused::TYPE);
+        }
         if ($this->limit instanceof UploadLimitInterface && !$this->limit->allows($target, $image->totalBytes())) {
             throw new UploadRefused(UploadRefused::LIMIT);
         }

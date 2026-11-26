@@ -131,18 +131,7 @@ final readonly class ImageProcessor
         if (strlen($bytes) > $this->maxBytes) {
             throw new UploadRefused(UploadRefused::SIZE);
         }
-        $mime = self::sniff($bytes);
-        $info = $mime === null ? false : @getimagesizefromstring($bytes);
-        if ($info === false || (self::TYPES[$info[2]] ?? null) !== $mime) {
-            throw new UploadRefused(UploadRefused::TYPE);
-        }
-        [$width, $height] = [(int) $info[0], (int) $info[1]];
-        if ($width < 1 || $height < 1) {
-            throw new UploadRefused(UploadRefused::TYPE);
-        }
-        if ($width * $height > $this->maxPixels) {
-            throw new UploadRefused(UploadRefused::PIXELS);
-        }
+        [$mime, $width, $height] = $this->header($bytes);
         if ($mime === 'image/gif' || ($mime === 'image/webp' && str_contains(substr($bytes, 0, 64), 'ANIM'))) {
             return new ProcessedImage(['bytes' => $bytes, 'mime' => $mime, 'width' => $width, 'height' => $height]);
         }
@@ -171,6 +160,72 @@ final readonly class ImageProcessor
         unset($image);
 
         return new ProcessedImage($original, $variants);
+    }
+
+    /**
+     * 2.2 ({@see ImageThumbnailerInterface}): a re-encoded image whose longest side is at most `$maxEdge` pixels (never
+     * enlarged), with the same checks as {@see self::process()} — the type from the magic bytes, the pixel cap from the
+     * header before decoding, the memory guard — but at most `$maxBytes` bytes in, and **always** re-encoded: a GIF
+     * becomes a PNG of its first frame, an animated WebP (which GD cannot decode) is refused like any undecodable image.
+     *
+     * @throws UploadRefused `empty`, `size`, `type` or `pixels`
+     */
+    public function thumbnail(string $bytes, int $maxEdge, int $maxBytes): ProcessedImage
+    {
+        if ($bytes === '') {
+            throw new UploadRefused(UploadRefused::EMPTY);
+        }
+        if (strlen($bytes) > $maxBytes) {
+            throw new UploadRefused(UploadRefused::SIZE);
+        }
+        [$mime, $width, $height] = $this->header($bytes);
+        $extra                   = $mime === 'image/jpeg' ? self::PROGRESSIVE_BYTES_PER_PIXEL : 0;
+        if (!self::fitsInMemory($width * $height, $this->memoryLimit ?? ini_get('memory_limit'), memory_get_usage(true), $extra)) {
+            throw new UploadRefused(UploadRefused::PIXELS);
+        }
+        $image = @imagecreatefromstring($bytes);
+        if (!$image instanceof GdImage) {
+            throw new UploadRefused(UploadRefused::TYPE);
+        }
+        if ($mime === 'image/jpeg') {
+            $image = self::upright($image, self::jpegOrientation($bytes));
+        }
+        if (max(imagesx($image), imagesy($image)) > $maxEdge) {
+            $image = $this->fit($image, $maxEdge);
+        } elseif ($mime === 'image/gif') {
+            // A palette image: copied to true colour so the PNG keeps its transparency.
+            $image = $this->fit($image, max(imagesx($image), imagesy($image)));
+        }
+        $thumbnail = $this->encode($image, $mime === 'image/gif' ? 'image/png' : $mime);
+        unset($image);
+
+        return new ProcessedImage($thumbnail);
+    }
+
+    /**
+     * The sniffed type and the dimensions read from the header (no decoding), within `max_pixels` (2.2, also used by
+     * {@see FileVariantWriterInterface}).
+     *
+     * @throws UploadRefused `type` or `pixels`
+     *
+     * @return array{0: string, 1: int, 2: int} type, width, height
+     */
+    public function header(string $bytes): array
+    {
+        $mime = self::sniff($bytes);
+        $info = $mime === null ? false : @getimagesizefromstring($bytes);
+        if ($info === false || (self::TYPES[$info[2]] ?? null) !== $mime) {
+            throw new UploadRefused(UploadRefused::TYPE);
+        }
+        [$width, $height] = [(int) $info[0], (int) $info[1]];
+        if ($width < 1 || $height < 1) {
+            throw new UploadRefused(UploadRefused::TYPE);
+        }
+        if ($width * $height > $this->maxPixels) {
+            throw new UploadRefused(UploadRefused::PIXELS);
+        }
+
+        return [$mime, $width, $height];
     }
 
     /**

@@ -17,7 +17,9 @@ use function sprintf;
  *
  * - a **redirect** (`302`) to {@see self::location()}, a pre-signed URL of the private bucket, or
  * - a **stream** (`200`) of exactly {@see self::$size} bytes written by {@see self::writeTo()} (the bucket object is read
- *   with a byte range and sent as it arrives; a bucket that sends more is cut there and the write fails);
+ *   with a byte range and sent as it arrives; a bucket that sends more is cut there and the write fails); 2.2: a
+ *   `206` stream of one byte range ({@see self::partial()}, `Content-Range` in the headers) or a `416` without a body
+ *   ({@see self::unsatisfiable()}) answer a `Range` request;
  * - in both cases {@see self::$headers} first, then a private cache of {@see self::$maxAge} seconds, then
  *   {@see self::$policyHeaders}.
  *
@@ -32,7 +34,7 @@ final readonly class DeliverableFile
     /** A `302` redirect to a pre-signed URL. */
     public const REDIRECT = 'redirect';
 
-    /** A `200` streamed body. */
+    /** A `200` streamed body (2.2: also a `206` part of it, or a `416` with no body). */
     public const STREAM = 'stream';
 
     /** Headers every download ends with (after the cache headers). */
@@ -40,7 +42,7 @@ final readonly class DeliverableFile
 
     /**
      * @param string $mode {@see self::REDIRECT} or {@see self::STREAM}
-     * @param int $statusCode `302` or `200`
+     * @param int $statusCode `302`, `200`, `206` or `416`
      * @param array<string, string> $headers headers of the response, in order (a stream's content headers)
      * @param int $maxAge seconds of the private cache (`Cache-Control: max-age=<n>, private`)
      * @param int|null $size bytes of a stream, null for a redirect
@@ -80,6 +82,34 @@ final readonly class DeliverableFile
     {
         $file = new self(self::STREAM, 200, $headers, $maxAge, $size);
         DeliverableFileData::put($file, null, $body);
+
+        return $file;
+    }
+
+    /**
+     * 2.2: a `206` stream of the bytes `$range` of an object of `$total` bytes, from `$body` (`Content-Range` and
+     * `Content-Length` are set after `$headers`).
+     *
+     * @param Closure(): iterable<string> $body yields the bytes of the range only
+     * @param array<string, string> $headers
+     */
+    public static function partial(Closure $body, ByteRange $range, int $total, int $maxAge, array $headers = []): self
+    {
+        $file = new self(self::STREAM, 206, [...$headers, 'Content-Length' => (string) $range->length(), 'Content-Range' => $range->contentRange($total)], $maxAge, $range->length());
+        DeliverableFileData::put($file, null, $body);
+
+        return $file;
+    }
+
+    /**
+     * 2.2: a `416` for a range past the end of an object of `$total` bytes (its `Content-Range` names the total size only), no body.
+     *
+     * @param array<string, string> $headers
+     */
+    public static function unsatisfiable(int $total, int $maxAge, array $headers = []): self
+    {
+        $file = new self(self::STREAM, 416, [...$headers, 'Content-Length' => '0', 'Content-Range' => 'bytes */' . $total], $maxAge, 0);
+        DeliverableFileData::put($file, null, static fn (): iterable => []);
 
         return $file;
     }

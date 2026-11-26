@@ -179,6 +179,7 @@ upload:
         csrf: 'La pagina è scaduta. Ricaricala e riprova.'
         rate: 'Troppi caricamenti. Attendi un momento e riprova.'
         access: 'Non hai il permesso di caricare file.'
+        source: 'Impossibile leggere il file. Riprova.'
 provider:
     aws_s3: 'Amazon S3'
     s3_compatible: 'Servizio compatibile con S3 (R2, B2, Wasabi, RustFS…)'

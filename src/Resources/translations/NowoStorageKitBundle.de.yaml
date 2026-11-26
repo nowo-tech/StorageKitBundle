@@ -179,6 +179,7 @@ upload:
         csrf: 'Die Seite ist abgelaufen. Laden Sie sie neu und versuchen Sie es erneut.'
         rate: 'Zu viele Uploads. Warten Sie einen Moment und versuchen Sie es erneut.'
         access: 'Sie dürfen keine Dateien hochladen.'
+        source: 'Die Datei konnte nicht gelesen werden. Versuchen Sie es erneut.'
 provider:
     aws_s3: 'Amazon S3'
     s3_compatible: 'S3-kompatibler Dienst (R2, B2, Wasabi, RustFS…)'

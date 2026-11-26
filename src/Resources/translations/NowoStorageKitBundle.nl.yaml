@@ -179,6 +179,7 @@ upload:
         csrf: 'De pagina is verlopen. Laad haar opnieuw en probeer het nog eens.'
         rate: 'Te veel uploads. Wacht even en probeer het opnieuw.'
         access: 'U mag geen bestanden uploaden.'
+        source: 'Het bestand kon niet worden gelezen. Probeer het opnieuw.'
 provider:
     aws_s3: 'Amazon S3'
     s3_compatible: 'S3-compatibele dienst (R2, B2, Wasabi, RustFS…)'

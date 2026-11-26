@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Audit;
 
+use DateTimeImmutable;
 use Nowo\StorageKitBundle\Lifecycle\FileRemoverInterface;
 use Symfony\Contracts\EventDispatcher\Event;
 
@@ -61,12 +62,14 @@ final class StorageAuditEvent extends Event
      * @param string|null $scope scope key, null = the instance
      * @param string|null $actor user identifier, null = console / worker
      * @param array<string, scalar|null> $details plain details
+     * @param DateTimeImmutable $occurredAt when it happened (2.2, REQ-ARCH-001 rule 4: events carry ids and the time)
      */
     public function __construct(
         public readonly string $action,
         public readonly ?string $scope = null,
         public readonly ?string $actor = null,
         public readonly array $details = [],
+        public readonly DateTimeImmutable $occurredAt = new DateTimeImmutable(),
     ) {
     }
 }
