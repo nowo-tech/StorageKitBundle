@@ -20,8 +20,9 @@ use function strlen;
  * - **Active content** ({@see self::isActive()}): HTML, XHTML, SVG, XML (and every `+xml` type), XSL and script types
  *   are never sent with their own type. They are served as `application/octet-stream`, `attachment`, so a browser
  *   never renders or runs them, whatever the context allowed at upload.
- * - **Inline** ({@see self::inlineSafe()}): only the raster images StorageKit re-encoded itself (PNG, JPEG, GIF, WebP
- *   variants and processed originals) and the audio / video types of {@see self::INLINE_MEDIA} (played through
+ * - **Inline** ({@see self::inlineSafe()}): only raster images StorageKit checked by magic bytes and header and serves
+ *   under that type with `nosniff` (re-encoded originals, GIF / animated WebP image uploads kept as they came, variants
+ *   written through the variant port; audit ZCK-SK-I3) and the audio / video types of {@see self::INLINE_MEDIA} (played through
  *   `<audio>` / `<video>`) may be served `inline`. Everything else is `attachment`.
  *
  * Stateless (static methods and constants only).
@@ -110,7 +111,7 @@ final class MediaTypes
     }
 
     /**
-     * Whether an object of `$type` may be served `inline`: a raster image StorageKit re-encoded (`$reencoded`), or an
+     * Whether an object of `$type` may be served `inline`: a raster image StorageKit checked (`$reencoded`: re-encoded, or verified by magic bytes and header and served under its raster type), or an
      * audio / video type of {@see self::INLINE_MEDIA}. Never active content.
      */
     public static function inlineSafe(string $type, bool $reencoded): bool

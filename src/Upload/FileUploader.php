@@ -200,12 +200,48 @@ final readonly class FileUploader implements FileUploaderInterface, FileVariantW
 
             throw $e;
         }
-        // After the commit: the object the variant replaced (never the original's).
-        if ($replaced !== null && $replaced !== $key && $replaced !== $file->getStorageKey()) {
-            $this->discard($connection, $replaced);
+        $view     = $this->view($file, $variants, $total);
+        $obsolete = $replaced !== null && $replaced !== $key && $replaced !== $file->getStorageKey() ? $replaced : null;
+        if ($this->entityManager->connection()->isTransactionActive()) {
+            // Inside the host's transaction (audit ZCK-SK-L1): nothing is deleted until the host says how it ended.
+            // @igor-ignore - The closures belong to this write's view only (a per-request WeakMap entry).
+            PendingVariantObjects::put(
+                $view,
+                function () use ($connection, $obsolete): void {
+                    if ($obsolete !== null) {
+                        $this->discard($connection, $obsolete);
+                    }
+                },
+                function () use ($connection, $key): void {
+                    $this->discard($connection, $key);
+                },
+            );
+        } elseif ($obsolete !== null) {
+            // After the commit: the object the variant replaced (never the original's).
+            $this->discard($connection, $obsolete);
         }
 
-        return $this->view($file, $variants, $total);
+        return $view;
+    }
+
+    /**
+     * After the host committed: deletes the objects the variants of `$written` replaced (2.2, audit ZCK-SK-L1).
+     */
+    public function afterVariantCommit(StoredFileView ...$written): void
+    {
+        foreach ($written as $view) {
+            PendingVariantObjects::settle($view, 'commit');
+        }
+    }
+
+    /**
+     * After the host rolled back: deletes the objects `$written` wrote (the rows point at the previous ones again).
+     */
+    public function afterVariantRollback(StoredFileView ...$written): void
+    {
+        foreach ($written as $view) {
+            PendingVariantObjects::settle($view, 'rollback');
+        }
     }
 
     /**
@@ -312,6 +348,7 @@ final readonly class FileUploader implements FileUploaderInterface, FileVariantW
     {
         rewind($handle);
         $context = hash_init('sha256');
+        // A source that changed since it was opened (a file grown or cut) is refused.
         if (hash_update_stream($context, $handle) !== $size) {
             throw new UploadRefused(UploadRefused::SOURCE);
         }

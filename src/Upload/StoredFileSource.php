@@ -14,6 +14,7 @@ use function fopen;
 use function fstat;
 use function is_file;
 use function is_link;
+use function preg_match;
 use function str_contains;
 
 /**
@@ -39,8 +40,8 @@ final readonly class StoredFileSource
         public string $path,
         public int $size,
     ) {
-        if ($path === '' || str_contains($path, "\0")) {
-            throw new InvalidArgumentException('A stored file source needs the path of a local file.');
+        if (!self::isLocal($path)) {
+            throw new InvalidArgumentException('A stored file source needs the path of a local file (no stream wrapper).');
         }
         if ($size < 0) {
             throw new InvalidArgumentException('A stored file source cannot have a negative size.');
@@ -54,12 +55,21 @@ final readonly class StoredFileSource
      */
     public static function fromPath(string $path): self
     {
-        if ($path === '' || str_contains($path, "\0") || is_link($path) || !is_file($path)) {
+        if (!self::isLocal($path) || is_link($path) || !is_file($path)) {
             throw new InvalidArgumentException('A stored file source must be a regular local file.');
         }
         clearstatcache(true, $path);
 
         return new self($path, (int) filesize($path));
+    }
+
+    /**
+     * Whether `$path` can name a local file: not empty, no NUL byte, no stream wrapper (`php://`, `phar://`, `data:`…;
+     * audit ZCK-SK-I2).
+     */
+    public static function isLocal(string $path): bool
+    {
+        return $path !== '' && !str_contains($path, "\0") && !str_contains($path, '://') && preg_match('/^data:/i', $path) !== 1;
     }
 
     /**

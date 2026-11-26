@@ -28,7 +28,6 @@ use Nowo\StorageKitBundle\Tests\Fixtures\PlainDelivery;
 use Nowo\StorageKitBundle\Tests\Fixtures\UploadLimit;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
-use Nowo\StorageKitBundle\Tests\Support\GrowingFileStream;
 use Nowo\StorageKitBundle\Tests\Support\Images;
 use Nowo\StorageKitBundle\Tests\Support\StatementHook;
 use Nowo\StorageKitBundle\Tests\Support\StatementHooks;
@@ -42,19 +41,21 @@ use Nowo\StorageKitBundle\Upload\ImageUploaderInterface;
 use Nowo\StorageKitBundle\Upload\StoredFileSource;
 use Nowo\StorageKitBundle\Upload\StoredFileView;
 use Nowo\StorageKitBundle\Upload\UploadRefused;
+use ReflectionMethod;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 use Throwable;
 
 use function array_keys;
 use function array_values;
+use function fclose;
 use function file_put_contents;
+use function fopen;
+use function fwrite;
 use function hash;
 use function ob_get_clean;
 use function ob_start;
 use function str_repeat;
-use function stream_wrapper_register;
-use function stream_wrapper_unregister;
 use function strlen;
 use function strtoupper;
 use function substr;
@@ -216,17 +217,18 @@ final class GenericFilesTest extends KernelTestCase
         $this->refused(UploadRefused::OFF, fn (): StoredFileView => $this->upload($kernel));
     }
 
-    public function testASourceThatGrowsWhileItIsReadIsRefused(): void
+    public function testAStreamWrapperIsNeverASource(): void
     {
-        $kernel = $this->kernel();
-        stream_wrapper_register(GrowingFileStream::SCHEME, GrowingFileStream::class);
-        try {
-            $this->refused(UploadRefused::SOURCE, fn () => $this->service($kernel, FileUploaderInterface::class)->uploadFile(new InMemoryUser('alice', null), 'chat', 'c1', new StoredFileSource(GrowingFileStream::SCHEME . '://10', 10), 'a.txt', 'text/plain'));
-        } finally {
-            stream_wrapper_unregister(GrowingFileStream::SCHEME);
+        foreach (['php://memory', 'php://temp', 'phar:///tmp/x.phar/a', 'data:text/plain,hello', 'DATA:text/plain,x', 'file:///etc/passwd'] as $path) {
+            foreach ([static fn (): StoredFileSource => new StoredFileSource($path, 5), static fn (): StoredFileSource => StoredFileSource::fromPath($path)] as $build) {
+                try {
+                    $build();
+                    self::fail('accepted ' . $path);
+                } catch (InvalidArgumentException) {
+                    self::assertFalse(StoredFileSource::isLocal($path));
+                }
+            }
         }
-        self::assertSame(0, $this->rows($kernel));
-        self::assertSame([], $this->objects($kernel));
     }
 
     public function testAnInsertConflictIsRethrownAndAnObjectThatCannotBeDeletedIsLogged(): void
@@ -264,6 +266,49 @@ final class GenericFilesTest extends KernelTestCase
         }
         self::assertCount(1, $this->objects($kernel));
         self::assertSame(0, $this->rows($kernel));
+    }
+
+    public function testARemovalOrPurgeThatLosesItsRowBeforeTheLockedReadDoesNothing(): void
+    {
+        $kernel = $this->bootKernel(extra: static function (ContainerConfigurator $container): void {
+            $services = $container->services();
+            $services->set('test.chat_context', ChatContext::class)->public()->tag('nowo_storage_kit.file_context');
+            $services->set(StatementHooks::class)->public();
+            $services->set(StatementHook::class)->args([service(StatementHooks::class)])->tag('doctrine.middleware');
+        });
+        $this->profile($kernel);
+        $connection = $this->entityManager($kernel)->getConnection();
+        $hooks      = $this->service($kernel, StatementHooks::class);
+
+        // Removed by someone else just before the claim: nothing to report, nothing deleted twice.
+        $view = $this->upload($kernel);
+        $hooks->onceBefore('SELECT storage_key, variants FROM', static function () use ($connection): void {
+            $connection->executeStatement('DELETE FROM storage_kit_file');
+        });
+        self::assertNull($this->service($kernel, FileRemoverInterface::class)->remove($view->uuid, 'chat', 'c1'));
+        self::assertCount(1, $this->objects($kernel), 'the claim found no row, so no object was touched');
+
+        // Referenced again just before the purge's claim: the file is kept.
+        $kept = $this->upload($kernel);
+        $hooks->onceBefore('SELECT storage_key, variants FROM', fn () => $this->service($kernel, FileReferencesInterface::class)->sync('chat_attachment', 'att-9', '![](storage-file:' . $kept->uuid . ')', ['chat', 'c1']));
+        self::assertSame(0, $this->service($kernel, FilePurger::class)->run(new DateTimeImmutable('+30 days'))['purged']);
+        self::assertSame(1, $this->rows($kernel));
+    }
+
+    public function testASourceThatChangedSizeWhileItWasReadIsRefused(): void
+    {
+        $handle = fopen('php://memory', 'w+');
+        self::assertIsResource($handle);
+        fwrite($handle, 'twelve bytes');
+        $sha256 = new ReflectionMethod(FileUploader::class, 'sha256');
+        try {
+            $sha256->invoke($this->service($this->kernel(), FileUploader::class), $handle, 5);
+            self::fail('accepted');
+        } catch (UploadRefused $e) {
+            self::assertSame(UploadRefused::SOURCE, $e->reason);
+        } finally {
+            fclose($handle);
+        }
     }
 
     public function testImagesIntoAGenericContextFollowItsListAndLimit(): void
@@ -322,6 +367,49 @@ final class GenericFilesTest extends KernelTestCase
         // The removal port deletes every object of the file.
         self::assertNotNull($this->service($kernel, FileRemoverInterface::class)->remove($view->uuid, 'chat', 'c1'));
         self::assertSame([], $this->objects($kernel));
+    }
+
+    public function testInsideAHostTransactionTheReplacedObjectWaitsForTheOutcome(): void
+    {
+        $kernel     = $this->kernel();
+        $view       = $this->upload($kernel);
+        $writer     = $this->service($kernel, FileVariantWriterInterface::class);
+        $connection = $this->entityManager($kernel)->getConnection();
+        $writer->putVariant($view->uuid, 'chat', 'c1', 'thumb', Images::png(10, 5), 'image/png');
+        self::assertCount(2, $this->objects($kernel));
+
+        // Rolled back: the row names the first thumb again, which is still there; the rolled-back object goes.
+        $connection->beginTransaction();
+        $rolledBack = $writer->putVariant($view->uuid, 'chat', 'c1', 'thumb', Images::png(12, 6), 'image/png');
+        self::assertCount(3, $this->objects($kernel), 'nothing deleted before the host decides');
+        $connection->rollBack();
+        $writer->afterVariantRollback($rolledBack);
+        $writer->afterVariantRollback($rolledBack);
+        self::assertCount(2, $this->objects($kernel));
+        self::assertContains(Images::png(10, 5), $this->objects($kernel));
+        $this->bundleManager($kernel)->clear();
+        $body = '';
+        $this->service($kernel, FileRangeDeliveryInterface::class)->deliverInContext($view->uuid, 'chat', 'c1', 'thumb')->writeTo(static function (string $chunk) use (&$body): void {
+            $body .= $chunk;
+        });
+        self::assertSame(Images::png(10, 5), $body, 'the thumb the row names is still served');
+
+        // Committed: the replaced object goes after the commit.
+        $connection->beginTransaction();
+        $committed = $writer->putVariant($view->uuid, 'chat', 'c1', 'thumb', Images::png(14, 7), 'image/png');
+        $connection->commit();
+        self::assertCount(3, $this->objects($kernel));
+        $writer->afterVariantCommit($committed, $view);
+        self::assertCount(2, $this->objects($kernel));
+        self::assertNotContains(Images::png(10, 5), $this->objects($kernel));
+        self::assertContains(Images::png(14, 7), $this->objects($kernel));
+
+        // A first variant inside a transaction replaces nothing; the commit clean-up is then a no-op.
+        $connection->beginTransaction();
+        $first = $writer->putVariant($view->uuid, 'chat', 'c1', 'preview', Images::png(16, 8), 'image/png');
+        $connection->commit();
+        $writer->afterVariantCommit($first);
+        self::assertCount(3, $this->objects($kernel));
     }
 
     public function testAVariantIsRefusedForAnotherContextOrBadBytesAndLeavesNoObject(): void
