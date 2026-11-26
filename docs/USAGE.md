@@ -9,6 +9,7 @@
   - [The private entity manager (1.8)](#the-private-entity-manager-18)
   - [A dedicated entity manager (1.5)](#a-dedicated-entity-manager-15)
   - [Square images: profile pictures and logos (1.6)](#square-images-profile-pictures-and-logos-16)
+  - [Generic files: attachments of any type (2.2)](#generic-files-attachments-of-any-type-22)
 - [The instance bucket](#the-instance-bucket)
   - [The `storage` settings section](#the-storage-settings-section)
   - [A bucket from the configuration](#a-bucket-from-the-configuration)
@@ -267,6 +268,89 @@ matched). Outside a transaction the `file_removed` / `file_expired` audit event 
 `$this->remover->afterCommit($removed)` after the commit (a rolled-back removal leaves no trace). UserKitBundle 1.18
 (`owner_images`) wraps all of this for avatars and organization logos.
 
+### Generic files: attachments of any type (2.2)
+
+Images are re-encoded by StorageKit; any other file (a PDF, an office document, a voice note) is stored **as uploaded**
+through four ports. ChatKit 2.7 attachments are built on them; any host can use them the same way.
+
+**1. A context that accepts files.** Implement `Context\GenericFileContextInterface` (it extends
+`FileContextInterface`; tag it like any context). Only such a context takes generic files; every other context refuses
+them like an unknown one (`context`). It adds two answers:
+
+- `acceptedTypes()`: the media types it stores, bare and lower case (`application/pdf`, `audio/mpeg`…). A declared type
+  is accepted only when it is **exactly** one of them (`===`: no case folding, no `; charset=` parameter).
+- `maxBytes()`: its largest file. The bundle's ceiling `upload.files.max_bytes` (100 MiB) caps it. Image uploads into
+  the context (`uploadImage()`) follow the same list and limit.
+
+`readable()` still decides StorageKit's own download route. A context whose files must only be served by your route
+(a quarantine, signed URLs) answers `[]` there: `GET <prefix>/files/{uuid}/…` then answers 404 for all of its files.
+
+**2. Upload.** Write the bytes to a local temporary file, sniff the type yourself (ext-fileinfo magic **and** your
+extension rules), then call `Upload\FileUploaderInterface::uploadFile()`:
+
+```php
+$source = new StoredFileSource($tmpPath, filesize($tmpPath));      // or StoredFileSource::fromPath($tmpPath)
+$view   = $this->files->uploadFile($user, 'chat', $conversationUuid, $source, $clientName, $sniffedType);
+// $view->uuid, ->mimeType, ->size, ->sha256; width / height are 0 (stored as uploaded)
+```
+
+- The bytes are **streamed** to the bucket and hashed in chunks (a 25 MiB file never becomes a PHP string). The source
+  must be a regular file (not a symbolic link) of exactly the declared size when it is read (`source` otherwise).
+- A declared PNG, JPEG, GIF or WebP must match its magic bytes (`type`). The stored name is a label only
+  (`FileNames::clean()`: last path segment, no control or bidi characters, `:` replaced, at most 200 characters); the
+  object key is server-generated (`yyyy/mm/<uuid>`).
+- Refusals (`UploadRefused::$reason`): `context`, `type`, `empty`, `size`, `off`, `limit` (`UploadLimitInterface`),
+  `source`, `storage`. Nothing is stored on a refusal.
+- **No lock is held while the bytes travel** (REQ-RUNTIME-003 rule 9): the object is written first, then one DBAL
+  insert. Call it **outside** your own transaction, then write your row (with its own idempotency key) in your unit. If
+  your unit rolls back, `FileRemoverInterface::expire()` (or `remove()`) the file. Inside a transaction the audit
+  event waits for `afterCommit($view)`, as for images.
+- Like an image, the file is an **orphan** until something points at it; the purge deletes orphans after
+  `purge.retention_days`. Reference it from your row: `FileReferencesInterface::sync('chat_attachment',
+  $attachmentUuid, '![](storage-file:' . $view->uuid . ')', ['chat', $conversationUuid])`, and `forget()` it when the
+  row goes. Make your context's `existing()` answer the conversations that still exist.
+
+**3. Previews.** `Upload\ImageThumbnailerInterface::thumbnail($source, $maxEdge)` is the bundle's GD pipeline as a
+port: type from the magic bytes, pixel cap (`upload.max_pixels`) read from the header **before** decoding, memory
+guard, always re-encoded (EXIF / GPS / XMP dropped, a GIF becomes a PNG of its first frame), longest side at most
+`$maxEdge` (16–4096 px). Attach the result with `Upload\FileVariantWriterInterface::putVariant($uuid, $contextType,
+$contextId, 'thumb'|'preview', $bytes, $mediaType)`: the bytes must be a raster image matching `$mediaType`, at most
+`upload.max_bytes`. A variant replaces the previous one of that name (the old object is deleted after the commit).
+
+```php
+$thumb = $this->thumbnailer->thumbnail(new StoredFileSource($tmp, $size), 480);
+$this->variants->putVariant($uuid, 'chat', $conversationUuid, 'thumb', $thumb->original['bytes'], $thumb->original['mime']);
+```
+
+**4. Reading on the server.** `Download\FileReaderInterface::open($uuid, $contextType, $contextId, $variant, $length)`
+gives a `FileStream` (`read()`, `eof()`, `close()`, `size`, `mediaType`) for a scanner or a preview builder, at most
+the stored size (or `$length` bytes). Close it in a `finally`. It checks no viewer: it is for your server-side code.
+
+**5. Serving from your route.** After your own checks (membership, quarantine, signature), call
+`Download\FileRangeDeliveryInterface::deliverInContext($uuid, $contextType, $contextId, $variant, $rangeHeader,
+$inline, $ttl)` and turn the result into a response with `FileDeliveryResponder` (or read the VO in your own adapter):
+
+```php
+$range = $request->headers->has('If-Range') ? null : $request->headers->get('Range');
+try {
+    return $this->responder->toResponse($this->delivery->deliverInContext($uuid, 'chat', $conversationUuid, $variant, $range, true, 60));
+} catch (FileNotDeliverable) {
+    throw new NotFoundHttpException();   // the same 404 for missing, foreign and expired
+}
+```
+
+- `Range`: a single `bytes=` range answers `206` with `Content-Range` (media seeking), one past the end `416`, anything
+  else the whole file (`200`). Redirect-delivered profiles answer `302` to a URL pre-signed for `$ttl` seconds (at most
+  `download.url_ttl`); the bucket serves ranges itself.
+- Disposition: `attachment`, unless `$inline` is true **and** the object is safe inline: a variant (a raster image
+  StorageKit checked) or an audio / video type (`MediaTypes::INLINE_MEDIA`). A PDF, an office file or an image stored as
+  uploaded is always an attachment. Active content (HTML, SVG, XML, script) is always an attachment of type
+  `application/octet-stream` with a `.bin` name. Every stream carries `nosniff`, `Content-Security-Policy:
+  default-src 'none'; sandbox`, `Cross-Origin-Resource-Policy: same-origin`, `noindex` and `no-referrer`.
+- The file name is sent as `filename*` (UTF-8) with an ASCII `filename` fallback.
+
+Ids are compared byte for byte everywhere: an upper-case UUID, `C1` for `c1` or a padded context id finds nothing.
+
 ### Listening to it
 
 `Audit\StorageAuditEvent` (`action`, `scope`, `actor` identifier, `details`) is dispatched after every mutation with
@@ -493,6 +577,13 @@ decorate it to serve files your way) and `FileDeliveryResponder` builds the resp
 
 Both are `Cache-Control: private, max-age=<url_ttl − 60>`, `X-Robots-Tag: noindex`, `Referrer-Policy: no-referrer`.
 
+2.2: the route also answers a single `Range` with `206` (`416` past the end; an `If-Range` gets the whole file) when the
+download port serves ranges (`FileRangeDeliveryInterface`; the bundle's own does, a host port that implements only
+`FileDeliveryInterface` keeps answering `200`). A generic file (stored as uploaded) is served as its stored type (active
+types as `application/octet-stream`), always `attachment` unless it is audio / video and `download.disposition` is
+`inline`, with `Accept-Ranges: bytes`; a variant that was not written is a 404 for it (only images fall back to the
+original). Image downloads keep their 1.4 headers.
+
 ### CSP for redirect-delivered profiles
 
 `Http\StorageCspSources::imgSrc()` lists the browser origins of the config profiles with `delivery: redirect` (never a
@@ -703,7 +794,9 @@ final class TenantUploaderKeys implements UploaderKeyResolverInterface
 
 - `exportUser(UserInterface $user): list<array>` — uuid, name, type, size, dimensions, sha256, context, whether a text
   still shows it, created at and an absolute link to the original (it answers while the user may still read the
-  context);
+  context). 2.2: a generic file of a context that StorageKit's route never serves (`readable()` answers `[]`, ChatKit's
+  `chat`) has a link that answers 404; read its bytes with `FileReaderInterface::open($uuid, $type, $id, 'original')`
+  (the row's `context` is `<type>/<id>`) when you build the export archive. Generic files have `width` / `height` 0;
 - `eraseUser(UserInterface $user): int` — files a kept text still shows lose their name, uploader and key; files no
   text shows are expired for the next purge. No bucket call (erasers usually run in one transaction) and, since 1.5, no
   flush: the rows are changed with DBAL `UPDATE` statements, so nothing your code left pending is committed. Audited

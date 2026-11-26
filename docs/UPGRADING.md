@@ -55,6 +55,39 @@ The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([To 2.0.0](#to-
 
 ## Unreleased
 
+From **2.1.0**: `composer update nowo-tech/storage-kit-bundle`, then widen one column **before or with the code** (a
+generic file with a type longer than 32 characters cannot be stored without it; images are not affected).
+
+`storage_kit_file.mime_type` grows from 32 to 127 characters. `php bin/console doctrine:migrations:diff` (or
+`doctrine:schema:update --dump-sql`) produces it:
+
+```sql
+-- MySQL 8.4 / MariaDB 11.4
+ALTER TABLE storage_kit_file MODIFY mime_type VARCHAR(127) NOT NULL;
+-- PostgreSQL 16+
+ALTER TABLE storage_kit_file ALTER mime_type TYPE VARCHAR(127);
+```
+
+With `doctrine.table_prefix`, use your prefixed table name. PostgreSQL widens a `VARCHAR` without rewriting the table.
+On MySQL / MariaDB (utf8mb4) the change crosses the 255-byte length prefix, so InnoDB copies the table and blocks writes
+to it meanwhile: run it in a quiet window on a large table (the table holds one row per uploaded file).
+
+What changes for you:
+
+- **Nothing unless you use the new ports.** `ImageUploaderInterface::uploadImage()`, `SquareImageUploaderInterface`,
+  `FileDeliveryInterface::deliver()` and the upload endpoint are unchanged; image downloads keep their headers.
+- **Generic files** need a context that implements `Context\GenericFileContextInterface` (its type allow-list and size
+  limit) and the new ports: [USAGE](USAGE.md#generic-files-attachments-of-any-type-22). Keep PHP
+  `upload_max_filesize` / `post_max_size` and the web server's request body limit at or above the largest limit you
+  allow (`upload.files.max_bytes`, default 100 MiB, caps every context).
+- **The download route answers `Range`** (`206` / `416`) when its port serves ranges (the bundle's does). A host port
+  aliased to `FileDeliveryInterface` only keeps answering `200`.
+- **A unit whose rollback fails now closes the connection** (lost savepoint after a MySQL / MariaDB deadlock): if you
+  call a StorageKit write inside your own transaction and it fails with a deadlock, your transaction is gone (the
+  server already rolled it back); your `commit()` / `rollBack()` reports "no active transaction". Run the whole unit
+  again, as for any deadlock.
+- `StorageAuditEvent` gains `occurredAt` (a trailing constructor argument with a default).
+
 ## To 2.1.0
 
 From **2.0.1**:

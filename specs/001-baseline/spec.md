@@ -90,6 +90,17 @@ copy, **then** every file points at the target, the old profile is retired and `
 `nowo:storage-kit:adopt-instance-bucket` runs, **then** its connection is written into the `storage` section and the row
 becomes the settings-backed active profile; existing files keep downloading.
 
+### US-8 — Store a generic file (P1, 2.2)
+
+**Given** a context implementing `GenericFileContextInterface` that accepts `application/pdf` up to 25 MiB, **when** host
+code calls `uploadFile()` with a local file and the type it sniffed, **then** the bytes are stored as uploaded (streamed,
+hashed in chunks) and a view is returned; a type that is not exactly in the list, a size above the limit, a declared
+image whose magic bytes differ, or a context that is not generic is refused and nothing is stored. A generated
+`thumb` is attached with `putVariant()`; `FileReaderInterface` reads the bytes on the server;
+`FileRangeDeliveryInterface` serves them from the host's route with `Range` (`206`), never inline unless they are a
+re-encoded image or audio / video, never as active content. StorageKit's own route serves them only when the
+context's `readable()` allows it.
+
 ### Edge cases
 
 - An empty or malformed configuration profile makes that profile unusable (uploads off), logged by name only.
@@ -185,6 +196,16 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-UP-006** — `UploadRefused`: stable refusal reasons.
 - **FR-UP-007** — `ImageUploaderInterface` / `StoredFileView` (1.3 – 1.5): upload port returning a read-only view, no
   entity.
+- **FR-UP-008** — `FileUploaderInterface` / `FileUploader` / `StoredFileSource` / `FileNames` /
+  `GenericFileContextInterface` / `MediaTypes` (2.2): generic files stored as uploaded into contexts that accept them;
+  exact type allow-list, context size limit capped by `upload.files.max_bytes`, owner quota, magic check of declared
+  images, streamed write and chunked hash, no lock during the transfer, DBAL insert, cleanup on failure, conflicts
+  rethrown, audit after the commit.
+- **FR-UP-009** — `FileVariantWriterInterface` (2.2): a generated raster `thumb` / `preview` attached to a file found by
+  exact UUID and context; object first, then a row-locked unit (`FOR UPDATE`, context and expiry re-checked); the
+  replaced object deleted after the commit.
+- **FR-UP-010** — `ImageThumbnailerInterface` / `GdImageThumbnailer` (2.2): the GD pipeline as a port (pixel cap before
+  decoding, memory guard, always re-encoded, bounded edge).
 
 ### Download and rendering
 
@@ -198,6 +219,11 @@ becomes the settings-backed active profile; existing files keep downloading.
 - **FR-DL-007** — `FileDeliveryInterface`, `FileDeliveryResponder`, `DeliverableFile`, `DeliverableFileData`,
   `FileNotDeliverable`, `StoredImageResolverInterface` (1.5): delivery and image-resolver ports with framework-free
   value objects.
+- **FR-DL-008** — `FileRangeDeliveryInterface` / `ByteRange` / `MediaTypes` (2.2): context-bound delivery for host
+  routes and the bundle's route: single `Range` → `206` / `416`, inline only for re-encoded images and audio / video,
+  active content as `application/octet-stream` attachment, RFC 6266 names, optional shorter pre-signed lifetime.
+- **FR-DL-009** — `FileReaderInterface` / `FileReader` / `FileStream` (2.2): bounded server-side read stream by exact UUID
+  and context, closed by the caller.
 
 ### References and purge
 

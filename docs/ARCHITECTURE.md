@@ -78,14 +78,30 @@ for everything else.
    `StoredFile` row (orphan from now). Any failure removes the objects already written (`503 storage`).
 4. `file_uploaded` audit event; `201` with the Markdown snippet.
 
+### Generic file flow (2.2)
+
+1. Host code (ChatKit) writes the bytes to a local temporary file, sniffs the type and calls
+   `FileUploader::uploadFile()`: the context must be a `GenericFileContextInterface` whose `writableTarget()` answers
+   (404 semantics otherwise) → type `===` one of `acceptedTypes()` → size within `maxBytes()` and
+   `upload.files.max_bytes` → profile and settings → `UploadLimitInterface`.
+2. The source is opened once (`fstat` size check, magic bytes of a declared image, chunked SHA-256), streamed to
+   `gmdate('Y/m')/<uuid v4>` (no lock held), then the DBAL insert (orphan from now; width / height 0).
+3. Previews: `GdImageThumbnailer::thumbnail()` (the image pipeline as a port) → `FileUploader::putVariant()`: the object
+   under `<key>-<variant>-<random>`, then one unit locking the row (`FOR UPDATE`), re-checking the exact context and
+   expiry, writing `variants` + `total_bytes`; the replaced object deleted after the commit.
+4. Server-side reads (`FileReader::open()`) and host routes (`FileDelivery::deliverInContext()`) find the file by
+   canonical UUID **and** exact context (`StoredFileRepository::findInContext()`), then read ranges of the object.
+
 ## Download flow
 
 1. `GET /storage/files/{uuid}/{variant}`: `findOneByUuid()` → `FileContexts::readable(viewer, [file])` → 404 for missing
    and forbidden alike.
 2. `FileDelivery::deliver()` + `FileDeliveryResponder`: the file's own profile → settings (404 when the profile is no longer connectable) →
    `redirect` profiles: `302` to `StorageConnection::presign()` (signed for the public endpoint when set);
-   others: `StorageConnection::read()` streamed with the sandbox / `nosniff` headers. Both private, `noindex`,
-   `no-referrer`.
+   others: `StorageConnection::readRange()` streamed with the sandbox / `nosniff` headers. Both private, `noindex`,
+   `no-referrer`. 2.2: when the port also implements `FileRangeDeliveryInterface` (the bundle's does) the controller
+   calls `deliverInContext()` with the file's own context and the `Range` header: `206` / `416` answers, generic files
+   always `attachment` unless audio / video, active types as `application/octet-stream`.
 
 ## Rendering flow
 
@@ -170,6 +186,9 @@ boundaries. See
 | Interface / service | Purpose |
 | --- | --- |
 | `Context\FileContextInterface` (tag `nowo_storage_kit.file_context`) | who may write / read a context; scope and owner of uploads |
+| `Context\GenericFileContextInterface` (2.2, same tag) | a context that takes generic files: its allow-list of types and its size limit |
+| `Upload\FileUploaderInterface`, `Upload\FileVariantWriterInterface`, `Upload\ImageThumbnailerInterface` (2.2) | generic uploads, generated variants, the image pipeline as a port |
+| `Download\FileReaderInterface`, `Download\FileRangeDeliveryInterface` (2.2) | server-side reads; context-bound delivery with `Range` for host routes |
 | `Reference\FileReferenceSourceInterface` (tag `nowo_storage_kit.reference_source`) | texts that point at files |
 | `Scope\ScopeResolverInterface` (`scopes.resolver`) | context target → scope |
 | `Scope\ScopeAccessCheckerInterface` (`scopes.access_checker`) | who manages a scope's buckets |

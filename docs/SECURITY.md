@@ -20,6 +20,7 @@ Bundle-specific security analysis. The short GitHub reporting policy lives in [`
   - [Credentials](#credentials)
   - [References and the purge](#references-and-the-purge)
   - [Removal (1.6)](#removal-16)
+  - [Generic files (2.2)](#generic-files-22)
   - [Worker-mode state](#worker-mode-state)
 - [Admin UI exposure and debug-only switches](#admin-ui-exposure-and-debug-only-switches)
 - [Personal data (GDPR)](#personal-data-gdpr)
@@ -44,8 +45,8 @@ SECURITY.md), DoctrineEncrypt's key management, the bucket provider, or the Mark
 
 ### Assets
 
-- **Uploaded files** (images in private buckets) and their metadata (`storage_kit_file`: original name, uploader,
-  context, owner).
+- **Uploaded files** (images in private buckets; 2.2: generic files of any allow-listed type, stored as uploaded) and
+  their metadata (`storage_kit_file`: original name, uploader, context, owner).
 - **Bucket credentials**: access keys and secrets of the instance bucket (Instance Settings secret), scope / target /
   retired buckets (`storage_kit_profile.secret`, DoctrineEncrypt) and configuration profiles (environment).
 - **The application's network position**: what the server can reach (private networks, cloud metadata).
@@ -90,7 +91,8 @@ SECURITY.md), DoctrineEncrypt's key management, the bucket provider, or the Mark
 - Uploads are accepted **by content only**: PNG, JPEG, GIF, WebP magic bytes must match what `getimagesizefromstring()`
   reads; the file name and the declared type are ignored. SVG, HTML and anything else are refused (`422 type`).
 - JPEG, PNG and still WebP are decoded and re-encoded (drops EXIF / GPS / XMP and trailing payloads).
-- Downloads are sent with the stored (sniffed) type only if it is one of the four, else `application/octet-stream`;
+- Image downloads are sent with the stored (sniffed) type only if it is one of the four, else `application/octet-stream`
+  (2.2: generic files, see [Generic files](#generic-files-22));
   streamed responses carry `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
   `Cross-Origin-Resource-Policy: same-origin` and `Content-Disposition: attachment` by default (`download.disposition`).
 - Upload JSON answers are `private, no-store`, `nosniff`.
@@ -223,7 +225,31 @@ section unless `endpoints.guard_instance_profile: false`):
   byte for byte (`===` on the loaded row): a UUID learned elsewhere cannot remove another context's file. Malformed ids
   and contexts are refused before any query. Statements go by primary key.
 
+### Generic files (2.2)
+
+`FileUploaderInterface`, `FileVariantWriterInterface`, `ImageThumbnailerInterface`, `FileReaderInterface` and
+`FileRangeDeliveryInterface` (see [USAGE](USAGE.md#generic-files-attachments-of-any-type-22)). Threats and controls:
+
+| Threat | Control |
+| --- | --- |
+| A context receives a type it never asked for | Deny by default: only a `GenericFileContextInterface` takes generic files; the declared type must be a bare lower-case `type/subtype` that is `===` one of its `acceptedTypes()` (no case folding, no parameters, no trimming). The caller sniffs the bytes (ext-fileinfo); StorageKit never trusts the type for rendering. |
+| Polyglots (GIFAR, PDF + HTML, JPEG + JS) | A declared raster image must match its magic bytes. An original stored as uploaded is **never** served inline (only re-encoded images and the audio / video types of `MediaTypes::INLINE_MEDIA` may be), always with `nosniff`, the sandbox CSP and `Cross-Origin-Resource-Policy: same-origin`. Variants must be raster images matching their declared type (`putVariant`), and the thumbnail port always re-encodes. |
+| Active content (HTML, SVG, XML, script) | Never sent with its own type: `application/octet-stream`, `attachment`, an ASCII `.bin` name (also in the bucket's `Content-Type` and in pre-signed overrides). A host may store it, never render it. |
+| Path traversal, header injection | The object key is `yyyy/mm/<uuid>` (variants add `-<variant>-<random>`); the name is a label (`FileNames::clean()`: last segment, C0 / C1 controls and Unicode format characters such as RLO removed, `:` replaced, leading dots trimmed, ≤ 200 characters, invalid UTF-8 → `file`). In `Content-Disposition` the name goes through `HeaderUtils::makeDisposition()` (RFC 6266 / 8187 `filename*`) with `"`, `\`, `/` and controls replaced, plus an ASCII fallback. |
+| Decompression and memory bombs | The thumbnail port reads at most `upload.files.max_bytes`, checks `upload.max_pixels` from the header before decoding and the same memory budget as uploads (progressive JPEG included); variants are checked from their header (`upload.max_bytes`, `upload.max_pixels`). Generic files are never decoded, unpacked or parsed by StorageKit. |
+| Large files in PHP memory | Uploads stream from the local source to the bucket (`writeStream`) and are hashed in chunks; downloads and server-side reads are ranged and bounded by the stored size (a bucket that sends more is cut, a bucket that ignores a range for a later part is refused); bucket moves copy through a 2 MiB memory buffer that spills to a temporary file. |
+| Quarantine bypass through StorageKit's route | The route asks the context's `readable()`; a context that must not be served there (ChatKit's `chat`) answers `[]`, so every one of its files is a 404 there. A missing variant never falls back to a generic original. |
+| IDOR, look-alike ids | Every port that takes a file takes its context too: the row is matched by the canonical lower-case UUID (an upper-case or padded id finds nothing), then the context is compared with `===` on a DBAL read and again on the loaded row (no SQL collation decides). Unknown, foreign, expired and missing-variant answers are the same `FileNotDeliverable` / `context`. |
+| A swapped or growing source file | The source must be a regular file (not a symbolic link) of the declared size, checked with `fstat()` on the handle that is then hashed and streamed (`source` otherwise). |
+| Storage DoS | The context's `maxBytes()` capped by `upload.files.max_bytes` (default 100 MiB, at most 1 GiB) and the owner quota (`UploadLimitInterface`) before any byte is written. The bundle's upload endpoint and its rate limit are for images only: rate-limit the host action that calls `uploadFile()`. |
+| Range abuse | One range only (a list, another unit, a malformed or over-long header is ignored and the whole file sent); numbers at most 18 digits; `416` past the end; `If-Range` sends the whole file. |
+| Leaked pre-signed URL | `deliverInContext()` takes a lifetime (`$ttl`, capped at `download.url_ttl`): ChatKit asks for 60 s. |
+
 ### Worker-mode state
+
+2.2: generic files add no service state; every file handle, bucket response and GD image lives in the call that opened
+it (`FileStream` is a per-call value that cannot be cloned or serialized and closes its source on `close()` or when it
+is dropped). `GenericFilesWorkerTest` runs 300 rounds in one kept-alive kernel with flat memory.
 
 Request-scoped memos (connections, resolved profiles, per-viewer read decisions, pending references) are cleared on
 `kernel.reset`; profiles and connections also on a `storage` section change. Read decisions are keyed by viewer, so
@@ -303,6 +329,14 @@ Not audited yet: the independent audit is due before the first tag and will be r
 extracted with (SEC-STORAGE-SSRF, SEC-STORAGE-CSP-GLOBAL, SEC-FILE-REF-PIN; PERF-FILE-ORPHAN-UPDATE: keyset batches).
 
 ## Residual risks and host guidance
+
+- **Generic files are not scanned (2.2).** StorageKit stores what the caller hands it after the type and size checks;
+  it runs no virus engine. A host that shows generic files to other people must scan them first (ChatKit 2.7 keeps them
+  in quarantine until the host's scanner says clean) and serve them only through its own route. A context whose files
+  must not reach StorageKit's own download route answers `[]` from `readable()`.
+- **The caller's sniffing decides the type (2.2).** Beyond the raster-image magic check, StorageKit cannot tell a
+  mislabelled file: the declared type only decides the `Content-Type` (active types are never served as themselves) and
+  whether audio / video may be inline (played by a media element, never rendered as a page).
 
 - **GIF / animated WebP metadata (SEC-INFO-GIF-METADATA).** They are stored as uploaded (re-encoding would lose the
   animation): comments, XMP and other extension blocks survive. Privacy only; stripping them is on the

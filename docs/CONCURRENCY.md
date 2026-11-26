@@ -33,6 +33,9 @@ MySQL / MariaDB `GET_LOCK()`, PostgreSQL `pg_advisory_xact_lock()` (both wait at
 | Copy runner (`StorageSyncer::run`, Messenger handler, `nowo:storage-kit:sync`) | One small transaction per file (progress), no transaction around the bucket I/O | Symfony Lock per sync plus an atomic claim (`UPDATE … WHERE status = queued OR stale`); status changes are compare-and-set from `running`, so a cancel committed meanwhile wins | Console / worker: the failure is rethrown (Messenger retries) |
 | `nowo:storage-kit:adopt-instance-bucket` | Unit | Owner lock (instance) | Console: rethrown |
 | Upload endpoint / `ImageUploaderInterface` | One DBAL `INSERT` (a savepoint inside your transaction) | New random UUID and key per upload (`uniq_storage_kit_file_key`) | 409 JSON `{error: conflict, message, code}`; the objects already written are deleted again |
+| 2.2 generic upload (`FileUploaderInterface::uploadFile`) | No lock and no transaction while the bytes are streamed; then one DBAL `INSERT` (a savepoint inside your transaction) | New random UUID and key per upload; the object is written before the row, so a failed insert leaves no row (the object is deleted again) | Your code: a deadlock / lock wait is rethrown (retry-safe `CONFLICT_001` on your route), the object deleted; call it outside your own transaction |
+| 2.2 variant write (`FileVariantWriterInterface::putVariant`) | The object first (new random key, no lock); then `atomically()`: one short unit (a savepoint inside your transaction) | `SELECT … FOR UPDATE` on the file row (MySQL / MariaDB / PostgreSQL) re-checks the exact context and that the file is not expired, then one `UPDATE` of `variants` + `total_bytes`; the replaced object is deleted after the commit. Two writers of the same variant serialize on the row (last wins, no object left behind); a removal committed meanwhile wins (`context`) | Your code: the lock wait / deadlock rethrown, the new object deleted |
+| 2.2 server-side read / ranged delivery (`FileReaderInterface`, `FileRangeDeliveryInterface`) | No write | — | — |
 | First use: the instance's `storage` row, a config profile's row (`StorageProfiles`, from an upload or the settings listener) | `StorageEntityManager::exclusively()`: a savepoint inside your transaction, else one of its own; no manager flushed | Owner lock, then a locking re-read (1.7.1: `FOR UPDATE` on MySQL / MariaDB, waiting at most `owner_lock_timeout`, so a row inserted by another open transaction is waited for); a row the locking read sees but your snapshot does not is a retry-safe conflict, never a duplicate (inside your own transaction on MySQL / MariaDB the losing first use therefore always fails retry-safe and never reuses the row) | Bundle routes: 409 `CONFLICT_001`; your code: rethrown (`TransientStorageFailure` or the lock wait timeout) |
 | File references (`FileReferencesInterface::sync` / `forget`, the reference listener) | Your transaction (it runs after your flush); the insert in its own savepoint | Unique key `(file_id, source_type, source_id)` + `INSERT … SELECT … NOT EXISTS`; a unique violation (a concurrent save of the same text) is caught and dropped, never mapped to a conflict | Your route: the lock wait is rethrown to your code (the bundle never answers host routes) |
 | Download endpoint | No write | — | 409 `text/plain` if a read meets a lock |
@@ -135,6 +138,16 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
   and the pages of a replaced bucket (audit ZK-M1): a Move page of a discarded target saved after a new target, a
   Storage page saved after a switch at an equal version, and a token that names another row; each answers 409 with
   the new row unchanged.
+- `tests/Integration/Concurrency/GenericFilesRaceTest.php` (2.2, two kernels on MySQL 8.4, MariaDB 11.4 and
+  PostgreSQL, DBAL 3 and 4 in CI): a variant write waiting for a row lock held by another session answers
+  `CONFLICT_001` and deletes its object, then its retry works; a removal committed by the other session before the
+  locking read wins (`context`, no object left); two writers of one variant serialize on the row (the second waits
+  and gets `CONFLICT_001`, the stored variant is the first's until the retry); and (MySQL / MariaDB) a real deadlock
+  against a second process inside the host's transaction: the server rolls the whole transaction back, the unit's
+  savepoint is gone, so the connection is **closed** (never treated as rolled back), the deadlock is rethrown as a
+  retry-safe conflict and the connection works again at level 0.
+- `tests/Unit/Doctrine/LostSavepointRepairTest.php` (2.2): `rollBackTo()` / `rollBackSavepoint()` close the connection
+  when the rollback itself fails.
 - `tests/Unit/Concurrency`, `tests/Unit/EventListener/StorageKitConflictListenerTest.php`,
   `tests/Unit/Doctrine/OwnerLockTest.php`: the mapping (001 / 002, unique violations and lost connections excluded) and
   the lock per platform.
@@ -172,4 +185,12 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
 - **Orphan mark on PostgreSQL.** A text dropping a file while another adds it can leave `orphaned_since` set on a
   referenced file; the purge re-checks references before deleting, so the file is kept.
 - **Upload objects.** A failed upload insert deletes its objects again; if that delete fails too, the objects stay in
-  the bucket with no row (logged).
+  the bucket with no row (logged). The same holds for a refused variant write (2.2) and for the object a variant
+  replaced (deleted after the commit; a failed delete is logged and the object stays unreferenced).
+- **Lost savepoint (2.2).** When a unit's rollback itself fails (a MySQL / MariaDB deadlock already rolled back the
+  whole transaction, so "SAVEPOINT does not exist"), the bundle closes the connection and rethrows the original error.
+  Your open transaction is then gone too (it already was on the server): your `commit()` fails with "no active
+  transaction"; treat the original error as a retry-safe conflict and run the whole unit again.
+- **Owner quota of generic files (2.2).** `UploadLimitInterface::allows()` is asked before the bytes are stored, without
+  a lock (as for images): two concurrent uploads of one owner can both pass a quota that leaves room for one. Bound it
+  with your own per-owner lock or counter if the quota is a hard limit.

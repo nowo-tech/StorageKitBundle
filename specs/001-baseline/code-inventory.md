@@ -1,6 +1,6 @@
 # Code inventory — 001-baseline
 
-**Last audited**: 2026-11-27 (v2.1.0; 140/140 re-verified)
+**Last audited**: 2026-11-26 (2.2.0 unreleased; 154/154: the 140 of v2.1.0 plus the 14 generic-file sources)
 **Scope**: every production file under `src/` (`find src -type f | wc -l`). Tests, demo and generated caches are out of scope.
 
 ## Bundle / DI
@@ -220,6 +220,25 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 | `src/Upload/SquareImageProcessor.php` | Square image checks with GD (1.6) for profile pictures and logos: accepts PNG, JPEG and still WebP by content only (never name or declared type), refuses beyond `upload.square.max_bytes` and `upload.max_pixels` (read from the header, no decompression bomb) or when the decoded image would not fit in the remaining memory, then re-encodes a centred square as WebP with `preview` and `thumb` squares | FR-UP-003 |
 | `src/Upload/SquareImageUploaderInterface.php` | Public port of the square image upload (1.6), aliased to `ImageUploader`: `uploadSquareImage()` has the same flow and guarantees as `uploadImage()` (the context decides who may write, DBAL insert, no entity manager flushed, audit after the commit) with `SquareImageProcessor`'s checks; rethrows retryable / transient / lost-savepoint failures | FR-UP-003 |
 
+## Generic files (2.2)
+
+| Source path | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `src/Context/GenericFileContextInterface.php` | Contexts and scopes: a context that takes generic files (type allow-list, size limit) | FR-CTX-001, FR-UP-008 |
+| `src/Upload/FileUploaderInterface.php` | Upload: generic file upload port | FR-UP-008 |
+| `src/Upload/FileUploader.php` | Upload: generic uploads and generated variants | FR-UP-008, FR-UP-009 |
+| `src/Upload/StoredFileSource.php` | Upload: local source VO (path + size, checked when opened) | FR-UP-008 |
+| `src/Upload/FileNames.php` | Upload: stored names as labels | FR-UP-008 |
+| `src/Upload/FileVariantWriterInterface.php` | Upload: variant port | FR-UP-009 |
+| `src/Upload/ImageThumbnailerInterface.php` | Upload: thumbnail port | FR-UP-010 |
+| `src/Upload/GdImageThumbnailer.php` | Upload: GD thumbnailer | FR-UP-010 |
+| `src/Download/MediaTypes.php` | Download and rendering: type rules (syntax, active, inline-safe) | FR-DL-008, FR-UP-008 |
+| `src/Download/ByteRange.php` | Download and rendering: single byte range | FR-DL-008 |
+| `src/Download/FileRangeDeliveryInterface.php` | Download and rendering: context-bound delivery with `Range` | FR-DL-008 |
+| `src/Download/FileReaderInterface.php` | Download and rendering: server-side read port | FR-DL-009 |
+| `src/Download/FileReader.php` | Download and rendering: default reader | FR-DL-009 |
+| `src/Download/FileStream.php` | Download and rendering: bounded read stream | FR-DL-009 |
+
 ## Coverage summary
 
 | Category | Files |
@@ -239,4 +258,5 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 | Admin UI and access | 20 |
 | Translations | 7 |
 | Removal port and default remover | 3 |
-| **Total production sources** | **140 / 140** (`find src -type f \| wc -l` = 140) |
+| Generic files (2.2) | 14 |
+| **Total production sources** | **154 / 154** (`find src -type f \| wc -l` = 154) |
