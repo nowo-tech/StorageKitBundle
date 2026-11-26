@@ -300,7 +300,12 @@ $view   = $this->files->uploadFile($user, 'chat', $conversationUuid, $source, $c
   (`FileNames::clean()`: last path segment, no control or bidi characters, `:` replaced, at most 200 characters); the
   object key is server-generated (`yyyy/mm/<uuid>`).
 - Refusals (`UploadRefused::$reason`): `context`, `type`, `empty`, `size`, `off`, `limit` (`UploadLimitInterface`),
-  `source`, `storage`. Nothing is stored on a refusal.
+  `source`, `storage`. Nothing is stored on a refusal. The source must be a local path: stream wrappers (`php://`,
+  `phar://`, `data:`…) are refused.
+- **Rate limits are yours.** The bundle's upload endpoint (and its `upload.rate_limit`) is for editor images only; the
+  generic ports are PHP APIs. The host route that calls `uploadFile()` / `putVariant()` must rate-limit them (ChatKit:
+  uploads per person and minute, bytes per hour), sized to `upload.files.max_bytes`. The owner quota is checked without
+  a lock ([CONCURRENCY](CONCURRENCY.md#residual-risks)).
 - **No lock is held while the bytes travel** (REQ-RUNTIME-003 rule 9): the object is written first, then one DBAL
   insert. Call it **outside** your own transaction, then write your row (with its own idempotency key) in your unit. If
   your unit rolls back, `FileRemoverInterface::expire()` (or `remove()`) the file. Inside a transaction the audit
@@ -315,7 +320,9 @@ port: type from the magic bytes, pixel cap (`upload.max_pixels`) read from the h
 guard, always re-encoded (EXIF / GPS / XMP dropped, a GIF becomes a PNG of its first frame), longest side at most
 `$maxEdge` (16–4096 px). Attach the result with `Upload\FileVariantWriterInterface::putVariant($uuid, $contextType,
 $contextId, 'thumb'|'preview', $bytes, $mediaType)`: the bytes must be a raster image matching `$mediaType`, at most
-`upload.max_bytes`. A variant replaces the previous one of that name (the old object is deleted after the commit).
+`upload.max_bytes`. A variant replaces the previous one of that name (the old object is deleted after the commit). Inside your own
+transaction the unit is a savepoint: nothing is deleted until you report the outcome, `afterVariantCommit($view)` after
+your commit (deletes the replaced object) or `afterVariantRollback($view)` after a rollback (deletes the new one).
 
 ```php
 $thumb = $this->thumbnailer->thumbnail(new StoredFileSource($tmp, $size), 480);
@@ -343,7 +350,9 @@ try {
   else the whole file (`200`). Redirect-delivered profiles answer `302` to a URL pre-signed for `$ttl` seconds (at most
   `download.url_ttl`); the bucket serves ranges itself.
 - Disposition: `attachment`, unless `$inline` is true **and** the object is safe inline: a variant (a raster image
-  StorageKit checked) or an audio / video type (`MediaTypes::INLINE_MEDIA`). A PDF, an office file or an image stored as
+  StorageKit checked by its magic bytes and header and serves under that raster type with `nosniff`: a re-encoded image,
+  a GIF / animated WebP image upload or a variant written through `putVariant()`) or an audio / video type
+  (`MediaTypes::INLINE_MEDIA`). A PDF, an office file or an image stored as
   uploaded is always an attachment. Active content (HTML, SVG, XML, script) is always an attachment of type
   `application/octet-stream` with a `.bin` name. Every stream carries `nosniff`, `Content-Security-Policy:
   default-src 'none'; sandbox`, `Cross-Origin-Resource-Policy: same-origin`, `noindex` and `no-referrer`.

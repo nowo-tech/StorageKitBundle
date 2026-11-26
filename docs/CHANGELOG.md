@@ -97,7 +97,9 @@ additive schema change ([UPGRADING](UPGRADING.md#unreleased)).
 - **Generated variants (`Upload\FileVariantWriterInterface::putVariant()`).** Attaches a `thumb` / `preview` raster
   image to a stored file found by exact UUID and context: object first under a new random key, then one short unit that
   locks the row (`SELECT … FOR UPDATE`), re-checks the context and expiry and writes the variant list and byte total;
-  the replaced object is deleted after the commit.
+  the replaced object is deleted after the commit. Inside your transaction the unit is a savepoint, so nothing is
+  deleted until you call `afterVariantCommit($view)` (the replaced object) or `afterVariantRollback($view)` (the new
+  one) once you know how it ended (audit ZCK-SK-L1).
 - **The image pipeline as a port (`Upload\ImageThumbnailerInterface`, `Upload\GdImageThumbnailer`).** Pixel cap before
   decoding, memory guard, always re-encoded (EXIF / GPS / XMP dropped; a GIF becomes a PNG of its first frame), longest
   side 16–4096 px (`ImageProcessor::thumbnail()`, `ImageProcessor::header()`).
@@ -132,6 +134,14 @@ additive schema change ([UPGRADING](UPGRADING.md#unreleased)).
 - **Bucket moves stream each object** through a 2 MiB memory buffer that spills to a temporary file, and hash it in
   chunks (was: the object read whole into memory twice), so 100 MiB files move without the memory to match.
 - An image upload into a `GenericFileContextInterface` context also follows the context's type list and size limit.
+- **Removal and purge read the object keys under a row lock (audit ZCK-SK-M1).** `FileRemoverInterface::remove()` and
+  the purge now lock the file row, drop its references, expire it and read every object key under that lock
+  (`Lifecycle\FileClaims`), then delete the objects with no lock held, then the row. A variant written concurrently is
+  either in that list or refused (its locking read sees the expiry), so no derived copy (a thumbnail of a deleted
+  photo) is left in the bucket with no row. A bucket that refuses now leaves the row expired (no longer served) for
+  the next purge, which retries every key on it.
+- `StoredFileSource` refuses stream wrappers (`php://`, `phar://`, `data:`…): a source is a local file path
+  (`StoredFileSource::isLocal()`, audit ZCK-SK-I2).
 
 <a id="fixed-unreleased"></a>
 
@@ -143,6 +153,10 @@ additive schema change ([UPGRADING](UPGRADING.md#unreleased)).
   rethrown, but the connection was not repaired. They now roll back to the level the unit started at and, when that
   fails, close the connection (`StorageEntityManager::rollBackTo()` / `rollBackSavepoint()`) before rethrowing the
   original error, so the next use reconnects clean. Contention only (no data loss): no GHSA.
+- **Owner quota under contention (all versions, audit ZCK-SK-L2).** `UploadLimitInterface::allows()` is asked before
+  the bytes are stored, without a lock, for images (since 1.0) and generic files: concurrent uploads of one owner can
+  together exceed a quota that had room for one of them (by up to N × the largest upload). Not changed in code; now
+  documented in CONCURRENCY.md with the way to bound it (your own per-owner lock or counter). Contention only: no GHSA.
 
 ## [2.1.0] - 2026-11-22
 

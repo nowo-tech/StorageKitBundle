@@ -1,6 +1,6 @@
 # Code inventory — 001-baseline
 
-**Last audited**: 2026-11-26 (2.2.0 unreleased; 154/154: the 140 of v2.1.0 plus the 14 generic-file sources)
+**Last audited**: 2026-11-26 (2.2.0 unreleased; 156/156: the 140 of v2.1.0 plus the 16 generic-file sources)
 **Scope**: every production file under `src/` (`find src -type f | wc -l`). Tests, demo and generated caches are out of scope.
 
 ## Bundle / DI
@@ -238,6 +238,8 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 | `src/Download/FileReaderInterface.php` | Download and rendering: server-side read port | FR-DL-009 |
 | `src/Download/FileReader.php` | Download and rendering: default reader | FR-DL-009 |
 | `src/Download/FileStream.php` | Download and rendering: bounded read stream | FR-DL-009 |
+| `src/Lifecycle/FileClaims.php` | References and purge: lock, expire and read the object keys of a row before its objects are deleted (audit ZCK-SK-M1) | FR-PURGE-001, FR-UP-009 |
+| `src/Upload/PendingVariantObjects.php` | Upload: object clean-up a variant write inside the host's transaction still owes (audit ZCK-SK-L1) | FR-UP-009 |
 
 ## Coverage summary
 
@@ -258,5 +260,5 @@ These 6 `src/` files were added by releases after the last review. Each row maps
 | Admin UI and access | 20 |
 | Translations | 7 |
 | Removal port and default remover | 3 |
-| Generic files (2.2) | 14 |
-| **Total production sources** | **154 / 154** (`find src -type f \| wc -l` = 154) |
+| Generic files (2.2) | 16 |
+| **Total production sources** | **156 / 156** (`find src -type f \| wc -l` = 156) |

@@ -34,7 +34,8 @@ MySQL / MariaDB `GET_LOCK()`, PostgreSQL `pg_advisory_xact_lock()` (both wait at
 | `nowo:storage-kit:adopt-instance-bucket` | Unit | Owner lock (instance) | Console: rethrown |
 | Upload endpoint / `ImageUploaderInterface` | One DBAL `INSERT` (a savepoint inside your transaction) | New random UUID and key per upload (`uniq_storage_kit_file_key`) | 409 JSON `{error: conflict, message, code}`; the objects already written are deleted again |
 | 2.2 generic upload (`FileUploaderInterface::uploadFile`) | No lock and no transaction while the bytes are streamed; then one DBAL `INSERT` (a savepoint inside your transaction) | New random UUID and key per upload; the object is written before the row, so a failed insert leaves no row (the object is deleted again) | Your code: a deadlock / lock wait is rethrown (retry-safe `CONFLICT_001` on your route), the object deleted; call it outside your own transaction |
-| 2.2 variant write (`FileVariantWriterInterface::putVariant`) | The object first (new random key, no lock); then `atomically()`: one short unit (a savepoint inside your transaction) | `SELECT … FOR UPDATE` on the file row (MySQL / MariaDB / PostgreSQL) re-checks the exact context and that the file is not expired, then one `UPDATE` of `variants` + `total_bytes`; the replaced object is deleted after the commit. Two writers of the same variant serialize on the row (last wins, no object left behind); a removal committed meanwhile wins (`context`) | Your code: the lock wait / deadlock rethrown, the new object deleted |
+| 2.2 variant write (`FileVariantWriterInterface::putVariant`) | The object first (new random key, no lock); then `atomically()`: one short unit (a savepoint inside your transaction) | `SELECT … FOR UPDATE` on the file row (MySQL / MariaDB / PostgreSQL) re-checks the exact context and that the file is not expired, then one `UPDATE` of `variants` + `total_bytes`. The replaced object is deleted after the commit: at once outside a transaction; inside yours only on `afterVariantCommit()` (and the new object on `afterVariantRollback()`), audit ZCK-SK-L1. Two writers of the same variant serialize on the row (last wins, no object left behind); a removal or purge that claimed the row first wins (`context`) | Your code: the lock wait / deadlock rethrown, the new object deleted |
+| Removal (`FileRemoverInterface::remove`) and purge (2.2, audit ZCK-SK-M1) | `FileClaims::claim()`: one short unit; then the bucket deletes with no lock; then `FileClaims::delete()`: one short unit | The row is locked (`FOR UPDATE`), un-referenced and expired, and its object keys are read **under that lock**, so a variant written meanwhile is in the list (committed before) or refused (it waits, then sees the expiry). The purge also re-checks under the lock that the file is still an unreferenced orphan past the retention. A refusing bucket leaves the row expired for the next purge | Your code / console: rethrown |
 | 2.2 server-side read / ranged delivery (`FileReaderInterface`, `FileRangeDeliveryInterface`) | No write | — | — |
 | First use: the instance's `storage` row, a config profile's row (`StorageProfiles`, from an upload or the settings listener) | `StorageEntityManager::exclusively()`: a savepoint inside your transaction, else one of its own; no manager flushed | Owner lock, then a locking re-read (1.7.1: `FOR UPDATE` on MySQL / MariaDB, waiting at most `owner_lock_timeout`, so a row inserted by another open transaction is waited for); a row the locking read sees but your snapshot does not is a retry-safe conflict, never a duplicate (inside your own transaction on MySQL / MariaDB the losing first use therefore always fails retry-safe and never reuses the row) | Bundle routes: 409 `CONFLICT_001`; your code: rethrown (`TransientStorageFailure` or the lock wait timeout) |
 | File references (`FileReferencesInterface::sync` / `forget`, the reference listener) | Your transaction (it runs after your flush); the insert in its own savepoint | Unique key `(file_id, source_type, source_id)` + `INSERT … SELECT … NOT EXISTS`; a unique violation (a concurrent save of the same text) is caught and dropped, never mapped to a conflict | Your route: the lock wait is rethrown to your code (the bundle never answers host routes) |
@@ -146,6 +147,10 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
   against a second process inside the host's transaction: the server rolls the whole transaction back, the unit's
   savepoint is gone, so the connection is **closed** (never treated as rolled back), the deadlock is rethrown as a
   retry-safe conflict and the connection works again at level 0.
+- `GenericFilesRaceTest` (2.2, audit ZCK-SK-M1) also races a removal and a purge against a variant written by the
+  other session: committed before the locked read, the variant's object is deleted with the file; written while the
+  removal holds the row, it waits, gets `CONFLICT_001` and deletes its own object. No object is left either way.
+  `GenericFilesTest` checks the deferred clean-up of a variant written inside your transaction (audit ZCK-SK-L1).
 - `tests/Unit/Doctrine/LostSavepointRepairTest.php` (2.2): `rollBackTo()` / `rollBackSavepoint()` close the connection
   when the rollback itself fails.
 - `tests/Unit/Concurrency`, `tests/Unit/EventListener/StorageKitConflictListenerTest.php`,
@@ -191,6 +196,10 @@ read the code must list `X-Conflict-Code` in `Access-Control-Expose-Headers` (th
   whole transaction, so "SAVEPOINT does not exist"), the bundle closes the connection and rethrows the original error.
   Your open transaction is then gone too (it already was on the server): your `commit()` fails with "no active
   transaction"; treat the original error as a retry-safe conflict and run the whole unit again.
-- **Owner quota of generic files (2.2).** `UploadLimitInterface::allows()` is asked before the bytes are stored, without
-  a lock (as for images): two concurrent uploads of one owner can both pass a quota that leaves room for one. Bound it
-  with your own per-owner lock or counter if the quota is a hard limit.
+- **Owner quota (all versions; generic files since 2.2, audit ZCK-SK-L2).** `UploadLimitInterface::allows()` is asked
+  before the bytes are stored, without a lock: N concurrent uploads of one owner can all pass a quota that leaves room
+  for one, overshooting it by up to N × the largest upload (`upload.files.max_bytes` for generic files). Bound it with
+  your own per-owner lock or counter (and your route's rate limit) if the quota is a hard limit.
+- **A variant view you drop inside a transaction (2.2).** If you call neither `afterVariantCommit()` nor
+  `afterVariantRollback()`, both the replaced and the new object stay in the bucket; the one the row does not name is
+  unreferenced (it costs storage, it is never served).

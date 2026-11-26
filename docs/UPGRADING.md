@@ -68,7 +68,10 @@ ALTER TABLE storage_kit_file MODIFY mime_type VARCHAR(127) NOT NULL;
 ALTER TABLE storage_kit_file ALTER mime_type TYPE VARCHAR(127);
 ```
 
-With `doctrine.table_prefix`, use your prefixed table name. PostgreSQL widens a `VARCHAR` without rewriting the table.
+With `doctrine.table_prefix`, use your prefixed table name. **Do not skip it on MySQL / MariaDB in non-strict
+`sql_mode`** (without `STRICT_TRANS_TABLES`): there a type longer than 32 characters
+(`application/vnd.openxmlformats-…`) is cut silently instead of refused, and the file is then served with the cut type
+(audit ZCK-SK-I5; strict mode, the default, refuses the upload with `storage`). PostgreSQL widens a `VARCHAR` without rewriting the table.
 On MySQL / MariaDB (utf8mb4) the change crosses the 255-byte length prefix, so InnoDB copies the table and blocks writes
 to it meanwhile: run it in a quiet window on a large table (the table holds one row per uploaded file).
 
@@ -81,7 +84,11 @@ What changes for you:
   `upload_max_filesize` / `post_max_size` and the web server's request body limit at or above the largest limit you
   allow (`upload.files.max_bytes`, default 100 MiB, caps every context).
 - **The download route answers `Range`** (`206` / `416`) when its port serves ranges (the bundle's does). A host port
-  aliased to `FileDeliveryInterface` only keeps answering `200`.
+  aliased to `FileDeliveryInterface` only keeps answering `200`. Replacing `FileDeliveryInterface` (a quarantine-aware
+  delivery, say) does **not** replace the new `FileRangeDeliveryInterface`, which stays the bundle's `FileDelivery`:
+  alias it to your service too if your rules must apply to host routes that call it.
+- **`remove()` and the purge lock the row first** (audit ZCK-SK-M1): a bucket that refuses now leaves the row expired
+  (no longer served) for the next purge instead of servable.
 - **A unit whose rollback fails now closes the connection** (lost savepoint after a MySQL / MariaDB deadlock): if you
   call a StorageKit write inside your own transaction and it fails with a deadlock, your transaction is gone (the
   server already rolled it back); your `commit()` / `rollBack()` reports "no active transaction". Run the whole unit

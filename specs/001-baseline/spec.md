@@ -203,7 +203,9 @@ context's `readable()` allows it.
   rethrown, audit after the commit.
 - **FR-UP-009** — `FileVariantWriterInterface` (2.2): a generated raster `thumb` / `preview` attached to a file found by
   exact UUID and context; object first, then a row-locked unit (`FOR UPDATE`, context and expiry re-checked); the
-  replaced object deleted after the commit.
+  replaced object deleted after the commit (inside the host's transaction only on `afterVariantCommit()`, the new one
+  on `afterVariantRollback()`; `PendingVariantObjects`). Removal and purge claim the row under a lock before deleting
+  objects (`FileClaims`), so no variant object outlives its row.
 - **FR-UP-010** — `ImageThumbnailerInterface` / `GdImageThumbnailer` (2.2): the GD pipeline as a port (pixel cap before
   decoding, memory guard, always re-encoded, bounded edge).
 
