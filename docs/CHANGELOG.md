@@ -79,6 +79,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation (audit ZCK-SK-L3): `FileRemoverInterface::remove()` called inside a host transaction keeps its row lock until the host commits, so the bucket deletes run with the lock held. USAGE and CONCURRENCY now say to call `remove()` outside your transaction (use `expire()` inside one). No code change.
+
 ## [2.2.0] - 2026-11-26
 
 Generic, non-image files (a prerequisite of ChatKit 2.7 attachments, Beacon spec 259). Minor, no BC break; one
