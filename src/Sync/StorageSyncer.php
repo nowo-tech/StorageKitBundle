@@ -27,12 +27,18 @@ use Throwable;
 use function array_keys;
 use function array_slice;
 use function count;
-use function hash;
+use function fclose;
+use function fopen;
 use function hash_equals;
+use function hash_final;
+use function hash_init;
+use function hash_update_stream;
 use function is_array;
 use function is_string;
 use function json_decode;
+use function rewind;
 use function sort;
+use function stream_copy_to_stream;
 use function time;
 
 /**
@@ -62,6 +68,9 @@ final readonly class StorageSyncer
 
     /** Fields a status change writes (1.7: with a compare-and-set on the status, never with a flush). */
     public const STATUS_FIELDS = ['status', 'error', 'finishedAt', 'updatedAt'];
+
+    /** 2.2: bytes of an object copy kept in memory; the rest of a larger object goes to a temporary file. */
+    public const BUFFER_MEMORY = 2 * 1024 * 1024;
 
     private LockFactory $locks;
 
@@ -327,24 +336,64 @@ final readonly class StorageSyncer
     }
 
     /**
-     * True = written, false = already there with the same contents.
+     * True = written, false = already there with the same contents. 2.2: the object is streamed through a temporary
+     * buffer ({@see self::BUFFER_MEMORY} bytes in memory, the rest in a temporary file) and hashed in chunks, so a
+     * 100 MiB generic file never sits in a PHP string.
      */
     private function copyObject(string $key, string $mime, ?string $checksum, StorageConnection $from, StorageConnection $to): bool
     {
-        $bytes = $from->read($key);
-        $hash  = hash('sha256', $bytes);
-        if ($checksum !== null && !hash_equals($checksum, $hash)) {
-            throw new SyncFailure('source checksum mismatch');
-        }
-        if ($to->exists($key) && hash_equals($hash, hash('sha256', $to->read($key)))) {
-            return false;
-        }
-        $to->write($key, $bytes, $mime);
-        if (!hash_equals($hash, hash('sha256', $to->read($key)))) {
-            throw new SyncFailure('copy checksum mismatch');
-        }
+        $buffer = fopen('php://temp/maxmemory:' . self::BUFFER_MEMORY, 'w+') ?: throw new SyncFailure('no temporary buffer');
+        try {
+            $source = $from->readStream($key);
+            try {
+                stream_copy_to_stream($source, $buffer);
+            } finally {
+                fclose($source);
+            }
+            $hash = $this->sha256($buffer);
+            if ($checksum !== null && !hash_equals($checksum, $hash)) {
+                throw new SyncFailure('source checksum mismatch');
+            }
+            if ($to->exists($key) && hash_equals($hash, $this->hashOf($to, $key))) {
+                return false;
+            }
+            rewind($buffer);
+            $to->writeStream($key, $buffer, $mime);
+            if (!hash_equals($hash, $this->hashOf($to, $key))) {
+                throw new SyncFailure('copy checksum mismatch');
+            }
 
-        return true;
+            return true;
+        } finally {
+            fclose($buffer);
+        }
+    }
+
+    /**
+     * The SHA-256 of an object, read as a stream.
+     */
+    private function hashOf(StorageConnection $connection, string $key): string
+    {
+        $stream = $connection->readStream($key);
+        try {
+            return $this->sha256($stream);
+        } finally {
+            fclose($stream);
+        }
+    }
+
+    /**
+     * The SHA-256 of a stream from its start.
+     *
+     * @param resource $stream
+     */
+    private function sha256($stream): string
+    {
+        rewind($stream);
+        $context = hash_init('sha256');
+        hash_update_stream($context, $stream);
+
+        return hash_final($context);
     }
 
     /**

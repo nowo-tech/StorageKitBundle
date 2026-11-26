@@ -7,10 +7,12 @@ namespace Nowo\StorageKitBundle\Storage;
 use AsyncAws\S3\S3Client;
 use DateTimeImmutable;
 use League\Flysystem\FilesystemOperator;
+use RuntimeException;
 
 use function fclose;
 use function fread;
 use function min;
+use function str_starts_with;
 use function strlen;
 
 /**
@@ -43,6 +45,27 @@ final readonly class StorageConnection
     }
 
     /**
+     * Writes an object from a stream (2.2, generic files): the bytes go to the bucket as they are read, never as one PHP
+     * string. The caller owns the handle (it is not closed here).
+     *
+     * @param resource $contents readable stream positioned at the first byte
+     */
+    public function writeStream(string $key, $contents, string $contentType): void
+    {
+        $this->filesystem->writeStream($key, $contents, ['ContentType' => $contentType, 'mimetype' => $contentType]);
+    }
+
+    /**
+     * Reads an object as a stream (2.2: bucket moves of large files). The caller closes it.
+     *
+     * @return resource
+     */
+    public function readStream(string $key)
+    {
+        return $this->filesystem->readStream($key);
+    }
+
+    /**
      * Reads an object.
      */
     public function read(string $key): string
@@ -51,31 +74,42 @@ final readonly class StorageConnection
     }
 
     /**
-     * The first `$length` bytes of an object, as chunks (audit CJ L2b). On S3 it is a `GetObject` with
-     * `Range: bytes=0-<length-1>` whose body is iterated as it arrives: a bucket that serves a larger object (or ignores
-     * the range) cannot make the application download more than the caller reads, and nothing is fetched before the
-     * first chunk. Without an S3 client (tests), the object stream is read in chunks, one byte past `$length` at most so
-     * the caller can see an object that grew.
+     * `$length` bytes of an object from byte `$offset` (default: its first bytes), as chunks (audit CJ L2b; 2.2: the
+     * offset serves `Range` requests). On S3 it is a `GetObject` with `Range: bytes=<offset>-<offset+length-1>` whose
+     * body is iterated as it arrives: a bucket that serves a larger object (or ignores the range) cannot make the
+     * application download more than the caller reads, and nothing is fetched before the first chunk. Without an S3
+     * client (tests), the object stream is skipped to the offset and read in chunks, one byte past `$length` at most so
+     * the caller can see an object that grew (2.2: only when `$whole`, the read of a whole object; a part of it is read
+     * to its last byte exactly).
      *
      * @return iterable<string>
      */
-    public function readRange(string $key, int $length): iterable
+    public function readRange(string $key, int $length, int $offset = 0, bool $whole = true): iterable
     {
-        if ($length <= 0) {
+        if ($length <= 0 || $offset < 0) {
             return;
         }
         if ($this->client instanceof S3Client) {
-            yield from $this->client->getObject([
+            $object = $this->client->getObject([
                 'Bucket' => $this->settings->bucket,
                 'Key'    => $this->settings->key($key),
-                'Range'  => 'bytes=0-' . ($length - 1),
-            ])->getBody()->getChunks();
+                'Range'  => 'bytes=' . $offset . '-' . ($offset + $length - 1),
+            ]);
+            // A bucket that ignored the range would send the object from its first byte: never served as a later part.
+            if ($offset > 0 && !str_starts_with((string) $object->getContentRange(), 'bytes ' . $offset . '-')) {
+                throw new RuntimeException('The bucket did not honour the byte range; the download was not sent.');
+            }
+            yield from $object->getBody()->getChunks();
 
             return;
         }
         $stream = $this->filesystem->readStream($key);
         try {
-            $left = $length + 1;
+            $skip = $offset;
+            while ($skip > 0 && ($chunk = fread($stream, min(self::CHUNK, $skip))) !== false && $chunk !== '') {
+                $skip -= strlen($chunk);
+            }
+            $left = $whole ? $length + 1 : $length;
             while ($left > 0 && ($chunk = fread($stream, min(self::CHUNK, $left))) !== false && $chunk !== '') {
                 $left -= strlen($chunk);
                 yield $chunk;
