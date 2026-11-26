@@ -261,7 +261,9 @@ if ($previous !== null) {
 ```
 
 `remove()` and `expire()` only act on a file of exactly that context (a UUID learned elsewhere removes nothing).
-`remove()` calls the bucket: call it after your transaction committed. `expire()` makes no bucket call (use it inside a
+`remove()` calls the bucket: call it **outside your transaction**, after it committed (audit ZCK-SK-L3: `remove()` locks the
+file row first, and inside your transaction that lock lasts until your commit, so the bucket deletes would run with the
+row lock held; I/O under a lock). `expire()` makes no bucket call (use it inside a
 transaction, e.g. a GDPR erasure): the file is no longer served (its URL answers 404 at once) and the next
 `nowo:storage-kit:purge` deletes its objects and row. Both return a `Lifecycle\RemovedFile` (null when nothing
 matched). Outside a transaction the `file_removed` / `file_expired` audit event is recorded at once; inside yours, call
