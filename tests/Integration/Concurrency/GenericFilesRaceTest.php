@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Tests\Integration\Concurrency;
 
+use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Nowo\StorageKitBundle\Concurrency\StorageConflicts;
 use Nowo\StorageKitBundle\Doctrine\StorageEntityManager;
 use Nowo\StorageKitBundle\Entity\StorageProfile;
+use Nowo\StorageKitBundle\Lifecycle\FilePurger;
+use Nowo\StorageKitBundle\Lifecycle\FileRemoverInterface;
 use Nowo\StorageKitBundle\Tests\Fixtures\ChatContext;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\KernelTestCase;
 use Nowo\StorageKitBundle\Tests\Integration\Kernel\StorageKitTestKernel;
@@ -212,6 +215,71 @@ final class GenericFilesRaceTest extends KernelTestCase
         self::assertSame(30, $this->put($this->b, $view, 'thumb', 30)->variants['thumb']['width']);
         self::assertSame(30, $this->variants($view->uuid)['thumb']['width'] ?? null);
         self::assertCount(1, $this->variants($view->uuid));
+    }
+
+    /**
+     * Both kernels write the same bucket double (one shared adapter), so B's objects are visible to A's removal.
+     */
+    private function shareBuckets(): void
+    {
+        $this->buckets($this->b)->buckets = $this->buckets($this->a)->buckets;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function objects(): array
+    {
+        return $this->buckets($this->a)->objects('files', 'http://minio:9000');
+    }
+
+    /**
+     * Audit ZCK-SK-M1: a variant committed by another session after the removal started but before its locked read
+     * is in the key list the removal deletes; one written while the removal holds the row waits and is refused. Either
+     * way no object is left behind once the row is gone.
+     */
+    public function testARemovalNeverLeavesAVariantWrittenMeanwhile(): void
+    {
+        $view = $this->upload($this->a);
+        $this->shareBuckets();
+        $this->hooks($this->a)->onceBefore('SELECT storage_key, variants FROM', function () use ($view): void {
+            $this->put($this->b, $view);
+        });
+        self::assertNotNull($this->service($this->a, FileRemoverInterface::class)->remove($view->uuid, 'chat', 'c1'));
+        self::assertSame([], $this->objects(), 'the thumb committed before the locked read is deleted too');
+        self::assertSame(0, (int) $this->connection($this->a)->fetchOne('SELECT COUNT(*) FROM storage_kit_file'));
+
+        // While the removal holds the row (between its locked read and its expiry), a variant write waits and is refused.
+        $view   = $this->upload($this->a);
+        $caught = null;
+        $this->hooks($this->a)->onceBefore('UPDATE storage_kit_file SET orphaned_since', function () use ($view, &$caught): void {
+            try {
+                $this->put($this->b, $view);
+            } catch (Throwable $e) {
+                $caught = $e;
+            }
+        });
+        self::assertNotNull($this->service($this->a, FileRemoverInterface::class)->remove($view->uuid, 'chat', 'c1'));
+        self::assertInstanceOf(Throwable::class, $caught);
+        $this->assertRetrySafeConflict($caught);
+        self::assertSame([], $this->objects(), 'the refused write deleted its object');
+        $this->assertUsable($this->a);
+        $this->assertUsable($this->b);
+    }
+
+    /**
+     * Audit ZCK-SK-M1 for the purge: a variant committed before the purge's locked read is purged with the file.
+     */
+    public function testThePurgeNeverLeavesAVariantWrittenMeanwhile(): void
+    {
+        $view = $this->upload($this->a);
+        $this->shareBuckets();
+        $this->hooks($this->a)->onceBefore('SELECT storage_key, variants FROM', function () use ($view): void {
+            $this->put($this->b, $view);
+        });
+        self::assertSame(1, $this->service($this->a, FilePurger::class)->run(new DateTimeImmutable('+30 days'))['purged']);
+        self::assertSame([], $this->objects());
+        self::assertSame(0, (int) $this->connection($this->a)->fetchOne('SELECT COUNT(*) FROM storage_kit_file'));
     }
 
     /**

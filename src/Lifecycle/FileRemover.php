@@ -28,7 +28,9 @@ use function strtolower;
 /**
  * Default {@see FileRemoverInterface} (1.6). The row is looked up by public id, then its context is compared with `===`
  * (no SQL collation decides it); the statements go by primary key, each pair in one unit
- * ({@see StorageEntityManager::atomically()}: a savepoint inside a host transaction). The `file_removed` /
+ * ({@see StorageEntityManager::atomically()}: a savepoint inside a host transaction). 2.2: `remove()` locks and expires
+ * the row and reads its object keys under that lock before any bucket call ({@see FileClaims}), so a variant written
+ * concurrently is never left behind. The `file_removed` /
  * `file_expired` audit event is recorded at once outside a transaction, else by {@see self::afterCommit()} once the host
  * committed (rule 7); the loaded row leaves the bundle's unit of work.
  *
@@ -64,18 +66,16 @@ final readonly class FileRemover implements FileRemoverInterface
             return null;
         }
         $id = (int) $file->getId();
-        if (!$this->deleteObjects($file)) {
-            $this->expireRow($id);
-
+        // 2.2 (audit ZCK-SK-M1): the row is locked and expired first, and its object keys are read under that lock, so
+        // a variant written meanwhile is either in the list or refused; then the objects go with no lock held.
+        $keys = FileClaims::claim($this->entityManager, $id);
+        if ($keys === null) {
+            return null;
+        }
+        if (!$this->deleteObjects($file, $keys)) {
             return $this->done($file, true);
         }
-        $files      = $this->entityManager->table(StoredFile::class);
-        $references = $this->entityManager->table(StoredFileReference::class);
-        // @igor-ignore - The closure runs synchronously inside atomically(); nothing is kept on the service.
-        $this->entityManager->atomically(static function (Connection $connection) use ($files, $references, $id): void {
-            $connection->executeStatement('DELETE FROM ' . $references . ' WHERE file_id = ?', [$id], [Types::INTEGER]);
-            $connection->executeStatement('DELETE FROM ' . $files . ' WHERE id = ?', [$id], [Types::INTEGER]);
-        }, 'remove');
+        FileClaims::delete($this->entityManager, $id);
 
         return $this->done($file, false);
     }
@@ -161,7 +161,10 @@ final readonly class FileRemover implements FileRemoverInterface
         }, 'expire');
     }
 
-    private function deleteObjects(StoredFile $file): bool
+    /**
+     * @param list<string> $keys
+     */
+    private function deleteObjects(StoredFile $file, array $keys): bool
     {
         $settings = $this->profiles->settingsOf($file->getProfile());
         if (!$settings instanceof S3Settings) {
@@ -171,7 +174,7 @@ final readonly class FileRemover implements FileRemoverInterface
         }
         try {
             $connection = $this->storage->connection($settings);
-            foreach ($file->objectKeys() as $key) {
+            foreach ($keys as $key) {
                 $connection->delete($key);
             }
 
