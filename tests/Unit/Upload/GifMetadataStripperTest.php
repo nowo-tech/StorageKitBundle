@@ -94,6 +94,47 @@ final class GifMetadataStripperTest extends TestCase
         self::assertSame($head . AnimatedImages::loop(3, 'ANIMEXTS1.0') . $image . "\x3B", (new GifMetadataStripper())->strip($gif));
     }
 
+    public function testBrowserTolerancesOf220AreKept(): void
+    {
+        $stripper = new GifMetadataStripper();
+        $head     = AnimatedImages::gifHead();
+        $image    = AnimatedImages::gifImageBlock();
+
+        // No trailer, the file ending on a block boundary: the trailer is added.
+        self::assertSame($head . $image . "\x3B", $stripper->strip($head . $image));
+        self::assertSame($head . $image . "\x3B", $stripper->strip($head . $image . AnimatedImages::extension(0xFE, AnimatedImages::SECRET)));
+        // A stray byte between blocks ends the file, as in Chromium and Firefox: what follows is dropped.
+        self::assertSame($head . $image . "\x3B", $stripper->strip($head . $image . "\x00" . $image . AnimatedImages::SECRET));
+        // An application extension whose first block is not 11 bytes is dropped, not refused.
+        self::assertSame($head . $image . "\x3B", $stripper->strip($head . "\x21\xFF\x0ANETSCAPE2.\x03\x01\x00\x00\x00" . $image . "\x3B"));
+        // LZW minimum code sizes 1 and 11 (decoded by browsers) are accepted.
+        $desc = "\x2C\x00\x00\x00\x00\x04\x00\x04\x00\x00";
+        foreach (["\x01", "\x0B"] as $codeSize) {
+            $gif = $head . $desc . $codeSize . "\x02\x44\x01\x00\x3B";
+            self::assertSame($gif, $stripper->strip($gif));
+        }
+    }
+
+    public function testSmallCovertFieldsAreCanonical(): void
+    {
+        $stripper = new GifMetadataStripper();
+        $head     = AnimatedImages::gifHead();
+        $image    = AnimatedImages::gifImageBlock();
+
+        // Only the last graphic control before an image is kept; one not followed by an image is dropped.
+        $gif = $head . AnimatedImages::gce(0x04, 1) . AnimatedImages::gce(0x04, 2) . AnimatedImages::gce(0x08, 3) . $image . AnimatedImages::gce(0x04, 4) . "\x3B";
+        self::assertSame($head . AnimatedImages::gce(0x08, 3) . $image . "\x3B", $stripper->strip($gif));
+
+        // Only the first loop extension is kept.
+        $gif = $head . AnimatedImages::loop(2) . AnimatedImages::loop(7) . AnimatedImages::loop(9, 'ANIMEXTS1.0') . $image . "\x3B";
+        self::assertSame($head . AnimatedImages::loop(2) . $image . "\x3B", $stripper->strip($gif));
+
+        // The pixel aspect byte and the descriptor reserved bits are cleared.
+        $odd = substr($head, 0, 12) . "\x31" . substr($head, 13);
+        $gif = $odd . substr($image, 0, 9) . chr(ord($image[9]) | 0x18) . substr($image, 10) . "\x3B";
+        self::assertSame($head . $image . "\x3B", $stripper->strip($gif));
+    }
+
     public function testALocalColourTableIsKept(): void
     {
         $image = AnimatedImages::gifImageBlock();
@@ -115,7 +156,6 @@ final class GifMetadataStripperTest extends TestCase
         yield 'too short' => ['GIF89a'];
         yield 'not a GIF' => ['GIF90a' . substr($head, 6) . $image . "\x3B"];
         yield 'global table past the end' => ['GIF89a' . "\x04\x00\x04\x00\x87\x00\x00" . str_repeat("\0", 30)];
-        yield 'no trailer' => [$head . $image];
         yield 'truncated image data' => [$head . substr($image, 0, -3)];
         yield 'trailer without image' => [$head . "\x3B"];
         yield 'truncated descriptor' => [$head . "\x2C\x00\x00"];
@@ -124,15 +164,16 @@ final class GifMetadataStripperTest extends TestCase
         yield 'frame above max pixels' => [$head . "\x2C\x00\x00\x00\x00\xFF\xFF\xFF\xFF\x00\x02\x02\x44\x01\x00\x3B"];
         yield 'local table past the end' => [$head . "\x2C\x00\x00\x00\x00\x04\x00\x04\x00\x87\x00\x00"];
         yield 'descriptor at the very end' => [$head . $desc];
-        yield 'LZW code size 1' => [$head . $desc . "\x01\x02\x44\x01\x00\x3B"];
-        yield 'LZW code size 9' => [$head . $desc . "\x09\x02\x44\x01\x00\x3B"];
+        yield 'LZW code size 0' => [$head . $desc . "\x00\x02\x44\x01\x00\x3B"];
+        yield 'LZW code size 12' => [$head . $desc . "\x0C\x02\x44\x01\x00\x3B"];
         yield 'sub-block past the end' => [$head . $desc . "\x02\xFF\x44\x01"];
-        yield 'unknown introducer' => [$head . "\x00" . $image . "\x3B"];
+        yield 'stray byte before any image' => [$head . "\x00" . $image . "\x3B"];
+        yield 'image cut after its last sub-block size' => [$head . substr($image, 0, -1)];
+        yield 'extension cut after an image' => [$head . $image . "\x21\xFE\x05abc"];
         yield 'extension introducer at the end' => [$head . "\x21"];
         yield 'extension past the end' => [$head . "\x21\xFE\x20comment"];
         yield 'graphic control of 3 bytes' => [$head . "\x21\xF9\x03\x00\x00\x00\x00" . $image . "\x3B"];
         yield 'graphic control of 2 sub-blocks' => [$head . "\x21\xF9\x04\x00\x00\x00\x00\x01\x00\x00" . $image . "\x3B"];
-        yield 'application block of 10 bytes' => [$head . "\x21\xFF\x0ANETSCAPE2.\x03\x01\x00\x00\x00" . $image . "\x3B"];
     }
 
     #[DataProvider('malformed')]

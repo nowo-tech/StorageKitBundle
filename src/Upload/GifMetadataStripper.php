@@ -15,17 +15,22 @@ use function unpack;
  * Removes the metadata of a GIF (2.2.1) without decoding it: one linear, non-recursive pass over the blocks that
  * rebuilds the file from what an animation needs and nothing else.
  *
- * Kept: the header, the logical screen descriptor and the global colour table, every image (descriptor, local colour
- * table, LZW minimum code size and data sub-blocks, copied as they are: the LZW data is never decoded nor re-encoded),
- * the graphic control extensions (rewritten canonically: reserved bits and an unused transparent index cleared) and
- * the loop of a `NETSCAPE2.0` / `ANIMEXTS1.0` application extension (rewritten to its single loop sub-block).
+ * Kept: the header, the logical screen descriptor (pixel aspect byte zeroed) and the global colour table, every image
+ * (descriptor with its reserved bits cleared, local colour table, LZW minimum code size and data sub-blocks copied as
+ * they are: the LZW data is never decoded nor re-encoded), the last graphic control extension before each image
+ * (rewritten canonically: reserved bits and an unused transparent index cleared) and the loop of the first
+ * `NETSCAPE2.0` / `ANIMEXTS1.0` application extension (rewritten to its single loop sub-block).
  *
- * Dropped: comment (`0xFE`) and plain text (`0x01`) extensions, every other application extension (XMP, ICC, …),
- * extensions with an unknown label, and anything after the trailer (`0x3B`).
+ * Dropped: comment (`0xFE`) and plain text (`0x01`) extensions, every other application extension (XMP, ICC, …, or
+ * one whose first block is not 11 bytes), extensions with an unknown label, graphic controls not followed by an image,
+ * further loop extensions, and anything after the trailer (`0x3B`) or after a stray byte between blocks (which
+ * Chromium and Firefox read as the end of the file). A file that ends cleanly on a block boundary without its trailer
+ * gets one, as browsers render it.
  *
- * Malformed input — truncated, a block running past the end, an unknown block introducer, no image, a frame of no
- * pixels or above `max_pixels`, more than {@see self::MAX_FRAMES} images, or more than `max_bytes` — gives null: the
- * caller refuses the upload. Stateless (FrankenPHP worker mode: nothing kept between calls).
+ * Malformed input — truncated inside a block, a block running past the end, no image before the end, an LZW minimum
+ * code size outside 1–11 (the range Chromium and Firefox decode), a frame of no pixels or above `max_pixels`, more than
+ * {@see self::MAX_FRAMES} images, or more than `max_bytes` — gives null: the caller refuses the upload. Stateless
+ * (FrankenPHP worker mode: nothing kept between calls).
  *
  * @internal
  */
@@ -72,14 +77,13 @@ final readonly class GifMetadataStripper
         if ($offset === null) {
             return null;
         }
-        $out    = substr($bytes, 0, $offset);
-        $frames = 0;
+        // The pixel aspect ratio byte is zeroed (browsers ignore it).
+        $out     = substr($bytes, 0, 12) . "\0" . substr($bytes, 13, $offset - 13);
+        $frames  = 0;
+        $control = '';
+        $looped  = false;
         while ($offset < $length) {
             $introducer = ord($bytes[$offset]);
-            if ($introducer === self::TRAILER) {
-                // Whatever follows the trailer is dropped.
-                return $frames > 0 ? $out . chr(self::TRAILER) : null;
-            }
             if ($introducer === self::IMAGE) {
                 if (++$frames > $this->maxFrames) {
                     return null;
@@ -88,12 +92,19 @@ final readonly class GifMetadataStripper
                 if ($end === null) {
                     return null;
                 }
-                $out .= substr($bytes, $offset, $end - $offset);
-                $offset = $end;
+                // The last graphic control before the image, then the descriptor with its reserved bits cleared.
+                $out .= $control . substr($bytes, $offset, 9) . chr(ord($bytes[$offset + 9]) & 0xE7) . substr($bytes, $offset + 10, $end - $offset - 10);
+                $control = '';
+                $offset  = $end;
 
                 continue;
             }
-            if ($introducer !== self::EXTENSION || $offset + 2 > $length) {
+            if ($introducer !== self::EXTENSION) {
+                // The trailer, or a stray byte between blocks that Chromium and Firefox read as the end of the file:
+                // whatever follows is dropped.
+                break;
+            }
+            if ($offset + 2 > $length) {
                 return null;
             }
             $end = $this->subBlocksEnd($bytes, $length, $offset + 2);
@@ -104,12 +115,19 @@ final readonly class GifMetadataStripper
             if ($kept === null) {
                 return null;
             }
-            $out .= $kept;
+            if (ord($bytes[$offset + 1]) === self::GRAPHIC_CONTROL) {
+                // Only the last one before an image applies; one not followed by an image is dropped.
+                $control = $kept;
+            } elseif ($kept !== '' && !$looped) {
+                // The first loop extension only.
+                $out .= $kept;
+                $looped = true;
+            }
             $offset = $end;
         }
 
-        // No trailer.
-        return null;
+        // A file that ends on a block boundary without its trailer (as browsers render it) gets one.
+        return $frames > 0 ? $out . chr(self::TRAILER) : null;
     }
 
     /**
@@ -130,7 +148,8 @@ final readonly class GifMetadataStripper
             return null;
         }
         $codeSize = ord($bytes[$offset]);
-        if ($codeSize < 2 || $codeSize > 8) {
+        // 1 to 11, as Chromium and Firefox decode it (the GIF specification says 2 to 8).
+        if ($codeSize < 1 || $codeSize > 11) {
             return null;
         }
 
@@ -159,13 +178,10 @@ final readonly class GifMetadataStripper
             // Comment, plain text, unknown labels: dropped.
             return '';
         }
-        if (ord($bytes[$data]) !== 11) {
-            return null;
-        }
         $identifier = substr($bytes, $data + 1, 11);
         $loop       = $data + 12;
         // The loop sub-block: size 3, id 1, a 16-bit count. Any other sub-block (buffering, payloads) is dropped.
-        if (!in_array($identifier, self::LOOP_IDENTIFIERS, true) || ord($bytes[$loop]) !== 3 || ord($bytes[$loop + 1]) !== 1) {
+        if (ord($bytes[$data]) !== 11 || !in_array($identifier, self::LOOP_IDENTIFIERS, true) || ord($bytes[$loop]) !== 3 || ord($bytes[$loop + 1]) !== 1) {
             return '';
         }
 

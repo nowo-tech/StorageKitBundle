@@ -139,9 +139,9 @@ final class ImageProcessorTest extends TestCase
         self::assertSame($gif, $kept->original['bytes']);
         self::assertSame([], $kept->variants);
 
-        $webp     = $this->webp(30, 10);
-        $animated = substr($webp, 0, 12) . 'VP8X' . pack('V', 10) . "\x02" . str_repeat("\0", 3) . pack('v', 29) . "\0" . pack('v', 9) . "\0" . 'ANIM' . pack('V', 6) . str_repeat("\0", 6) . substr($webp, 12);
-        $animated = substr_replace($animated, pack('V', strlen($animated) - 8), 4, 4);
+        $webp = $this->webp(30, 10);
+        // The still bitstream of a GD WebP wrapped in one frame of a 30 x 10 animation.
+        $animated = AnimatedImages::riff(AnimatedImages::vp8x(0x02, 30, 10), AnimatedImages::chunk('ANIM', str_repeat("\0", 6)), AnimatedImages::anmf(30, 10, substr($webp, 12)));
         $kept     = (new ImageProcessor())->process($animated);
         self::assertSame($animated, $kept->original['bytes']);
         self::assertSame([30, 10], [$kept->original['width'], $kept->original['height']]);
@@ -170,7 +170,7 @@ final class ImageProcessorTest extends TestCase
         $this->assertRefused(UploadRefused::TYPE, static fn (): ProcessedImage => (new ImageProcessor())->process($gif));
 
         // The header reads fine (VP8X canvas), the ANIM chunk is 4 bytes.
-        $webp = AnimatedImages::riff(AnimatedImages::vp8x(0x02), AnimatedImages::chunk('ANIM', "\0\0\0\0"));
+        $webp = AnimatedImages::riff(AnimatedImages::vp8x(0x02), AnimatedImages::chunk('ANIM', "\0\0\0\0"), AnimatedImages::anmf(4, 4, AnimatedImages::chunk('VP8L', 'data')));
         $this->assertRefused(UploadRefused::TYPE, static fn (): ProcessedImage => (new ImageProcessor())->process($webp));
     }
 

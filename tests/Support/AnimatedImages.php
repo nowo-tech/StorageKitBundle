@@ -6,6 +6,7 @@ namespace Nowo\StorageKitBundle\Tests\Support;
 
 use function chr;
 use function implode;
+use function intdiv;
 use function ord;
 use function pack;
 use function str_repeat;
@@ -121,10 +122,17 @@ final class AnimatedImages
         return self::chunk('VP8X', chr($flags) . $reserved . substr(pack('V', $width - 1), 0, 3) . substr(pack('V', $height - 1), 0, 3));
     }
 
-    /** An `ANMF` frame: its 16-byte header (position, size, duration, flags) then `$chunks`. */
+    /** An `ANMF` frame at the canvas origin: its 16-byte header (size, duration, flags) then `$chunks`. */
     public static function anmf(int $width = 4, int $height = 4, string ...$chunks): string
     {
-        $header = "\0\0\0\0\0\0" . substr(pack('V', $width - 1), 0, 3) . substr(pack('V', $height - 1), 0, 3) . "\x64\0\0\x02";
+        return self::anmfAt(0, 0, $width, $height, 0x02, ...$chunks);
+    }
+
+    /** An `ANMF` frame at (`$x`, `$y`) (even numbers), with its `$flags` byte, then `$chunks`. */
+    public static function anmfAt(int $x, int $y, int $width, int $height, int $flags, string ...$chunks): string
+    {
+        $header = substr(pack('V', intdiv($x, 2)), 0, 3) . substr(pack('V', intdiv($y, 2)), 0, 3)
+            . substr(pack('V', $width - 1), 0, 3) . substr(pack('V', $height - 1), 0, 3) . "\x64\0\0" . chr($flags);
 
         return self::chunk('ANMF', $header . implode('', $chunks));
     }
@@ -139,7 +147,7 @@ final class AnimatedImages
         $secret = self::SECRET;
         $chunks = [self::vp8x(0x02 | 0x10 | 0x20 | 0x08 | 0x04 | 0x01 | 0xC0, 4, 4, "\x01\x02\x03"), self::chunk('ICCP', "icc {$secret}"), self::chunk('ANIM', "\0\0\0\0\0\0")];
         for ($i = 0; $i < $frames; ++$i) {
-            $chunks[] = self::anmf(4, 4, self::chunk('ALPH', "alpha{$i}"), self::chunk('VP8L', "bitstream-{$i}x"), self::chunk('XYZW', "in-frame {$secret}"));
+            $chunks[] = self::anmf(4, 4, self::chunk('ALPH', "alpha{$i}"), self::chunk('VP8 ', "bitstream-{$i}x"), self::chunk('XYZW', "in-frame {$secret}"));
         }
         $chunks[] = self::chunk('EXIF', "exif {$secret}");
         $chunks[] = self::chunk('XMP ', "<x:xmpmeta>{$secret}</x:xmpmeta>");
