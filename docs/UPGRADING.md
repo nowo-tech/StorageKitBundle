@@ -4,6 +4,7 @@
 
 - [Done in 2.0](#done-in-20)
 - [Unreleased](#unreleased)
+- [To 2.2.1](#to-221)
 - [To 2.2.0](#to-220)
 - [To 2.1.0](#to-210)
 - [To 2.0.1](#to-201)
@@ -55,6 +56,14 @@ The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([To 2.0.0](#to-
 4. **`ImageUploader::upload()` returning the `StoredFile` entity is removed** (deprecated in 1.3.0).
 
 ## Unreleased
+
+## To 2.2.1
+
+From **2.2.0**:
+
+```bash
+composer update nowo-tech/storage-kit-bundle
+```
 
 No BC break, no configuration or schema change. Behaviour changes of the image upload (`ImageProcessor::process()`):
 

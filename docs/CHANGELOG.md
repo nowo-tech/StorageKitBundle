@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[2.2.1] - 2026-11-27](#221---2026-11-27)
   - [Security](#security)
   - [Changed](#changed)
 - [[2.2.0] - 2026-11-26](#220---2026-11-26)
@@ -81,6 +82,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-11-27
+
 ### Security
 
 - **GIF and animated WebP uploads lose their metadata (SEC-INFO-GIF-METADATA, Beacon 241 T035 / 207 T030).** Up to
@@ -96,7 +99,7 @@ All notable changes to this project are documented here. The format follows
   - `Upload\WebpMetadataStripper` drops the `EXIF`, `XMP `, `ICCP` and unknown chunks (inside `ANMF` frames too),
     clears the matching `VP8X` flags, rewrites the RIFF size and drops anything after it. It follows libwebp's demuxer
     rules, so image chunks libwebp never decodes are refused rather than stored.
-  A file they cannot parse is refused with the usual `422 type` (see [UPGRADING](UPGRADING.md#unreleased) for the list).
+  A file they cannot parse is refused with the usual `422 type` (see [UPGRADING](UPGRADING.md#to-221) for the list).
   Objects stored before this release keep their metadata. Square images and the 2.2 thumbnail port always re-encoded and
   are unchanged; generic files (2.2) are still stored as uploaded, by design. What is still not removed is listed in
   [SECURITY](SECURITY.md#residual-risks-and-host-guidance).
