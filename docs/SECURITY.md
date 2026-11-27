@@ -93,10 +93,10 @@ SECURITY.md), DoctrineEncrypt's key management, the bucket provider, or the Mark
 - JPEG, PNG and still WebP are decoded and re-encoded (drops EXIF / GPS / XMP and trailing payloads).
 - GIF and animated WebP (2.2.1) keep their animation but are rebuilt without decoding by bounded, linear parsers
   (`GifMetadataStripper`, `WebpMetadataStripper`, internal): comment, plain-text and non-loop application extensions,
-  `EXIF` / `XMP ` / `ICCP` / unknown chunks (inside frames too) and bytes after the end are dropped; malformed files,
-  frames above `max_pixels` and more than 10 000 frames are refused (`422 type`). Not removed: data hidden inside the
-  compressed image data itself (LZW sub-blocks past the end code, VP8 / VP8L bitstreams) or in unused colour-table
-  entries, which only a full decode and re-encode would remove. Up to 2.2.0 these formats were stored as uploaded.
+  `EXIF` / `XMP ` / `ICCP` / unknown chunks (inside frames too), image data libwebp never decodes and bytes after the
+  end are dropped or refused; malformed files, frames above `max_pixels` and more than 10 000 frames are refused
+  (`422 type`). Not removed (residual SEC-INFO-GIF-METADATA): data hidden inside the compressed image data (LZW sub-blocks past the end code, VP8 / VP8L / ALPH bitstreams), in unused colour-table entries or in small canonical fields (frame position, delay, loop count). Up to 2.2.0 these formats were stored as
+  uploaded.
 - Image downloads are sent with the stored (sniffed) type only if it is one of the four, else `application/octet-stream`
   (2.2: generic files, see [Generic files](#generic-files-22));
   streamed responses carry `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
@@ -288,8 +288,8 @@ same id never share files; tenants that share a user class and ids need a tenant
 without a usable `getId()` gets no key (identifier-only, logged once). Before 1.2.0, an identifier
 change left the person's files out of the export and the erasure (see [UPGRADING](UPGRADING.md#to-120) for the
 backfill).
-Orphans are deleted after `purge.retention_days`. GIF and animated WebP keep their embedded metadata (see residual
-risks).
+Orphans are deleted after `purge.retention_days`. GIF and animated WebP uploaded before 2.2.1 keep their embedded
+metadata (see residual risks).
 
 **Exact uploader matching (house rule LQ, 1.5.2).** The export, the erasure and the backfill compare the uploader
 identifier and key byte for byte: every row the SQL returns is matched again with `===`
@@ -347,9 +347,12 @@ extracted with (SEC-STORAGE-SSRF, SEC-STORAGE-CSP-GLOBAL, SEC-FILE-REF-PIN; PERF
   mislabelled file: the declared type only decides the `Content-Type` (active types are never served as themselves) and
   whether audio / video may be inline (played by a media element, never rendered as a page).
 
-- **GIF / animated WebP metadata (SEC-INFO-GIF-METADATA).** They are stored as uploaded (re-encoding would lose the
-  animation): comments, XMP and other extension blocks survive. Privacy only; stripping them is on the
-  [ROADMAP](ROADMAP.md).
+- **GIF / animated WebP metadata (SEC-INFO-GIF-METADATA, residual after 2.2.1).** Since 2.2.1 their metadata
+  containers are removed without decoding (see [Content type and extension allow-lists](#content-type-and-extension-allow-lists)).
+  What stays: data hidden inside the compressed image data (LZW sub-blocks past the end code, VP8 / VP8L / ALPH bitstreams), in unused colour-table entries or in small canonical fields (frame position, delay, loop count), which only a full decode and re-encode would remove (that loses the animation with GD);
+  objects stored up to 2.2.0 (re-upload them to clean them); GIF / WebP variants a host writes through `putVariant()`
+  (checked by header only); generic files (2.2), stored as uploaded by design. Privacy only: the data is the uploader's
+  own, and stored originals are never served inline as active content.
 - **GD peak memory (PERF-IMAGE-GD-PEAK-MEMORY, CJ L1).** A 24 MP image (the default cap) needs about 96 MB decoded
   (about 192 MB at the peak with a variant), plus about 144 MB of libjpeg coefficient buffers budgeted for any JPEG —
   that part is outside `memory_limit`, so the check budgets it but only RSS limits really bound it. A 40 MP
