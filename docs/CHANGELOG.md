@@ -6,46 +6,48 @@ All notable changes to this project are documented here. The format follows
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+  - [Security](#security)
+  - [Changed](#changed)
 - [[2.2.0] - 2026-11-26](#220---2026-11-26)
   - [Added](#added)
-  - [Changed](#changed)
+  - [Changed](#changed-1)
   - [Fixed](#fixed)
 - [[2.1.0] - 2026-11-22](#210---2026-11-22)
   - [Added](#added-1)
-  - [Changed](#changed-1)
+  - [Changed](#changed-2)
   - [Fixed](#fixed-1)
 - [[2.0.1] - 2026-11-22](#201---2026-11-22)
   - [Fixed](#fixed-2)
 - [[2.0.0] - 2026-11-21](#200---2026-11-21)
   - [Removed](#removed)
-  - [Changed](#changed-2)
-  - [Security](#security)
+  - [Changed](#changed-3)
+  - [Security](#security-1)
 - [[1.8.1] - 2026-11-20](#181---2026-11-20)
   - [Fixed](#fixed-3)
 - [[1.8.0] - 2026-11-20](#180---2026-11-20)
   - [Added](#added-2)
   - [Deprecated](#deprecated)
-  - [Changed](#changed-3)
+  - [Changed](#changed-4)
 - [[1.7.1] - 2026-11-19](#171---2026-11-19)
   - [Fixed](#fixed-4)
 - [[1.7.0] - 2026-11-19](#170---2026-11-19)
   - [Added](#added-3)
   - [Fixed](#fixed-5)
-  - [Changed](#changed-4)
+  - [Changed](#changed-5)
 - [[1.6.1] - 2026-11-15](#161---2026-11-15)
   - [Fixed](#fixed-6)
   - [Tests](#tests)
 - [[1.6.0] - 2026-11-15](#160---2026-11-15)
   - [Added](#added-4)
-  - [Changed](#changed-5)
+  - [Changed](#changed-6)
   - [Tests](#tests-1)
 - [[1.5.3] - 2026-11-13](#153---2026-11-13)
-  - [Security](#security-1)
+  - [Security](#security-2)
   - [Added](#added-5)
-  - [Changed](#changed-6)
+  - [Changed](#changed-7)
   - [Tests](#tests-2)
 - [[1.5.2] - 2026-11-13](#152---2026-11-13)
-  - [Security](#security-2)
+  - [Security](#security-3)
   - [Fixed](#fixed-7)
   - [Tests](#tests-3)
 - [[1.5.1] - 2026-11-12](#151---2026-11-12)
@@ -53,31 +55,54 @@ All notable changes to this project are documented here. The format follows
   - [Tests](#tests-4)
 - [[1.5.0] - 2026-11-12](#150---2026-11-12)
   - [Added](#added-6)
-  - [Changed](#changed-7)
+  - [Changed](#changed-8)
   - [Deprecated](#deprecated-1)
 - [[1.4.0] - 2026-11-11](#140---2026-11-11)
   - [Added](#added-7)
-  - [Security](#security-3)
+  - [Security](#security-4)
   - [Fixed](#fixed-9)
-  - [Changed](#changed-8)
+  - [Changed](#changed-9)
 - [[1.3.0] - 2026-11-11](#130---2026-11-11)
   - [Fixed](#fixed-10)
   - [Added](#added-8)
-  - [Changed](#changed-9)
+  - [Changed](#changed-10)
   - [Deprecated](#deprecated-2)
 - [[1.2.0] - 2026-11-10](#120---2026-11-10)
-  - [Security](#security-4)
+  - [Security](#security-5)
   - [Added](#added-9)
-  - [Changed](#changed-10)
+  - [Changed](#changed-11)
 - [[1.1.0] - 2026-11-03](#110---2026-11-03)
   - [Added](#added-10)
-  - [Changed](#changed-11)
+  - [Changed](#changed-12)
   - [Fixed](#fixed-11)
 - [[1.0.0] - 2026-11-03](#100---2026-11-03)
   - [Added](#added-11)
-  - [Security](#security-5)
+  - [Security](#security-6)
 
 ## [Unreleased]
+
+### Security
+
+- **GIF and animated WebP uploads lose their metadata (SEC-INFO-GIF-METADATA, Beacon 241 T035 / 207 T030).** Up to
+  2.2.0, `Upload\ImageProcessor::process()` stored GIF and animated WebP images exactly as uploaded (re-encoding with GD
+  would lose the animation), so their comments, XMP packets, ICC profiles, EXIF chunks and any bytes appended after the
+  end of the image were stored and served with them. They are now rebuilt without decoding by two new internal,
+  stateless parsers, each one linear pass without recursion, bounded by `upload.max_bytes`, `upload.max_pixels` per
+  frame and 10 000 frames:
+  - `Upload\GifMetadataStripper` keeps the header, logical screen descriptor, colour tables, every image (LZW data
+    copied byte for byte), the last graphic control extension before each image and the first `NETSCAPE2.0` /
+    `ANIMEXTS1.0` loop, both rewritten canonically. It drops comment, plain-text and every other extension and
+    everything after the trailer. Like browsers, it adds a missing trailer and stops at a stray byte between blocks.
+  - `Upload\WebpMetadataStripper` drops the `EXIF`, `XMP `, `ICCP` and unknown chunks (inside `ANMF` frames too),
+    clears the matching `VP8X` flags, rewrites the RIFF size and drops anything after it. It follows libwebp's demuxer
+    rules, so image chunks libwebp never decodes are refused rather than stored.
+  A file they cannot parse is refused with the usual `422 type` (see [UPGRADING](UPGRADING.md#unreleased) for the list).
+  Objects stored before this release keep their metadata. Square images and the 2.2 thumbnail port always re-encoded and
+  are unchanged; generic files (2.2) are still stored as uploaded, by design. What is still not removed is listed in
+  [SECURITY](SECURITY.md#residual-risks-and-host-guidance).
+- **A still WebP can no longer skip the re-encode.** Up to 2.2.0 a WebP with the text `ANIM` in its first 64 bytes was
+  treated as animated and stored as uploaded, EXIF and trailing data included. Animated WebP is now recognised by the
+  `VP8X` animation flag only (`WebpMetadataStripper::animated()`), so every still WebP is re-encoded.
 
 ### Changed
 

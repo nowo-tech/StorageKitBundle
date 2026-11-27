@@ -535,7 +535,9 @@ const json = await res.json();   // 201: insert json.markdown; else show json.me
 `nowo_storage_kit/upload/<type>/<id>`) checks, in order: CSRF, signed-in user with `upload.access_roles`, per-user rate
 limit, the PHP upload, `max_bytes`; then the context (`writableTarget()`), a usable bucket, the image (content sniffing:
 PNG, JPEG, GIF, WebP only; SVG / HTML refused; pixels before decoding; memory), the owner's limit. JPEG, PNG and still
-WebP are re-encoded (EXIF / GPS / XMP dropped, JPEGs turned upright); GIF and animated WebP are kept as uploaded.
+WebP are re-encoded (EXIF / GPS / XMP dropped, JPEGs turned upright); GIF and animated WebP keep their animation
+but are stored without their metadata (2.2.1: comments, XMP, ICC, EXIF, bytes after the end; a malformed one is
+refused).
 
 | Status | `error` | Meaning |
 | --- | --- | --- |

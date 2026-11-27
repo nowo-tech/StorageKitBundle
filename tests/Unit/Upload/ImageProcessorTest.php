@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace Nowo\StorageKitBundle\Tests\Unit\Upload;
 
+use Nowo\StorageKitBundle\Tests\Support\AnimatedImages;
 use Nowo\StorageKitBundle\Tests\Support\Images;
+use Nowo\StorageKitBundle\Upload\GifMetadataStripper;
 use Nowo\StorageKitBundle\Upload\ImageProcessor;
+use Nowo\StorageKitBundle\Upload\ProcessedImage;
 use Nowo\StorageKitBundle\Upload\UploadRefused;
+use Nowo\StorageKitBundle\Upload\WebpMetadataStripper;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -126,7 +130,7 @@ final class ImageProcessorTest extends TestCase
         self::assertSame(1, ImageProcessor::jpegOrientation("\xFF\xD8\xFF\xDA\x00\x04"));
     }
 
-    public function testAGifAndAnAnimatedWebpAreKeptAsTheyCame(): void
+    public function testAGifAndAnAnimatedWebpWithoutMetadataAreKeptAsTheyCame(): void
     {
         ob_start();
         imagegif(imagecreatetruecolor(3000, 10));
@@ -135,12 +139,52 @@ final class ImageProcessorTest extends TestCase
         self::assertSame($gif, $kept->original['bytes']);
         self::assertSame([], $kept->variants);
 
-        $webp     = $this->webp(30, 10);
-        $animated = substr($webp, 0, 12) . 'VP8X' . pack('V', 10) . "\x02" . str_repeat("\0", 3) . pack('v', 29) . "\0" . pack('v', 9) . "\0" . 'ANIM' . pack('V', 6) . str_repeat("\0", 6) . substr($webp, 12);
-        $animated = substr_replace($animated, pack('V', strlen($animated) - 8), 4, 4);
+        $webp = $this->webp(30, 10);
+        // The still bitstream of a GD WebP wrapped in one frame of a 30 x 10 animation.
+        $animated = AnimatedImages::riff(AnimatedImages::vp8x(0x02, 30, 10), AnimatedImages::chunk('ANIM', str_repeat("\0", 6)), AnimatedImages::anmf(30, 10, substr($webp, 12)));
         $kept     = (new ImageProcessor())->process($animated);
         self::assertSame($animated, $kept->original['bytes']);
         self::assertSame([30, 10], [$kept->original['width'], $kept->original['height']]);
+    }
+
+    public function testAGifAndAnAnimatedWebpLoseTheirMetadata(): void
+    {
+        $gif  = AnimatedImages::gifWithMetadata();
+        $kept = (new ImageProcessor())->process($gif);
+        self::assertSame('image/gif', $kept->original['mime']);
+        self::assertSame([4, 4], [$kept->original['width'], $kept->original['height']]);
+        self::assertStringNotContainsString(AnimatedImages::SECRET, $kept->original['bytes']);
+        self::assertSame((new GifMetadataStripper())->strip($gif), $kept->original['bytes']);
+        self::assertSame([], $kept->variants);
+
+        $webp = AnimatedImages::webpWithMetadata();
+        $kept = (new ImageProcessor())->process($webp);
+        self::assertSame('image/webp', $kept->original['mime']);
+        self::assertStringNotContainsString(AnimatedImages::SECRET, $kept->original['bytes']);
+        self::assertSame((new WebpMetadataStripper())->strip($webp), $kept->original['bytes']);
+    }
+
+    public function testAMalformedGifOrAnimatedWebpIsRefused(): void
+    {
+        $gif = substr(AnimatedImages::gifWithMetadata(), 0, 200);
+        $this->assertRefused(UploadRefused::TYPE, static fn (): ProcessedImage => (new ImageProcessor())->process($gif));
+
+        // The header reads fine (VP8X canvas), the ANIM chunk is 4 bytes.
+        $webp = AnimatedImages::riff(AnimatedImages::vp8x(0x02), AnimatedImages::chunk('ANIM', "\0\0\0\0"), AnimatedImages::anmf(4, 4, AnimatedImages::chunk('VP8L', 'data')));
+        $this->assertRefused(UploadRefused::TYPE, static fn (): ProcessedImage => (new ImageProcessor())->process($webp));
+    }
+
+    /**
+     * @param callable(): mixed $call
+     */
+    private function assertRefused(string $reason, callable $call): void
+    {
+        try {
+            $call();
+            self::fail('Expected a refusal.');
+        } catch (UploadRefused $e) {
+            self::assertSame($reason, $e->reason);
+        }
     }
 
     public function testAStillWebpIsReEncoded(): void

@@ -21,7 +21,7 @@ use function strlen;
  *   are never sent with their own type. They are served as `application/octet-stream`, `attachment`, so a browser
  *   never renders or runs them, whatever the context allowed at upload.
  * - **Inline** ({@see self::inlineSafe()}): only raster images StorageKit checked by magic bytes and header and serves
- *   under that type with `nosniff` (re-encoded originals, GIF / animated WebP image uploads kept as they came, variants
+ *   under that type with `nosniff` (re-encoded originals, GIF / animated WebP image uploads kept as animations, variants
  *   written through the variant port; audit ZCK-SK-I3) and the audio / video types of {@see self::INLINE_MEDIA} (played through
  *   `<audio>` / `<video>`) may be served `inline`. Everything else is `attachment`.
  *
