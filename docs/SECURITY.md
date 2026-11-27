@@ -91,6 +91,12 @@ SECURITY.md), DoctrineEncrypt's key management, the bucket provider, or the Mark
 - Uploads are accepted **by content only**: PNG, JPEG, GIF, WebP magic bytes must match what `getimagesizefromstring()`
   reads; the file name and the declared type are ignored. SVG, HTML and anything else are refused (`422 type`).
 - JPEG, PNG and still WebP are decoded and re-encoded (drops EXIF / GPS / XMP and trailing payloads).
+- GIF and animated WebP (2.2.1) keep their animation but are rebuilt without decoding by bounded, linear parsers
+  (`GifMetadataStripper`, `WebpMetadataStripper`, internal): comment, plain-text and non-loop application extensions,
+  `EXIF` / `XMP ` / `ICCP` / unknown chunks (inside frames too) and bytes after the end are dropped; malformed files,
+  frames above `max_pixels` and more than 10 000 frames are refused (`422 type`). Not removed: data hidden inside the
+  compressed image data itself (LZW sub-blocks past the end code, VP8 / VP8L bitstreams) or in unused colour-table
+  entries, which only a full decode and re-encode would remove. Up to 2.2.0 these formats were stored as uploaded.
 - Image downloads are sent with the stored (sniffed) type only if it is one of the four, else `application/octet-stream`
   (2.2: generic files, see [Generic files](#generic-files-22));
   streamed responses carry `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,

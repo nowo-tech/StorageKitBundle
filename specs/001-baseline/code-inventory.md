@@ -92,6 +92,8 @@
 | `src/Upload/ImageUploader.php` | Upload | FR-UP-002 |
 | `src/Upload/ImageProcessor.php` | Upload | FR-UP-003 |
 | `src/Upload/ProcessedImage.php` | Upload | FR-UP-003 |
+| `src/Upload/GifMetadataStripper.php` | Upload | FR-UP-003 |
+| `src/Upload/WebpMetadataStripper.php` | Upload | FR-UP-003 |
 | `src/Upload/UploadEndpoint.php` | Upload | FR-UP-004 |
 | `src/Upload/UploadLimitInterface.php` | Upload | FR-UP-005 |
 | `src/Upload/UploadRefused.php` | Upload | FR-UP-006 |

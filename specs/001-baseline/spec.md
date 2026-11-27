@@ -106,7 +106,8 @@ context's `readable()` allows it.
 - An empty or malformed configuration profile makes that profile unusable (uploads off), logged by name only.
 - A sync interrupted by a dead worker is taken over after `stale_seconds`; a duplicated Messenger message is harmless.
 - A bucket that refuses a deletion keeps the row for the next purge run.
-- GIF and animated WebP are stored as uploaded (metadata kept — residual risk).
+- GIF and animated WebP are stored as animations without their metadata (2.2.1); a malformed one is refused. Data
+  hidden inside the compressed frame data is not removed (no decode).
 
 ## Requirements
 
@@ -190,7 +191,8 @@ context's `readable()` allows it.
   statuses; `no-store`.
 - **FR-UP-002** — `ImageUploader`: context → bucket → image checks → limit → objects → row; cleanup on failure; audit.
 - **FR-UP-003** — `ImageProcessor` / `ProcessedImage`: sniffing, pixel cap before decode, memory fit, re-encoding,
-  orientation, variants.
+  orientation, variants; GIF / animated WebP metadata stripped without decoding (`GifMetadataStripper`,
+  `WebpMetadataStripper`, 2.2.1).
 - **FR-UP-004** — `UploadEndpoint`: editor configuration (`on` / `off` / `none`), MilkdownEditor options, CSRF token id.
 - **FR-UP-005** — `UploadLimitInterface`: optional owner quota.
 - **FR-UP-006** — `UploadRefused`: stable refusal reasons.
@@ -335,7 +337,7 @@ context's `readable()` allows it.
 ## Non-goals
 
 A local-disk provider, non-image attachments, image transformations beyond two variants, a caching image proxy,
-stripping GIF / animated WebP metadata (see [ROADMAP](../../docs/ROADMAP.md)), the Markdown renderer and editor
+the Markdown renderer and editor
 themselves, the host's permission model.
 
 ## Validation

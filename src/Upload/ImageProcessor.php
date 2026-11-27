@@ -28,7 +28,6 @@ use function ob_get_clean;
 use function ob_start;
 use function ord;
 use function round;
-use function str_contains;
 use function str_starts_with;
 use function strlen;
 use function strtolower;
@@ -47,8 +46,9 @@ use const IMG_FLIP_VERTICAL;
  * Server-side image checks (GD): accepts PNG, JPEG, GIF and WebP by their content — never the name or the declared
  * type, so SVG, HTML and anything else are refused — at most `max_bytes` and `max_pixels` (read from the header before
  * decoding: no decompression bomb). JPEG, PNG and still WebP are re-encoded, which drops EXIF / GPS / XMP and any
- * trailing payload (a JPEG is turned upright first, from its EXIF orientation); GIF and animated WebP are kept as they
- * are. Larger images get the configured variants (default: a 1600 px preview and a 400 px thumbnail).
+ * trailing payload (a JPEG is turned upright first, from its EXIF orientation); GIF and animated WebP stay animations
+ * but are rebuilt without their metadata by {@see GifMetadataStripper} and {@see WebpMetadataStripper} (2.2.1: comments,
+ * XMP, ICC, EXIF and bytes after the end are dropped, the frames are copied as they are; a malformed one is refused). Larger images get the configured variants (default: a 1600 px preview and a 400 px thumbnail).
  *
  * Memory: GD holds a decoded image as 4 bytes per pixel. Before decoding, the dimensions must fit twice (the image
  * plus a rotated copy or a variant) in what is left of `memory_limit`, or the upload is refused like one above
@@ -132,8 +132,16 @@ final readonly class ImageProcessor
             throw new UploadRefused(UploadRefused::SIZE);
         }
         [$mime, $width, $height] = $this->header($bytes);
-        if ($mime === 'image/gif' || ($mime === 'image/webp' && str_contains(substr($bytes, 0, 64), 'ANIM'))) {
-            return new ProcessedImage(['bytes' => $bytes, 'mime' => $mime, 'width' => $width, 'height' => $height]);
+        if ($mime === 'image/gif' || ($mime === 'image/webp' && WebpMetadataStripper::animated($bytes))) {
+            // Kept as animations, but rebuilt without their metadata (2.2.1); a malformed one is refused.
+            $stripped = $mime === 'image/gif'
+                ? (new GifMetadataStripper($this->maxBytes, $this->maxPixels))->strip($bytes)
+                : (new WebpMetadataStripper($this->maxBytes, $this->maxPixels))->strip($bytes);
+            if ($stripped === null) {
+                throw new UploadRefused(UploadRefused::TYPE);
+            }
+
+            return new ProcessedImage(['bytes' => $stripped, 'mime' => $mime, 'width' => $width, 'height' => $height]);
         }
         // Every JPEG: whether libjpeg decodes it progressively cannot be told reliably from the markers (it skips junk
         // bytes a strict parser stops at, audit CJ N1), so the coefficient buffer is always budgeted.

@@ -56,6 +56,20 @@ The breaking changes 1.x announced (REQ-BC-001), applied in 2.0 ([To 2.0.0](#to-
 
 ## Unreleased
 
+No BC break, no configuration or schema change. Behaviour changes of the image upload (`ImageProcessor::process()`):
+
+- **GIF and animated WebP are stored without their metadata.** Comments, XMP, ICC, EXIF, unknown extensions or chunks
+  and bytes after the end of the image are removed; frames, timing, disposal, transparency and the loop count are
+  kept, so the stored bytes (and their `sha256`) differ from the uploaded file.
+- **A malformed GIF or animated WebP is refused** (`422 type`) where it used to be stored as uploaded: a truncated file,
+  a block or chunk running past the end, an unknown block introducer, a GIF without image or trailer, a frame above
+  `upload.max_pixels`, or more than 10 000 frames.
+- **Animated WebP is recognised by the `VP8X` animation flag only.** A WebP whose first chunk is not a `VP8X` with that
+  flag goes through GD like any still WebP (re-encoded, or refused when GD cannot decode it); up to 2.2.0 an `ANIM` text
+  in the first 64 bytes was enough to store it as uploaded.
+- Images uploaded before this release are not rewritten. To clean them, re-upload them (or download, re-upload and
+  replace the references in your content).
+
 ## To 2.2.0
 
 From **2.1.0**:

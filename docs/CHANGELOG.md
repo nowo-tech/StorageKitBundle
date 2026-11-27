@@ -79,6 +79,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **GIF and animated WebP uploads lose their metadata (SEC-INFO-GIF-METADATA, Beacon 241 T035 / 207 T030).** Up to
+  2.2.0, `Upload\ImageProcessor::process()` stored GIF and animated WebP images exactly as uploaded, so their comments,
+  XMP packets, ICC profiles, EXIF chunks and any bytes appended after the end of the image were stored and served with
+  the image (re-encoding with GD would lose the animation). They are now rebuilt without decoding by two new internal,
+  stateless parsers: `Upload\GifMetadataStripper` keeps the header, logical screen descriptor, colour tables, every image
+  (descriptor and LZW data copied byte for byte), the graphic control extensions and the `NETSCAPE2.0` / `ANIMEXTS1.0`
+  loop, and drops comment, plain-text and every other application extension plus everything after the trailer;
+  `Upload\WebpMetadataStripper` drops the `EXIF`, `XMP `, `ICCP` and unknown chunks (inside `ANMF` frames too), clears
+  the matching `VP8X` flags, rewrites the RIFF size and drops anything after it. Both are one linear pass, without
+  recursion, bounded by `upload.max_bytes`, `upload.max_pixels` per frame and 10 000 frames. A GIF or animated WebP
+  they cannot parse (truncated, bad block sizes, unknown block introducers, out of bounds) is now refused with the
+  usual `422 type`. Objects stored before this release keep their metadata; see [UPGRADING](UPGRADING.md#unreleased).
+  Square images and the 2.2 thumbnail port always re-encoded and are unchanged; generic files (2.2) are still stored as
+  they are, by design.
+
 ### Changed
 
 - Documentation (audit ZCK-SK-L3): `FileRemoverInterface::remove()` called inside a host transaction keeps its row lock until the host commits, so the bucket deletes run with the lock held. USAGE and CONCURRENCY now say to call `remove()` outside your transaction (use `expire()` inside one). No code change.

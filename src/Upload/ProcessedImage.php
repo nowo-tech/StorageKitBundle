@@ -7,8 +7,8 @@ namespace Nowo\StorageKitBundle\Upload;
 use function strlen;
 
 /**
- * An accepted image ready to store: the original (re-encoded without metadata, or kept as it came for GIF / animated
- * WebP) and the generated variants (only when the image is larger than the variant size).
+ * An accepted image ready to store: the original (re-encoded without metadata, or for GIF / animated WebP kept as an
+ * animation with its metadata removed) and the generated variants (only when the image is larger than the variant size).
  *
  * @phpstan-type Encoded array{bytes: string, mime: string, width: int, height: int}
  */
