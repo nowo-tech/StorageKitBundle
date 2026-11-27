@@ -26,10 +26,11 @@ use function unpack;
  *
  * Malformed input gives null and the caller refuses the upload. Following libwebp's demuxer (ParseVP8XChunks,
  * IsValidExtendedFormat), that is: not a RIFF / WEBP file, a RIFF size past the end, a truncated chunk or missing
- * padding, a first chunk that is not an animated `VP8X`, a second `VP8X`, no `ANIM` before the first `ANMF` or a second
- * `ANIM`, no frame, image data (`ALPH`, `VP8 `, `VP8L`) outside a frame, a frame without bitstream, with two bitstreams,
+ * padding, a first chunk that is not an animated `VP8X`, a second `VP8X`, no `ANIM` before the first `ANMF`, no frame, image data (`ALPH`, `VP8 `, `VP8L`) outside a frame, a frame without bitstream, with two bitstreams,
  * two `ALPH` or an `ALPH` after its bitstream, a frame outside the canvas or above `max_pixels`, more than
- * {@see GifMetadataStripper::MAX_FRAMES} frames, or more than `max_bytes`. Stateless (FrankenPHP worker mode: nothing
+ * {@see GifMetadataStripper::MAX_FRAMES} frames, or more than `max_bytes`. One deliberate extra, stricter than libwebp
+ * (which decodes such files): a second `ANIM` chunk, before or after the frames, is refused too; real encoders never
+ * write two. Stateless (FrankenPHP worker mode: nothing
  * kept between calls).
  *
  * @internal

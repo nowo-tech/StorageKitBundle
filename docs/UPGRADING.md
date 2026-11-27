@@ -75,9 +75,11 @@ No BC break, no configuration or schema change. Behaviour changes of the image u
   than 10 000 frames. What browsers (Chromium, Firefox) render is still accepted: a missing trailer gets one, a stray
   byte between blocks ends the file there (as in browsers), an odd application extension is dropped.
 - **An animated WebP that libwebp would not decode is refused** (`422 type`): a truncated chunk or missing padding, a
-  RIFF size past the end, no frame, `ANMF` without a preceding `ANIM`, a second `ANIM`, `ALPH` / `VP8 ` / `VP8L` outside
+  RIFF size past the end, no frame, `ANMF` without a preceding `ANIM`, `ALPH` / `VP8 ` / `VP8L` outside
   a frame, a frame with two bitstreams, two `ALPH` or an `ALPH` after its bitstream, a frame outside the canvas or above
-  `upload.max_pixels`, or more than 10 000 frames. Browsers show these files as broken already.
+  `upload.max_pixels`, or more than 10 000 frames. Browsers show these files as broken already. One check is deliberately stricter than
+  libwebp: a second `ANIM` chunk (before or after the frames) is refused although libwebp decodes it; real encoders
+  never write two.
 - **Animated WebP is recognised by the `VP8X` animation flag only.** A WebP whose first chunk is not a `VP8X` with that
   flag goes through GD like any still WebP (re-encoded, or refused when GD cannot decode it); up to 2.2.0 an `ANIM` text
   in the first 64 bytes was enough to store it as uploaded.
